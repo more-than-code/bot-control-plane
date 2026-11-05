@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/more-than-code/bot-api-server/internal/agentws"
@@ -33,8 +34,8 @@ const (
 	staleGraceSec       = 120
 	maxAgentLines       = 50
 	maxLogLines         = 2000
-	maxAgentLineBytes   = 2048
-	maxAgentLineTotal   = 64 << 10
+	maxAgentLineChars   = 2048     // agent-protocol: each line cut to 2048 characters
+	maxAgentLineTotal   = 64 << 10 // and at most 64 KiB in all, counted the same way
 	maxStatusBytes      = 2048
 	secretRedactMin     = 6
 	redactedMarker      = "[REDACTED]"
@@ -1520,8 +1521,8 @@ func boundLines(lines []string, maxCount int) ([]string, bool) {
 	}
 	total := 0
 	for _, line := range lines {
-		n := len(line)
-		if n > maxAgentLineBytes {
+		n := utf8.RuneCountInString(line)
+		if n > maxAgentLineChars {
 			return nil, false
 		}
 		total += n
