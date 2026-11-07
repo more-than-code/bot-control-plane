@@ -50,6 +50,27 @@ func oauthErr(status int, code, desc, authenticate string) *OAuthError {
 	return &OAuthError{Status: status, Code: code, Desc: desc, Authenticate: authenticate}
 }
 
+// RegisterError is a refused registration. Rule names the failed check for the
+// refusal log; Method is the requested auth method when it is a known name.
+type RegisterError struct {
+	*OAuthError
+	Rule   string
+	Method string
+}
+
+func (e *RegisterError) Unwrap() error { return e.OAuthError }
+
+func registerErr(code, rule string) *RegisterError {
+	desc := "invalid client metadata"
+	switch code {
+	case "invalid_request":
+		desc = "invalid request"
+	case "invalid_redirect_uri":
+		desc = "invalid redirect uri"
+	}
+	return &RegisterError{OAuthError: oauthErr(http.StatusBadRequest, code, desc, ""), Rule: rule}
+}
+
 // RefreshReuseError is a rotated refresh token. The family is already revoked.
 type RefreshReuseError struct {
 	UserID   uuid.UUID
@@ -202,29 +223,31 @@ func (s *Service) Register(ctx context.Context, raw []byte) (RegisteredClient, e
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	var body registerBody
 	if err := dec.Decode(&body); err != nil {
-		return RegisteredClient{}, oauthErr(http.StatusBadRequest, "invalid_request", "invalid request", "")
+		return RegisteredClient{}, registerErr("invalid_request", "body")
 	}
 	var extra struct{}
 	if err := dec.Decode(&extra); err != io.EOF {
-		return RegisteredClient{}, oauthErr(http.StatusBadRequest, "invalid_request", "invalid request", "")
+		return RegisteredClient{}, registerErr("invalid_request", "body")
 	}
 	if !validRedirectList(body.RedirectURIs) {
-		return RegisteredClient{}, oauthErr(http.StatusBadRequest, "invalid_redirect_uri", "invalid redirect uri", "")
+		return RegisteredClient{}, registerErr("invalid_redirect_uri", "redirect_uris")
 	}
 	if !validClientName(body.ClientName) {
-		return RegisteredClient{}, oauthErr(http.StatusBadRequest, "invalid_client_metadata", "invalid client metadata", "")
+		return RegisteredClient{}, registerErr("invalid_client_metadata", "client_name")
 	}
 	grants, ok := normalizeGrants(body.GrantTypes)
 	if !ok {
-		return RegisteredClient{}, oauthErr(http.StatusBadRequest, "invalid_client_metadata", "invalid client metadata", "")
+		return RegisteredClient{}, registerErr("invalid_client_metadata", "grant_types")
 	}
 	responses, ok := normalizeResponses(body.ResponseTypes)
 	if !ok {
-		return RegisteredClient{}, oauthErr(http.StatusBadRequest, "invalid_client_metadata", "invalid client metadata", "")
+		return RegisteredClient{}, registerErr("invalid_client_metadata", "response_types")
 	}
 	method, ok := normalizeAuth(body.AuthMethod)
 	if !ok {
-		return RegisteredClient{}, oauthErr(http.StatusBadRequest, "invalid_client_metadata", "invalid client metadata", "")
+		e := registerErr("invalid_client_metadata", "token_endpoint_auth_method")
+		e.Method = refusedAuthLabel(*body.AuthMethod)
+		return RegisteredClient{}, e
 	}
 	id, _, err := secret.NewToken()
 	if err != nil {
@@ -762,11 +785,27 @@ func normalizeResponses(in []string) ([]string, bool) {
 	return []string{"code"}, true
 }
 
+// normalizeAuth maps the requested method to the one registered. Secret-based
+// methods become public clients (none); the response tells the client so
+// (RFC 7591 §3.2.1, oauth-v1 v1.5).
 func normalizeAuth(in *string) (string, bool) {
-	if in == nil || *in == "" || *in == "none" {
+	if in == nil {
+		return "none", true
+	}
+	switch *in {
+	case "", "none", "client_secret_post", "client_secret_basic":
 		return "none", true
 	}
 	return "", false
+}
+
+// refusedAuthLabel is the refused method as logged: a known name, else "other".
+func refusedAuthLabel(method string) string {
+	switch method {
+	case "client_secret_jwt", "private_key_jwt", "tls_client_auth", "self_signed_tls_client_auth":
+		return method
+	}
+	return "other"
 }
 
 func validChallenge(s string) bool {

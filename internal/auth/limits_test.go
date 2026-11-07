@@ -100,3 +100,46 @@ func TestIPLimitsAreSeparate(t *testing.T) {
 		t.Fatalf("google: %v", err)
 	}
 }
+
+func TestNormalizeAuth(t *testing.T) {
+	str := func(s string) *string { return &s }
+	cases := []struct {
+		name string
+		in   *string
+		want string
+		ok   bool
+	}{
+		{"absent", nil, "none", true},
+		{"empty", str(""), "none", true},
+		{"none", str("none"), "none", true},
+		{"client_secret_post", str("client_secret_post"), "none", true},
+		{"client_secret_basic", str("client_secret_basic"), "none", true},
+		{"private_key_jwt", str("private_key_jwt"), "", false},
+		{"unknown", str("made_up"), "", false},
+	}
+	for _, tc := range cases {
+		got, ok := normalizeAuth(tc.in)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("%s: got %q %v, want %q %v", tc.name, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestRefusedAuthLabel(t *testing.T) {
+	cases := map[string]string{
+		"client_secret_jwt":           "client_secret_jwt",
+		"private_key_jwt":             "private_key_jwt",
+		"tls_client_auth":             "tls_client_auth",
+		"self_signed_tls_client_auth": "self_signed_tls_client_auth",
+		"made_up":                     "other",
+		"https://leak.example/cb":     "other",
+		"CLIENT_SECRET_POST":          "other",
+		"Private_Key_JWT":             "other",
+		" private_key_jwt":            "other",
+	}
+	for in, want := range cases {
+		if got := refusedAuthLabel(in); got != want {
+			t.Errorf("refusedAuthLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

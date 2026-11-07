@@ -344,6 +344,8 @@ func TestOAuthRegisterValidation(t *testing.T) {
 		`{"client_name":"` + name + `","redirect_uris":["https://example.com/cb"]}`,
 		`{"client_name":"a","redirect_uris":["https://example.com/cb"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","logo_uri":"https://ignored.example"}`,
 		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"token_endpoint_auth_method":""}`,
+		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"token_endpoint_auth_method":"client_secret_basic"}`,
+		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"token_endpoint_auth_method":"client_secret_post"}`,
 	}
 	for i, body := range accepted {
 		f.ip = fmt.Sprintf("198.51.100.%d:1234", i+1)
@@ -389,8 +391,8 @@ func TestOAuthRegisterValidation(t *testing.T) {
 		`{"client_name":"","redirect_uris":["https://example.com/cb"]}`,
 		`{"client_name":"` + strings.Repeat("n", 65) + `","redirect_uris":["https://example.com/cb"]}`,
 		`{"client_name":"bad\nname","redirect_uris":["https://example.com/cb"]}`,
-		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"token_endpoint_auth_method":"client_secret_basic"}`,
-		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"token_endpoint_auth_method":"client_secret_post"}`,
+		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"token_endpoint_auth_method":"private_key_jwt"}`,
+		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"token_endpoint_auth_method":"something_else"}`,
 		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"grant_types":[]}`,
 		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"grant_types":["client_credentials"]}`,
 		`{"client_name":"ok","redirect_uris":["https://example.com/cb"],"response_types":["token"]}`,
@@ -1305,4 +1307,196 @@ func TestOAuthRevokedSubject(t *testing.T) {
 	}
 	_ = access
 	oauthErr(t, f.exchange(accessForm(plain), store.ClientMCP, mcpSecret), http.StatusBadRequest, "invalid_grant")
+}
+
+func TestOAuthRegisterAuthMethods(t *testing.T) {
+	cases := []struct {
+		name   string
+		member string
+		status int
+		code   string
+	}{
+		{"absent", ``, http.StatusCreated, ""},
+		{"null", `,"token_endpoint_auth_method":null`, http.StatusCreated, ""},
+		{"empty", `,"token_endpoint_auth_method":""`, http.StatusCreated, ""},
+		{"none", `,"token_endpoint_auth_method":"none"`, http.StatusCreated, ""},
+		{"client_secret_post", `,"token_endpoint_auth_method":"client_secret_post"`, http.StatusCreated, ""},
+		{"client_secret_basic", `,"token_endpoint_auth_method":"client_secret_basic"`, http.StatusCreated, ""},
+		{"private_key_jwt", `,"token_endpoint_auth_method":"private_key_jwt"`, http.StatusBadRequest, "invalid_client_metadata"},
+		{"unknown", `,"token_endpoint_auth_method":"made_up"`, http.StatusBadRequest, "invalid_client_metadata"},
+		{"number", `,"token_endpoint_auth_method":5`, http.StatusBadRequest, "invalid_request"},
+		{"array", `,"token_endpoint_auth_method":["client_secret_post"]`, http.StatusBadRequest, "invalid_request"},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newOAuthFX(t)
+			f.ip = fmt.Sprintf("198.51.104.%d:1234", i+1)
+			rec := f.registerRaw(t, `{"client_name":"Claude","redirect_uris":["`+oauthRedirect+`"]`+tc.member+`}`)
+			if tc.status != http.StatusCreated {
+				oauthErr(t, rec, tc.status, tc.code)
+				return
+			}
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("register %s -> %d %s", tc.name, rec.Code, rec.Body.String())
+			}
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := raw["client_secret"]; ok {
+				t.Fatal("client_secret returned")
+			}
+			if string(raw["token_endpoint_auth_method"]) != `"none"` {
+				t.Fatalf("token_endpoint_auth_method %s", raw["token_endpoint_auth_method"])
+			}
+		})
+	}
+}
+
+// A client that asked for a secret method is public: code and refresh work
+// with client_id in the form and PKCE, and a client_secret field is ignored.
+func TestOAuthDowngradedClientFlow(t *testing.T) {
+	for i, method := range []string{"client_secret_post", "client_secret_basic"} {
+		t.Run(method, func(t *testing.T) {
+			f := newOAuthFX(t)
+			f.ip = fmt.Sprintf("198.51.105.%d:1234", i+1)
+			rec := f.registerRaw(t, `{"client_name":"Claude","redirect_uris":["`+oauthRedirect+`"],"token_endpoint_auth_method":"`+method+`"}`)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("register %d %s", rec.Code, rec.Body.String())
+			}
+			var client auth.RegisteredClient
+			if err := json.Unmarshal(rec.Body.Bytes(), &client); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := f.mem.GetOAuthClient(context.Background(), client.ClientID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Kind != store.ClientPublic || stored.AuthMethod != "none" || len(stored.SecretHash) != 0 {
+				t.Fatalf("stored client kind %q method %q secret %d bytes", stored.Kind, stored.AuthMethod, len(stored.SecretHash))
+			}
+			bearer := f.console(t, f.user(t, "owner@example.com"))
+			loc := f.authorize(client.ClientID, oauthRedirect, "xyz").Header().Get("Location")
+			code, state := codeFromRedirect(t, f.approve(t, bearer, requestID(t, loc)))
+			if code == "" || state != "xyz" {
+				t.Fatalf("code %q state %q", code, state)
+			}
+			form := url.Values{}
+			form.Set("grant_type", "authorization_code")
+			form.Set("code", code)
+			form.Set("redirect_uri", oauthRedirect)
+			form.Set("client_id", client.ClientID)
+			form.Set("client_secret", "ignored")
+			form.Set("code_verifier", oauthVerifier)
+			form.Set("resource", oauthResource)
+			// HTTP Basic stays reserved for bot-mcp-server.
+			basic := f.token(form, client.ClientID, "any-password")
+			oauthErr(t, basic, http.StatusUnauthorized, "invalid_client")
+			if got := basic.Header().Get("WWW-Authenticate"); got != "Basic" {
+				t.Fatalf("WWW-Authenticate %q", got)
+			}
+			access, refresh := tokenPair(t, f.token(form, "", ""))
+			if !f.live(t, access) {
+				t.Fatal("access token not live")
+			}
+			rotated := f.refresh(t, client.ClientID, refresh, "")
+			if !f.live(t, rotated.access) {
+				t.Fatal("refreshed access token not live")
+			}
+		})
+	}
+}
+
+func TestOAuthRegisterRefusalLog(t *testing.T) {
+	const name = "LeakyClientName"
+	const redirect = "https://leak.example/cb"
+	ok := `"client_name":"` + name + `","redirect_uris":["` + redirect + `"]`
+	cases := []struct {
+		rule, code, method, contentType, body string
+	}{
+		{"body", "invalid_request", "", "application/json", `{` + ok},
+		{"body", "invalid_request", "", "application/json", `{` + ok + `}{"x":1}`},
+		{"body", "invalid_request", "", "text/plain", `{` + ok + `}`},
+		{"redirect_uris", "invalid_redirect_uri", "", "application/json", `{"client_name":"` + name + `","redirect_uris":["http://leak.example/cb"]}`},
+		{"client_name", "invalid_client_metadata", "", "application/json", `{"client_name":"` + name + `\n","redirect_uris":["` + redirect + `"]}`},
+		{"grant_types", "invalid_client_metadata", "", "application/json", `{` + ok + `,"grant_types":["client_credentials"]}`},
+		{"response_types", "invalid_client_metadata", "", "application/json", `{` + ok + `,"response_types":["token"]}`},
+		{"token_endpoint_auth_method", "invalid_client_metadata", "private_key_jwt", "application/json", `{` + ok + `,"token_endpoint_auth_method":"private_key_jwt"}`},
+		{"token_endpoint_auth_method", "invalid_client_metadata", "other", "application/json", `{` + ok + `,"token_endpoint_auth_method":"LeakyMethod"}`},
+		{"body", "invalid_request", "", "application/json", `{` + ok + `,"token_endpoint_auth_method":5}`},
+		{"body", "invalid_request", "", "application/json", `{` + ok + `,"token_endpoint_auth_method":["client_secret_post"]}`},
+		{"body", "invalid_request", "", "application/json", ``},
+		{"body", "invalid_request", "", "application/json", `{` + ok + `,"logo_uri":"` + strings.Repeat("L", 1<<20) + `"}`},
+	}
+	for i, tc := range cases {
+		t.Run(fmt.Sprintf("%d-%s", i, tc.rule), func(t *testing.T) {
+			f := newOAuthFX(t)
+			var buf strings.Builder
+			f.srv.Log = slog.New(slog.NewTextHandler(&buf, nil))
+			f.ip = fmt.Sprintf("198.51.106.%d:1234", i+1)
+			rec := f.do(http.MethodPost, "/oauth/register", tc.body, tc.contentType, "")
+			oauthErr(t, rec, http.StatusBadRequest, tc.code)
+			var refusals, access []string
+			for _, l := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+				switch {
+				case strings.Contains(l, `msg="oauth register refused"`):
+					refusals = append(refusals, l)
+				case strings.Contains(l, "msg=request "):
+					access = append(access, l)
+				default:
+					t.Fatalf("unexpected log line %q", l)
+				}
+			}
+			if len(refusals) != 1 || len(access) != 1 {
+				t.Fatalf("want one refusal and one access log line, got %q", buf.String())
+			}
+			for _, row := range f.mem.AllAudits() {
+				if row.Action == audit.ActionOAuthRegister {
+					t.Fatalf("refused registration wrote audit row %#v", row)
+				}
+			}
+			line := refusals[0]
+			for _, want := range []string{"level=INFO", "rule=" + tc.rule, "error=" + tc.code} {
+				if !strings.Contains(line, want) {
+					t.Fatalf("log line %q lacks %q", line, want)
+				}
+			}
+			if tc.method != "" && !strings.Contains(line, "method="+tc.method) {
+				t.Fatalf("log line %q lacks method %q", line, tc.method)
+			}
+			for _, leak := range []string{name, "leak.example", "LeakyMethod", "LLLL", tc.body} {
+				if leak != "" && strings.Contains(buf.String(), leak) {
+					t.Fatalf("log %q leaks %q", buf.String(), leak)
+				}
+			}
+		})
+	}
+	t.Run("success is not logged as refusal", func(t *testing.T) {
+		f := newOAuthFX(t)
+		var buf strings.Builder
+		f.srv.Log = slog.New(slog.NewTextHandler(&buf, nil))
+		f.ip = "198.51.107.2:1234"
+		if rec := f.registerRaw(t, `{`+ok+`}`); rec.Code != http.StatusCreated {
+			t.Fatalf("register %d %s", rec.Code, rec.Body.String())
+		}
+		if strings.Contains(buf.String(), "oauth register refused") {
+			t.Fatalf("success logged as refusal: %q", buf.String())
+		}
+	})
+	t.Run("rate limited is not logged", func(t *testing.T) {
+		f := newOAuthFX(t)
+		var buf strings.Builder
+		f.srv.Log = slog.New(slog.NewTextHandler(&buf, nil))
+		f.ip = "198.51.107.1:1234"
+		var rec *httptest.ResponseRecorder
+		for range 11 {
+			rec = f.registerRaw(t, `{`+ok+`}`)
+		}
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("status %d", rec.Code)
+		}
+		if strings.Contains(buf.String(), "oauth register refused") {
+			t.Fatalf("rate limit logged as refusal: %q", buf.String())
+		}
+	})
 }

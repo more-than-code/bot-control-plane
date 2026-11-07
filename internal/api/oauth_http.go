@@ -42,10 +42,15 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, ok := readJSONBody(w, r)
 	if !ok {
+		s.logRegisterRefused("invalid_request", "body", "")
 		return
 	}
 	client, err := s.Auth.Register(r.Context(), raw)
 	if err != nil {
+		var refused *auth.RegisterError
+		if errors.As(err, &refused) {
+			s.logRegisterRefused(refused.Code, refused.Rule, refused.Method)
+		}
 		s.writeOAuthResult(w, err)
 		return
 	}
@@ -313,6 +318,16 @@ func oauthAuditDetail(res auth.ConsentResult) map[string]any {
 		detail["grant_id"] = res.GrantID.String()
 	}
 	return detail
+}
+
+// logRegisterRefused logs the error code and failed rule of a refused
+// registration. No request values are logged except a known auth-method name.
+func (s *Server) logRegisterRefused(code, rule, method string) {
+	args := []any{"error", code, "rule", rule}
+	if method != "" {
+		args = append(args, "method", method)
+	}
+	s.logger().Info("oauth register refused", args...)
 }
 
 func (s *Server) writeOAuthResult(w http.ResponseWriter, err error) {
