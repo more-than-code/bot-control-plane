@@ -127,16 +127,19 @@ func TestWriteJSONBoundsWriteWait(t *testing.T) {
 	payload := map[string]string{"blob": strings.Repeat("a", 512<<10)}
 	parent, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	start := time.Now()
+	// Time only the write that blocks: the writes before it fill the socket buffers, and under a
+	// loaded full-suite run they alone took seconds, which made a whole-loop timer flaky.
 	var blocked error
+	var elapsed time.Duration
 	for i := 0; i < 32; i++ {
+		start := time.Now()
 		err := ac.writeJSON(parent, payload)
 		if err != nil {
 			blocked = err
+			elapsed = time.Since(start)
 			break
 		}
 	}
-	elapsed := time.Since(start)
 	if blocked == nil {
 		t.Fatal("socket accepted every write")
 	}
