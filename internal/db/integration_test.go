@@ -17,6 +17,27 @@ import (
 	"github.com/more-than-code/bot-api-server/internal/store"
 )
 
+// isTestDatabase is the guard every integration test applies before it
+// migrates or truncates: the database is deploybot_test or a separate test
+// database named deploybot_test_<suffix>. Anything else, deploybot included,
+// is refused.
+func isTestDatabase(name string) bool {
+	const prefix = "deploybot_test_"
+	return name == "deploybot_test" || (strings.HasPrefix(name, prefix) && len(name) > len(prefix))
+}
+
+func TestIsTestDatabase(t *testing.T) {
+	for name, want := range map[string]bool{
+		"deploybot_test": true, "deploybot_test_progsec": true,
+		"deploybot": false, "deploybot_test_": false, "deploybot_testx": false,
+		"xdeploybot_test": false, "postgres": false, "": false,
+	} {
+		if isTestDatabase(name) != want {
+			t.Fatalf("isTestDatabase(%q) = %v, want %v", name, !want, want)
+		}
+	}
+}
+
 func TestIntegration(t *testing.T) {
 	url := os.Getenv("DEPLOYBOT_TEST_DATABASE_URL")
 	if url == "" {
@@ -35,8 +56,8 @@ func TestIntegration(t *testing.T) {
 	if err := d.pool.QueryRow(ctx, `SELECT current_database()`).Scan(&dbName); err != nil {
 		t.Fatal("database name lookup failed")
 	}
-	if dbName != "deploybot_test" {
-		t.Fatalf("refusing database %s", dbName)
+	if !isTestDatabase(dbName) {
+		t.Fatalf("refusing database %s: integration tests run only on deploybot_test or deploybot_test_*", dbName)
 	}
 
 	legacySession, seededLegacy := seedLegacyMCPSession(t, d, ctx)

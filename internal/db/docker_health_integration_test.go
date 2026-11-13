@@ -10,7 +10,7 @@ import (
 )
 
 // TestDockerHealthQuery is the v1.11 services health query. It is skipped
-// unless DEPLOYBOT_TEST_DATABASE_URL names the deploybot_test database.
+// unless DEPLOYBOT_TEST_DATABASE_URL names a test database (isTestDatabase).
 func TestDockerHealthQuery(t *testing.T) {
 	d, ctx := openPresenceDB(t)
 	at := time.Now().UTC().Truncate(time.Microsecond)

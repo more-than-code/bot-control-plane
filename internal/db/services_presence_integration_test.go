@@ -98,8 +98,8 @@ func openPresenceDB(t *testing.T) (*DB, context.Context) {
 	if err := d.pool.QueryRow(ctx, `SELECT current_database()`).Scan(&dbName); err != nil {
 		t.Fatal("database name lookup failed")
 	}
-	if dbName != "deploybot_test" {
-		t.Fatalf("refusing database %s", dbName)
+	if !isTestDatabase(dbName) {
+		t.Fatalf("refusing database %s: integration tests run only on deploybot_test or deploybot_test_*", dbName)
 	}
 	if err := Migrate(ctx, url); err != nil {
 		t.Fatalf("migrate: %v", err)
