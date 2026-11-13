@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func TestLoggingHTTP(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/more-than-code/bot-api-server/internal/secret"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/secret"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 // missHash is compared when a digest lookup misses so the compare always runs.

@@ -3,7 +3,7 @@ package store
 import (
 	"encoding/json"
 
-	"github.com/more-than-code/bot-api-server/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 	"reflect"
 	"regexp"
 	"time"

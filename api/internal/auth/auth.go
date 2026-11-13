@@ -13,9 +13,9 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/config"
-	"github.com/more-than-code/bot-api-server/internal/secret"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/config"
+	"github.com/more-than-code/bot-control-plane/api/internal/secret"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 	"golang.org/x/oauth2"
 )
 

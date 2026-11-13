@@ -12,7 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/more-than-code/bot-mcp-server/internal/apiclient"
+	"github.com/more-than-code/bot-control-plane/mcp/internal/apiclient"
 )
 
 // errCatalogWriteShape is fixed. It must not include the entry body.

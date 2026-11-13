@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/more-than-code/bot-api-server/internal/catalog"
-	"github.com/more-than-code/bot-api-server/internal/seal"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/seal"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 // assertProgramSecrets is the Postgres half of api-v1 v1.22 items 2 and 6,

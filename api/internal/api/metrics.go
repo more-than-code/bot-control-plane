@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/more-than-code/bot-api-server/internal/authz"
-	"github.com/more-than-code/bot-api-server/internal/ingest"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/authz"
+	"github.com/more-than-code/bot-control-plane/api/internal/ingest"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 const (

@@ -279,7 +279,7 @@ describe('About page', () => {
 		const external = [...body.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].filter((m) =>
 			/\bhref="http/.test(m[1] ?? '')
 		);
-		assert.ok(external.length >= 6, 'GitHub, install guide and the four repos');
+		assert.ok(external.length >= 6, 'GitHub, install guide and the four components');
 		for (const [, attrs = '', inner = ''] of external) {
 			assert.match(attrs, /\btarget="_blank"/, attrs);
 			assert.match(attrs, /\brel="noopener noreferrer"/, attrs);

@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/secret"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/secret"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func (m *Mem) CreateJoinToken(_ context.Context, projectID uuid.UUID, hash []byte, hint *string, createdBy uuid.UUID, expiresAt, at time.Time) (store.JoinToken, error) {

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/more-than-code/bot-api-server/internal/audit"
-	"github.com/more-than-code/bot-api-server/internal/catalog"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 // putEnvMode sends the v1.19 dotenv PUT with an optional mode and new_keys_secret.

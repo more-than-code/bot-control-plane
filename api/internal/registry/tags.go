@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/more-than-code/bot-api-server/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 )
 
 // MaxItems is the most tags one response returns.

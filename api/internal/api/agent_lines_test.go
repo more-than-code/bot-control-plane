@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/more-than-code/bot-api-server/internal/agentws"
+	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
 )
 
 // agent-protocol v1 caps each log line at 2048 characters, not bytes. A line

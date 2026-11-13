@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/more-than-code/bot-api-server/internal/auth"
-	"github.com/more-than-code/bot-api-server/internal/config"
-	"github.com/more-than-code/bot-api-server/internal/memstore"
+	"github.com/more-than-code/bot-control-plane/api/internal/auth"
+	"github.com/more-than-code/bot-control-plane/api/internal/config"
+	"github.com/more-than-code/bot-control-plane/api/internal/memstore"
 )
 
 func TestRouteTable(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func (d *DB) InsertBatch(ctx context.Context, hostID, batchID uuid.UUID, samples []store.Sample, at time.Time) (bool, error) {

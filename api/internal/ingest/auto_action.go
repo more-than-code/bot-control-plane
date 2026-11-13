@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 )
 
 // MaxAutoReason is the agent-protocol v1.9 item 5 limit on reason, in bytes.

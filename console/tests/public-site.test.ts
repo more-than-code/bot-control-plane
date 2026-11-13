@@ -359,14 +359,20 @@ describe('public site pages', () => {
 		assert.equal(body.includes('prefers-color-scheme'), false, 'dark mode follows the theme switch, not the OS');
 	});
 
-	test('the About page ends with Open source: four repos on dev, SPDX licences, self-hosting needs', () => {
+	test('the About page ends with Open source: bot-agent and the bot-control-plane parts on main, SPDX licences, self-hosting needs', () => {
 		// Joe 2026-10-26: an Open source section below How it works, no versions or production details.
 		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '').replace(/\s+/g, ' ');
 		assert.ok(body.indexOf('id="source-title"') > body.indexOf('id="how-title"'), 'after How it works');
 		const source = body.slice(body.indexOf('id="source-title"'));
-		for (const repo of ['bot-agent', 'bot-api-server', 'bot-mcp-server', 'bot-console']) {
-			assert.ok(source.includes(`href="https://github.com/more-than-code/${repo}/tree/main"`), repo);
+		for (const path of [
+			'bot-agent/tree/main',
+			'bot-control-plane/tree/main/api',
+			'bot-control-plane/tree/main/mcp',
+			'bot-control-plane/tree/main/console'
+		]) {
+			assert.ok(source.includes(`href="https://github.com/more-than-code/${path}"`), path);
 		}
+		assert.doesNotMatch(source, /bot-api-server|bot-mcp-server|github\.com\/more-than-code\/bot-console/);
 		assert.equal(source.match(/AGPL-3\.0-only/g)?.length, 3);
 		assert.ok(source.includes('Apache-2.0'));
 		assert.ok(source.includes('PostgreSQL 18 with TimescaleDB, a Google OAuth client, a TLS reverse proxy'));

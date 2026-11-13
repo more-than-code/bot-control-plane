@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/audit"
-	"github.com/more-than-code/bot-api-server/internal/authz"
-	"github.com/more-than-code/bot-api-server/internal/catalog"
-	"github.com/more-than-code/bot-api-server/internal/secret"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
+	"github.com/more-than-code/bot-control-plane/api/internal/authz"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/secret"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 const healthConfirmAction = "health_checks"

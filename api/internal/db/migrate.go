@@ -9,7 +9,7 @@ import (
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/more-than-code/bot-api-server/migrations"
+	"github.com/more-than-code/bot-control-plane/api/migrations"
 )
 
 // Migrate applies embedded SQL files in lexical order using databaseURL.

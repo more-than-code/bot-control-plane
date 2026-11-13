@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/more-than-code/bot-api-server/internal/audit"
-	"github.com/more-than-code/bot-api-server/internal/memstore"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
+	"github.com/more-than-code/bot-control-plane/api/internal/memstore"
 )
 
 func TestUnauthenticatedSocketCap(t *testing.T) {

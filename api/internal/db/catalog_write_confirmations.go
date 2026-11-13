@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func (d *DB) PutCatalogWriteConfirmation(ctx context.Context, hash []byte, c store.CatalogWriteConfirmation) error {

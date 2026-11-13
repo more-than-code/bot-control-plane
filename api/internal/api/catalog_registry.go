@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/authz"
-	"github.com/more-than-code/bot-api-server/internal/catalog"
-	"github.com/more-than-code/bot-api-server/internal/registry"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/authz"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/registry"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 type tagItem struct {

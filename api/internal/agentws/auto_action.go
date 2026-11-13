@@ -4,10 +4,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/more-than-code/bot-api-server/internal/audit"
-	"github.com/more-than-code/bot-api-server/internal/catalog"
-	"github.com/more-than-code/bot-api-server/internal/ingest"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/ingest"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 var autoAuditActions = map[string]string{

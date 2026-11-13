@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/more-than-code/bot-api-server/migrations"
+	"github.com/more-than-code/bot-control-plane/api/migrations"
 )
 
 func TestMigrationSkipsDownScript(t *testing.T) {

@@ -144,24 +144,33 @@
 
 	const components = [
 		{
-			repo: 'bot-agent',
+			name: 'bot-agent',
+			href: REPO_URL('bot-agent'),
 			role: 'Runs on each host, dials out, deploys and reports',
 			stack: 'Go, one static binary; Linux (amd64/arm64) with systemd; Docker only for container entries',
 			licence: 'Apache-2.0'
 		},
 		{
-			repo: 'bot-api-server',
+			name: 'bot-control-plane/api',
+			href: REPO_URL('bot-control-plane', 'api'),
 			role: 'Google sign-in, projects and roles, catalog, audit log, OAuth for MCP clients',
 			stack: 'Go, PostgreSQL with TimescaleDB',
 			licence: 'AGPL-3.0-only'
 		},
 		{
-			repo: 'bot-mcp-server',
+			name: 'bot-control-plane/mcp',
+			href: REPO_URL('bot-control-plane', 'mcp'),
 			role: 'Standard MCP endpoint for AI agents',
 			stack: 'Go, MCP over Streamable HTTP',
 			licence: 'AGPL-3.0-only'
 		},
-		{ repo: 'bot-console', role: 'The web console', stack: 'SvelteKit (Node.js)', licence: 'AGPL-3.0-only' }
+		{
+			name: 'bot-control-plane/console',
+			href: REPO_URL('bot-control-plane', 'console'),
+			role: 'The web console',
+			stack: 'SvelteKit (Node.js)',
+			licence: 'AGPL-3.0-only'
+		}
 	];
 
 	const steps = [
@@ -382,7 +391,7 @@
 
 <section class="py-8" aria-labelledby="source-title">
 	<h2 id="source-title" class="text-2xl font-semibold tracking-tight">Open source</h2>
-	<p class="text-muted-foreground mt-2">Use Deploybot hosted, or run all of it yourself from these four repos.</p>
+	<p class="text-muted-foreground mt-2">Use Deploybot hosted, or run all of it yourself from these two repos.</p>
 	<table class="mt-4 w-full text-left text-sm max-sm:block">
 		<thead class="max-sm:sr-only">
 			<tr class="border-b">
@@ -393,14 +402,14 @@
 			</tr>
 		</thead>
 		<tbody class="max-sm:grid max-sm:gap-4">
-			{#each components as component (component.repo)}
+			{#each components as component (component.name)}
 				<tr class="border-b align-top max-sm:block max-sm:rounded-xl max-sm:border max-sm:p-4">
 					<th scope="row" class="py-2 pr-4 font-medium whitespace-nowrap max-sm:block max-sm:p-0">
 						<a
 							class={linkClass}
-							href={REPO_URL(component.repo)}
+							href={component.href}
 							rel="noopener noreferrer"
-							target="_blank">{component.repo}<span class="sr-only">{' (opens in a new tab)'}</span></a
+							target="_blank">{component.name}<span class="sr-only">{' (opens in a new tab)'}</span></a
 						>
 					</th>
 					<td class="py-2 pr-4 max-sm:block max-sm:p-0 max-sm:pt-2">{component.role}</td>
@@ -416,7 +425,7 @@
 	</table>
 	<p class="text-muted-foreground mt-4 text-sm">
 		To self-host you need a Linux server, PostgreSQL 18 with TimescaleDB, a Google OAuth client, a TLS reverse proxy
-		(agents connect over wss://) and a secrets key file for encrypted values. Each repo's README has the steps.
+		(agents connect over wss://) and a secrets key file for encrypted values. Each README has the steps.
 	</p>
 </section>
 

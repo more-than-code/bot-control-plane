@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/agentws"
-	"github.com/more-than-code/bot-api-server/internal/audit"
-	"github.com/more-than-code/bot-api-server/internal/auth"
-	"github.com/more-than-code/bot-api-server/internal/authz"
-	"github.com/more-than-code/bot-api-server/internal/registry"
-	"github.com/more-than-code/bot-api-server/internal/seal"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
+	"github.com/more-than-code/bot-control-plane/api/internal/auth"
+	"github.com/more-than-code/bot-control-plane/api/internal/authz"
+	"github.com/more-than-code/bot-control-plane/api/internal/registry"
+	"github.com/more-than-code/bot-control-plane/api/internal/seal"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 var errBadCursor = errors.New("bad cursor")

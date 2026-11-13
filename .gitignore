@@ -1,0 +1,13 @@
+# Root build output (go build -o bin/ ./cmd/..., or a plain go build). Each part keeps its own .gitignore.
+/bin/
+/deploybot-server
+/deploybot
+/bot-api-server
+/bot-mcp-server
+/cmd/*/deploybot-server
+/cmd/*/deploybot
+*.test
+*.out
+.env
+.env.*
+!.env.example

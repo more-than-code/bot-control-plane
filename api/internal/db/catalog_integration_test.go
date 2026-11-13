@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/catalog"
-	"github.com/more-than-code/bot-api-server/internal/secret"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/secret"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 // assertCatalog is the Postgres half of api-v1 v1.6 wave 1: migration shape,

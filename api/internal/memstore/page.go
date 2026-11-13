@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func pageBy[T any](items []T, limit int, cursor *store.Cursor, at func(T) time.Time, id func(T) string, desc bool) ([]T, *store.Cursor) {

@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/more-than-code/bot-api-server/internal/registry"
+	"github.com/more-than-code/bot-control-plane/api/internal/registry"
 )
 
 // Hosts are the names the server certificate covers.

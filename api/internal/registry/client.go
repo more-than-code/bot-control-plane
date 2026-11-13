@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/more-than-code/bot-api-server/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 )
 
 // Reasons returned in the 502 payload (api-v1 v1.16).

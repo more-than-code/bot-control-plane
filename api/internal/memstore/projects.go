@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func (m *Mem) CreateProject(_ context.Context, ownerID uuid.UUID, name, baseSlug string, at time.Time) (store.Project, error) {

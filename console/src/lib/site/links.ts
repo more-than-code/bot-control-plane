@@ -13,8 +13,12 @@ export const SIGN_IN_URL = '/signin';
 
 export const SUPPORT_EMAIL = 'support@deploybot.dev';
 
-/** Public source repos. Links use main, the latest release (each repo's default branch); dev is work in progress. */
-export const REPO_URL = (repo: string) => `https://github.com/more-than-code/${repo}/tree/main`;
+/**
+ * Public source repos, optionally a folder in one (bot-control-plane holds api/, mcp/ and console/).
+ * Links use main, the latest release (each repo's default branch); dev is work in progress.
+ */
+export const REPO_URL = (repo: string, dir?: string) =>
+	`https://github.com/more-than-code/${repo}/tree/main${dir ? `/${dir}` : ''}`;
 
 /** The product's front-door repo (umbrella README). */
 export const GITHUB_URL = 'https://github.com/more-than-code/deploybot';

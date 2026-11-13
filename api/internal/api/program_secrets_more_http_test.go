@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/more-than-code/bot-api-server/internal/agentws"
-	"github.com/more-than-code/bot-api-server/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 )
 
 // api-v1 v1.22 item 2 (spec criterion 6), deleting a key: an entry that

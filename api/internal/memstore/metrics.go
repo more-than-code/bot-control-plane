@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func (m *Mem) InsertBatch(_ context.Context, hostID, batchID uuid.UUID, samples []store.Sample, at time.Time) (bool, error) {

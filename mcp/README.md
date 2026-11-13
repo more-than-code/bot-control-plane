@@ -1,9 +1,9 @@
-# bot-mcp-server
+# MCP gateway (`mcp/`)
 
-Stateless MCP gateway (Streamable HTTP at `/mcp`) for external AI agents. Every tool call is forwarded to bot-api-server with a short-lived token exchanged from the caller's user token, so permissions are exactly the console's. It also contains `deploybot login`, a device-code login CLI.
+The MCP part of [bot-control-plane](../README.md) (formerly the bot-mcp-server repo), started as `deploybot-server mcp` (or as `bot-mcp-server`). Stateless MCP gateway (Streamable HTTP at `/mcp`) for external AI agents. Every tool call is forwarded to the API (`../api`) with a short-lived token exchanged from the caller's user token, so permissions are exactly the console's. It also contains `deploybot login`, a device-code login CLI (`cli/`, built from `../cmd/deploybot`).
 
 - Design: `docs/design.md`.
-- Contract (frozen): `docs/contracts/api-v1.md`.
+- Contract (frozen): `../docs/contracts/api-v1.md`.
 
 The server stores nothing and writes no files. The CLI writes only `~/.config/deploybot/token` (directory `0700`, file `0600`, atomic replace). The file is JSON, `{"api":"<base URL>","token":"<token>"}`.
 
@@ -14,7 +14,7 @@ export BOT_MCP_LISTEN=127.0.0.1:8091
 export BOT_MCP_API_URL=https://<api>
 export BOT_MCP_PUBLIC_ORIGIN=https://<mcp>
 export BOT_MCP_CLIENT_SECRET_FILE=/path/to/client-secret
-go run ./cmd/bot-mcp-server
+go run ./cmd/deploybot-server mcp   # from the repository root
 ```
 
 `BOT_MCP_CLIENT_SECRET_FILE` is mode `0600`. The server reads the first line and refuses to start if the file is missing, empty, shorter than 32 characters, or not mode `0600`. That line is the secret for client id `bot-mcp-server`. It only allows exchanging a user token. It is never logged and never sent to `/v1/*`.
@@ -46,7 +46,7 @@ Docker health (api-v1 v1.11) is one health source. `list_services` and `get_heal
 ## Deploybot
 
 ```bash
-go run ./cmd/deploybot login --api https://<api>
+go run ./cmd/deploybot login --api https://<api>   # from the repository root
 go run ./cmd/deploybot logout
 ```
 
@@ -69,8 +69,8 @@ deploybot login --api https://<api>
 claude mcp add --transport http deploybot https://<mcp>/mcp --header "Authorization: Bearer $(python3 -c 'import json,pathlib; print(json.loads(pathlib.Path.home().joinpath(".config/deploybot/token").read_text())["token"])')"
 ```
 
-The header is the `token` field. The file also stores the API base URL, so the raw file is not a bearer token. bot-mcp-server exchanges that token; it does not forward it to the API.
+The header is the `token` field. The file also stores the API base URL, so the raw file is not a bearer token. The MCP server exchanges that token; it does not forward it to the API.
 
 ## License
 
-GNU Affero General Public License v3.0 only (AGPL-3.0-only). See [LICENSE](LICENSE). You may self-host and change bot-mcp-server. If you offer a changed version to users over a network, you must offer them its source code.
+GNU Affero General Public License v3.0 only (AGPL-3.0-only). See [LICENSE](../LICENSE). You may self-host and change it. If you offer a changed version to users over a network, you must offer them its source code.

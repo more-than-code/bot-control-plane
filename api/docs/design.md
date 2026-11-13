@@ -1,12 +1,14 @@
-# bot-api-server: per-repo design
+# API (`api/` in bot-control-plane): design
 
-**Date:** 2026-10-13. **Status:** Approved design (D1–D31), wave 1 = phase 1. D34 (2026-10-14) amends umbrella D21. Service names and `GET /v1/projects/{id}/services` (2026-10-14) follow `docs/spec-project-services.md`. The MCP OAuth authorization server (2026-10-14) follows `docs/spec-mcp-oauth.md` and `docs/contracts/oauth-v1.md`. Project invite links (2026-10-15) follow `docs/spec-project-invites.md` and api-v1 v1.5. Project catalog programs (2026-10-15) follow `docs/spec-project-catalog.md` wave 1, api-v1 v1.6, and the v1.6.1 amendments. Catalog images, env sets, and registries (2026-10-15) follow `docs/spec-catalog-images.md` rev 3, api-v1 v1.8, and agent-protocol v1.4. Project files and `files` on image entries (2026-10-16) follow `docs/spec-catalog-files.md` rev 1, api-v1 v1.9, and agent-protocol v1.5. Health-check replacement from an `api_delegated` session (api-v1 v1.10, 2026-10-18) returns a confirmation plan and applies the set only on `POST /v1/confirmations/{id}`. The v1.3.1 environment denylist is enforced here. The helper socket and unit hardening in agent-protocol v1.3.1 are not implemented in this server.
-Cross-repo design: umbrella `docs/design-bot-agent-deploy.md` §2 (permissions), §3 (auth), §6 (server, app schema, Postgres roles and metrics). Contracts: `docs/contracts/`.
+**Date:** 2026-10-13. **Status:** Approved design (D1–D31), wave 1 = phase 1. D34 (2026-10-14) amends umbrella D21. Service names and `GET /v1/projects/{id}/services` (2026-10-14) follow `docs/spec-project-services.md`. The MCP OAuth authorization server (2026-10-14) follows `docs/spec-mcp-oauth.md` and `../../docs/contracts/oauth-v1.md`. Project invite links (2026-10-15) follow `docs/spec-project-invites.md` and api-v1 v1.5. Project catalog programs (2026-10-15) follow `docs/spec-project-catalog.md` wave 1, api-v1 v1.6, and the v1.6.1 amendments. Catalog images, env sets, and registries (2026-10-15) follow `docs/spec-catalog-images.md` rev 3, api-v1 v1.8, and agent-protocol v1.4. Project files and `files` on image entries (2026-10-16) follow `docs/spec-catalog-files.md` rev 1, api-v1 v1.9, and agent-protocol v1.5. Health-check replacement from an `api_delegated` session (api-v1 v1.10, 2026-10-18) returns a confirmation plan and applies the set only on `POST /v1/confirmations/{id}`. The v1.3.1 environment denylist is enforced here. The helper socket and unit hardening in agent-protocol v1.3.1 are not implemented in this server.
+Cross-repo design: umbrella `docs/design-bot-agent-deploy.md` §2 (permissions), §3 (auth), §6 (server, app schema, Postgres roles and metrics). Contracts: `../docs/contracts/` at the repository root.
 
 ## Layout
 
+Paths are relative to `api/`; the binary is `cmd/deploybot-server` at the repository root (`deploybot-server api`, or called as `bot-api-server`).
+
 ```
-cmd/bot-api-server/        main: config, DB pool, migrations on start (flag), HTTP server
+run.go                     Run(ctx, args): config, DB pool, migrations on start (flag), HTTP server
 internal/config/           env config (below)
 internal/db/               pgx pool, migrations (embedded SQL), queries
 internal/auth/             Google OIDC + PKCE, sessions, device flow, MCP OAuth tokens

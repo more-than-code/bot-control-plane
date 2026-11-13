@@ -10,10 +10,10 @@ import (
 	"net/url"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/audit"
-	"github.com/more-than-code/bot-api-server/internal/auth"
-	"github.com/more-than-code/bot-api-server/internal/authz"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
+	"github.com/more-than-code/bot-control-plane/api/internal/auth"
+	"github.com/more-than-code/bot-control-plane/api/internal/authz"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func (s *Server) handleOAuthMetadata(w http.ResponseWriter, _ *http.Request) {

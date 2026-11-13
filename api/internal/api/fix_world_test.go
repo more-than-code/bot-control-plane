@@ -13,13 +13,13 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/agentws"
-	"github.com/more-than-code/bot-api-server/internal/audit"
-	"github.com/more-than-code/bot-api-server/internal/auth"
-	"github.com/more-than-code/bot-api-server/internal/config"
-	"github.com/more-than-code/bot-api-server/internal/memstore"
-	"github.com/more-than-code/bot-api-server/internal/secret"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
+	"github.com/more-than-code/bot-control-plane/api/internal/auth"
+	"github.com/more-than-code/bot-control-plane/api/internal/config"
+	"github.com/more-than-code/bot-control-plane/api/internal/memstore"
+	"github.com/more-than-code/bot-control-plane/api/internal/secret"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 // world is one memstore behind the real REST mux and the agent socket.

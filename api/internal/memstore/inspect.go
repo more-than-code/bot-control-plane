@@ -4,7 +4,7 @@ import (
 	"bytes"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 // AllAudits returns a copy of every audit row, including sign-in rows that

@@ -1,4 +1,4 @@
-// Package config loads bot-api-server settings from the environment.
+// Package config loads the API settings from the environment.
 package config
 
 import (

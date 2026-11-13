@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/more-than-code/bot-mcp-server/internal/apiclient"
+	"github.com/more-than-code/bot-control-plane/mcp/internal/apiclient"
 )
 
 // An image deploy or rollback confirm waits at most apiclient.MaxCallTimeout

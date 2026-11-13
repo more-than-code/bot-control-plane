@@ -1,4 +1,4 @@
-// Package store is the persistence contract for bot-api-server.
+// Package store is the persistence contract for the API.
 // Handlers and the agent socket depend on this interface. Postgres and the
 // in-memory fake both implement it. Tokens are passed only as SHA-256 digests.
 package store

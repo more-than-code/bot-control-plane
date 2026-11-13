@@ -19,6 +19,13 @@ test('llms.txt links point at main, the latest release', () => {
 	assert.match(LLMS, /bot-agent\/blob\/main\/docs\/install\.md/);
 });
 
+test('llms.txt links the server parts in bot-control-plane, not the retired repos', () => {
+	for (const path of ['README.md', 'api/README.md', 'mcp/README.md', 'console/README.md', 'docs/contracts/api-v1.md']) {
+		assert.ok(LLMS.includes(`https://github.com/more-than-code/bot-control-plane/blob/main/${path}`), path);
+	}
+	assert.doesNotMatch(LLMS, /more-than-code\/(bot-api-server|bot-mcp-server|bot-console)\b/);
+});
+
 test('robots.txt allows all crawlers and names the apex sitemap', () => {
 	// Umbrella docs/spec-seo-site.md §3.4.
 	assert.equal(

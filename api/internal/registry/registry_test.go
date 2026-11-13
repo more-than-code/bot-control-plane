@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/more-than-code/bot-api-server/internal/registry"
-	"github.com/more-than-code/bot-api-server/internal/registry/registrytest"
+	"github.com/more-than-code/bot-control-plane/api/internal/registry"
+	"github.com/more-than-code/bot-control-plane/api/internal/registry/registrytest"
 )
 
 const bearer = "Bearer tok-123"

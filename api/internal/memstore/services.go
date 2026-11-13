@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/more-than-code/bot-api-server/internal/authz"
-	"github.com/more-than-code/bot-api-server/internal/store"
+	"github.com/more-than-code/bot-control-plane/api/internal/authz"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 func (m *Mem) ListServices(_ context.Context, hostID uuid.UUID, projects []uuid.UUID, now time.Time) ([]store.Service, error) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/more-than-code/bot-mcp-server/internal/apiclient"
+	"github.com/more-than-code/bot-control-plane/mcp/internal/apiclient"
 )
 
 func TestBudgetFromCatalog(t *testing.T) {
