@@ -1,0 +1,309 @@
+<script lang="ts">
+	import { browser } from '$app/environment';
+	import { enhance } from '$app/forms';
+	import { untrack, type Snippet } from 'svelte';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import * as Select from '$lib/components/ui/select';
+	import * as Sheet from '$lib/components/ui/sheet';
+	import Notice from '$lib/components/Notice.svelte';
+	import type { Host, ProgramEntry } from '$lib/api-types';
+	import InfoIcon from '@lucide/svelte/icons/info';
+	import {
+		PROGRAM_SECRET_HELP,
+		PROGRAM_SECRET_KEYS_HELP,
+		hoistPreviewEnv,
+		previewToken,
+		runAsChoices,
+		shellRisk,
+		shouldApplyPreviewUpdate,
+		submitCatalogPreview
+	} from '$lib/catalog';
+	import { envOverrideNote, envOverrides } from '$lib/env-precedence';
+	import type { KnownSet } from '$lib/image-spec';
+	import type { CatalogDraft, CatalogEditorState } from '$lib/project-action';
+	import EnvSourceFields from './EnvSourceFields.svelte';
+
+	let {
+		mode,
+		entry = null,
+		hosts,
+		saveAction,
+		parseAction,
+		editor = null,
+		sets = [],
+		setsMessage = null,
+		setsStatus = 'loading',
+		retrySets,
+		cancel
+	}: {
+		mode: 'create' | 'edit';
+		entry?: ProgramEntry | null;
+		hosts: Host[];
+		saveAction: string;
+		parseAction: string;
+		editor?: CatalogEditorState | null;
+		/** Env set names and key names (never values), loaded when the drawer opens. */
+		sets?: KnownSet[];
+		setsMessage?: string | null;
+		setsStatus?: 'loading' | 'ready' | 'error';
+		retrySets?: () => void;
+		cancel?: Snippet;
+	} = $props();
+
+	function emptyDraft(): CatalogDraft {
+		return { name: '', command: '', shell: false, dir: '', runAs: '', port: '', restart: 'on-failure', env: [], envSets: [], secrets: [] };
+	}
+
+	function fromEntry(item: ProgramEntry): CatalogDraft {
+		return {
+			name: item.name,
+			command: item.command_display,
+			shell: item.spec.shell,
+			dir: item.spec.dir,
+			runAs: item.spec.run_as,
+			port: item.spec.port == null ? '' : String(item.spec.port),
+			restart: item.spec.restart,
+			env: Object.entries(item.spec.env).map(([key, value]) => ({ key, value })),
+			envSets: [...item.spec.env_sets],
+			secrets: Object.entries(item.spec.secret_env).map(([key, reference]) => {
+				const dot = reference.indexOf('.');
+				return { key, set: reference.slice(0, dot), name: reference.slice(dot + 1) };
+			})
+		};
+	}
+
+	function starting(): CatalogDraft {
+		const base = editor ? editor.draft : entry ? fromEntry(entry) : emptyDraft();
+		const shown = editor?.preview;
+		if (!editor || !shown) return base;
+		const hoisted = hoistPreviewEnv(base.command, base.shell, base.env, editor.draft.command, shown);
+		return hoisted ? { ...base, ...hoisted } : base;
+	}
+
+	const initial = untrack(starting);
+	const hoistedAtStart = untrack(() => editor != null && initial.command !== editor.draft.command);
+	let name = $state(initial.name);
+	let command = $state(initial.command);
+	let shell = $state(initial.shell);
+	let dir = $state(initial.dir);
+	let runAs = $state(initial.runAs);
+	let port = $state(initial.port);
+	let restart = $state(initial.restart);
+	let envRows = $state(initial.env.map((row) => ({ key: row.key, value: row.value })));
+	let envSets = $state([...initial.envSets]);
+	let secrets = $state(initial.secrets.map((row) => ({ ...row })));
+	let formEl = $state<HTMLFormElement | null>(null);
+	let previewButton = $state<HTMLButtonElement | null>(null);
+	let previewRequest = 0;
+	let previewTimer: ReturnType<typeof setTimeout> | undefined;
+	// A line the server already parsed (and hoisted) is not parsed again.
+	let lastPreview = hoistedAtStart ? previewToken(initial.shell, initial.command) : '';
+
+	function clearPreviewTimer() {
+		if (previewTimer !== undefined) {
+			clearTimeout(previewTimer);
+			previewTimer = undefined;
+		}
+	}
+
+	const choices = $derived(runAsChoices(hosts, shell));
+	const fieldId = $derived(mode === 'edit' && entry ? `catalog-${entry.name}` : 'catalog-new');
+	const matched = $derived(
+		editor != null &&
+			editor.draft.shell === shell &&
+			(editor.draft.command === command || editor.preview?.command_display === command)
+	);
+	const preview = $derived(matched ? (editor?.preview ?? null) : null);
+	const previewMessage = $derived(matched ? (editor?.previewMessage ?? null) : null);
+	const saveMessage = $derived(editor?.message ?? null);
+	const argv = $derived(preview ? [preview.exec, ...preview.args] : []);
+	const risk = $derived(shellRisk(runAs));
+	// api-v1 rule 12, for programs from v1.22: env_sets in order < secret_env < env. Notes only.
+	const overrides = $derived(
+		envOverrides(
+			envRows.map((row) => row.key),
+			secrets,
+			envSets.map((name) => ({ name, keys: sets.find((set) => set.name === name)?.keys ?? [] }))
+		)
+	);
+
+	$effect(() => {
+		if (runAs !== '' && !choices.includes(runAs)) runAs = '';
+	});
+
+	$effect(() => {
+		const current = preview;
+		if (!current || !editor) return;
+		const applied = hoistPreviewEnv(command, shell, untrack(() => envRows), editor.draft.command, current);
+		if (!applied) return;
+		envRows = applied.env;
+		command = applied.command;
+		// The hoisted line is what the preview parsed; do not parse it again.
+		lastPreview = previewToken(false, applied.command);
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		const line = command;
+		const useShell = shell;
+		const token = previewToken(useShell, line);
+		if (line.length === 0 || token === lastPreview) return;
+		previewTimer = setTimeout(() => {
+			previewTimer = undefined;
+			if (!formEl || !previewButton) return;
+			const lineToken = token;
+			submitCatalogPreview(formEl, previewButton, () => {
+				lastPreview = lineToken;
+			});
+		}, 400);
+		return () => clearPreviewTimer();
+	});
+
+	function addEnv() {
+		if (envRows.length >= 64) return;
+		envRows = [...envRows, { key: '', value: '' }];
+	}
+
+	function removeEnv(index: number) {
+		envRows = envRows.filter((_, item) => item !== index);
+	}
+
+</script>
+
+<form
+	bind:this={formEl}
+	method="POST"
+	action={saveAction}
+	class="flex min-h-0 flex-1 flex-col"
+	use:enhance={({ submitter }) => {
+		const previewing = submitter === previewButton;
+		if (!previewing) {
+			clearPreviewTimer();
+			previewRequest += 1;
+		}
+		const mine = previewing ? ++previewRequest : previewRequest;
+		return async ({ update }) => {
+			if (!shouldApplyPreviewUpdate(previewing, mine, previewRequest)) return;
+			await update({ reset: false });
+			if (previewing) lastPreview = previewToken(shell, command);
+		};
+	}}
+>
+	<div class="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto scroll-py-4 px-4 pb-4" data-slot="form-body">
+		{#if saveMessage}
+			<Notice kind="error">{saveMessage}</Notice>
+		{/if}
+		<Input type="hidden" name="editor_mode" value={mode === 'edit' ? 'edit' : 'create'} />
+		{#if mode === 'edit' && entry}
+			<Input type="hidden" name="entry_name" value={entry.name} />
+		{:else}
+			<Label class="grid gap-1.5" for="{fieldId}-name">
+				Name
+				<Input id="{fieldId}-name" name="name" bind:value={name} required maxlength={48} autocomplete="off" />
+			</Label>
+		{/if}
+		<Label class="grid gap-1.5" for="{fieldId}-dir">
+			Working directory
+			<Input id="{fieldId}-dir" name="dir" bind:value={dir} required maxlength={255} autocomplete="off" />
+		</Label>
+		<Label class="grid gap-1.5" for="{fieldId}-command">
+			Command
+			<Input id="{fieldId}-command" name="command" bind:value={command} required maxlength={4096} autocomplete="off" />
+		</Label>
+		<Label class="flex items-center gap-2" for="{fieldId}-shell">
+			<Checkbox id="{fieldId}-shell" name="shell" value="1" checked={shell} onCheckedChange={(value) => (shell = value)} />
+			Run through a shell
+		</Label>
+		{#if shell && risk}
+			<p class="text-muted-foreground text-sm">{risk}</p>
+		{/if}
+		<div class="grid gap-1.5">
+			<Label for="{fieldId}-run-as">Run as</Label>
+			<Select.Root type="single" name="run_as" bind:value={runAs}>
+				<Select.Trigger id="{fieldId}-run-as" class="w-full">
+					<Select.Value placeholder="Choose an account" />
+				</Select.Trigger>
+				<Select.Content>
+					{#each choices as account (account)}
+						<Select.Item value={account}>{account}</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
+			{#if choices.length === 0}
+				<p class="text-muted-foreground text-sm">No eligible host allows a run-as account.</p>
+			{/if}
+		</div>
+		<Label class="grid gap-1.5" for="{fieldId}-port">
+			Expected port
+			<Input id="{fieldId}-port" name="port" bind:value={port} inputmode="numeric" maxlength={5} autocomplete="off" />
+		</Label>
+		<div class="grid gap-1.5">
+			<Label for="{fieldId}-restart">Restart</Label>
+			<Select.Root type="single" name="restart" bind:value={restart}>
+				<Select.Trigger id="{fieldId}-restart" class="w-40">
+					<Select.Value />
+				</Select.Trigger>
+				<Select.Content>
+					<Select.Item value="on-failure">on-failure</Select.Item>
+					<Select.Item value="no">no</Select.Item>
+				</Select.Content>
+			</Select.Root>
+		</div>
+		<div class="grid gap-2">
+			<p class="text-sm font-medium">Environment</p>
+			{#each envRows as row, index (index)}
+				{@const note = envOverrideNote(overrides, row.key)}
+				<div class="flex flex-wrap items-end gap-2">
+					<Label class="grid min-w-0 flex-1 gap-1.5" for="{fieldId}-env-key-{index}">
+						Key
+						<Input
+							id="{fieldId}-env-key-{index}"
+							name="env_key"
+							bind:value={envRows[index].key}
+							maxlength={64}
+							autocomplete="off"
+							aria-describedby={note ? `${fieldId}-env-note-${index}` : undefined}
+						/>
+					</Label>
+					<Label class="grid min-w-0 flex-1 gap-1.5" for="{fieldId}-env-value-{index}">
+						Value
+						<Input id="{fieldId}-env-value-{index}" name="env_value" bind:value={envRows[index].value} maxlength={4096} autocomplete="off" />
+					</Label>
+					<Button type="button" variant="outline" onclick={() => removeEnv(index)}>Remove</Button>
+				</div>
+				{#if note}
+					<p id="{fieldId}-env-note-{index}" class="text-muted-foreground flex min-w-0 items-start gap-1.5 text-sm break-words">
+						<InfoIcon class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+						<span class="min-w-0">{note}</span>
+					</p>
+				{/if}
+			{/each}
+			<Button type="button" variant="outline" disabled={envRows.length >= 64} onclick={addEnv}>Add variable</Button>
+		</div>
+		<EnvSourceFields {fieldId} bind:envSets bind:secrets {sets} {setsStatus} {setsMessage} {retrySets} {overrides} />
+		<p class="text-muted-foreground text-sm">{PROGRAM_SECRET_HELP}</p>
+		<p class="text-muted-foreground text-sm">{PROGRAM_SECRET_KEYS_HELP}</p>
+		{#if preview}
+			<p class="flex flex-wrap items-center gap-1">
+				will run:
+				{#each argv as arg, index (index)}
+					<Badge variant="outline" class="max-w-full min-w-0 whitespace-normal break-all">{arg}</Badge>
+				{/each}
+			</p>
+		{/if}
+		{#if previewMessage}
+			<Notice kind="error">{previewMessage}</Notice>
+		{/if}
+	</div>
+	<Sheet.Footer class="bg-popover flex-row flex-wrap items-center border-t">
+		<Button type="submit">Save</Button>
+		<Button type="submit" variant="outline" formaction={parseAction} formnovalidate bind:ref={previewButton}>Preview</Button>
+		{#if cancel}
+			{@render cancel()}
+		{/if}
+	</Sheet.Footer>
+</form>

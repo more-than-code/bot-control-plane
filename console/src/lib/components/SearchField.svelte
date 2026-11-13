@@ -1,0 +1,81 @@
+<script lang="ts">
+	import { goto } from '$app/navigation';
+	import { untrack, type Snippet } from 'svelte';
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+	import { SEARCH_DEBOUNCE_MS, SEARCH_MAX } from '$lib/table-query';
+
+	let {
+		q,
+		label,
+		action,
+		hidden,
+		hrefFor,
+		name = 'q',
+		extra
+	}: {
+		q: string | null;
+		label: string;
+		action: string;
+		hidden: Array<{ name: string; value: string }>;
+		hrefFor: (q: string | null) => string;
+		name?: string;
+		/** Shown after the Search button, e.g. active filter chips. */
+		extra?: Snippet;
+	} = $props();
+
+	let draft = $state(untrack(() => q ?? ''));
+	let sent = $state(untrack(() => q ?? ''));
+	let currentQ = untrack(() => q ?? '');
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	$effect(() => {
+		const incoming = q ?? '';
+		currentQ = incoming;
+		if (incoming !== sent) {
+			draft = incoming;
+			sent = incoming;
+		}
+	});
+
+	$effect(() => () => clearTimeout(timer));
+
+	function oninput(event: Event) {
+		const value = (event.currentTarget as HTMLInputElement).value;
+		draft = value;
+		clearTimeout(timer);
+		timer = setTimeout(() => {
+			const next = value.trim();
+			if (next === currentQ) return;
+			sent = next;
+			void goto(hrefFor(next === '' ? null : next), {
+				keepFocus: true,
+				noScroll: true,
+				replaceState: true
+			});
+		}, SEARCH_DEBOUNCE_MS);
+	}
+
+	function onsubmit() {
+		clearTimeout(timer);
+	}
+</script>
+
+<form class="mb-3 flex min-w-0 flex-wrap items-center gap-2" {action} method="get" role="search" onsubmit={onsubmit}>
+	{#each hidden as field (field.name)}
+		<Input type="hidden" name={field.name} value={field.value} />
+	{/each}
+	<label class="min-w-0 flex-1">
+		<span class="sr-only">{label}</span>
+		<Input
+			type="search"
+			name={name}
+			maxlength={SEARCH_MAX}
+			placeholder={label}
+			value={draft}
+			oninput={oninput}
+		/>
+	</label>
+	<Button type="submit" variant="outline">Search</Button>
+	{#if extra}{@render extra()}{/if}
+</form>

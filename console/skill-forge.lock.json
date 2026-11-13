@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "registry": {
+    "name": "skill-forge",
+    "version": "1.4.0",
+    "commit": "5a96e41f756b49cb792ca10c08e6a89a5f3b1792",
+    "lockIntegrity": "sha256-cm4PmD0bLt2p9eE0l8xuogrbD8UszPmooJi73MpvjDc="
+  },
+  "skills": {
+    "api-contracts": {
+      "version": "0.1.0",
+      "integrity": "sha256-49RjFOkIjO4LhrwrHrXWJbjZXGYh/zdk/Gi2Hpo4TqY=",
+      "source": "registry"
+    },
+    "code-quality": {
+      "version": "0.1.1",
+      "integrity": "sha256-URPCJOroQR0mJlQPoOkRpTe0xtF/qps48iLkoTwKAEo=",
+      "source": "registry"
+    },
+    "coding-discipline": {
+      "version": "0.3.1",
+      "integrity": "sha256-jS3r/aYrv7m5msRqm8PkAZqwyuVXNNTrNfMRiK1zMBg=",
+      "source": "registry"
+    },
+    "frontend-engineering": {
+      "version": "0.3.0",
+      "integrity": "sha256-cwW8++kmMEsBa0YLSqb95tM1IYWh/DxXK7UG9WssI5Q=",
+      "source": "registry"
+    },
+    "security-baseline": {
+      "version": "0.1.0",
+      "integrity": "sha256-6BrEv3S5yb6PakSghKmbONVwHilAxmkNQppRNPTv9tc=",
+      "source": "registry"
+    },
+    "ui-portability-baseline": {
+      "version": "0.2.0",
+      "integrity": "sha256-dL2aKMurLJySGa4oU8xO+UymCQCfIqlz/5hKTyMKzwc=",
+      "source": "registry"
+    }
+  }
+}

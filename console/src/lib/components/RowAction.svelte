@@ -1,0 +1,128 @@
+<script lang="ts">
+	import type { Component, Snippet } from 'svelte';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { cn } from '$lib/utils';
+
+	/** The dialog trigger only needs these. The tooltip handlers stay on the object at runtime. */
+	type TriggerProps = {
+		class?: string;
+		'aria-label'?: string;
+	};
+
+	function tooltipClass(value: unknown): string | undefined {
+		return typeof value === 'string' ? value : undefined;
+	}
+
+	let {
+		label,
+		tip,
+		icon: Icon,
+		destructive = false,
+		type = 'button',
+		name,
+		value,
+		trigger,
+		disabled = false,
+		blockedReason = null,
+		id,
+		onclick
+	}: {
+		label: string;
+		/** Extra hover sentence. The aria-label stays `label`. */
+		tip?: string;
+		icon: Component;
+		/** Destructive row actions use the destructive text colour. */
+		destructive?: boolean;
+		type?: 'button' | 'submit';
+		name?: string;
+		value?: string;
+		/** Dialog or alert-dialog trigger. Omit it for a form submit. */
+		trigger?: Snippet<[TriggerProps]>;
+		/** A disabled control does not receive hover, so the tooltip sits on a wrapper. */
+		disabled?: boolean;
+		/**
+		 * Why the action cannot run now. The button stays focusable with `aria-disabled`, ignores clicks,
+		 * and the reason is its description and tooltip (no `title`). Use without `trigger`.
+		 */
+		blockedReason?: string | null;
+		/** For a plain button (no `trigger`), e.g. a focus target. */
+		id?: string;
+		/** For a plain button: runs after the tooltip's own click handler. */
+		onclick?: (event: MouseEvent) => void;
+	} = $props();
+
+	function runClick(tooltipClick: unknown, event: MouseEvent) {
+		if (typeof tooltipClick === 'function') tooltipClick(event);
+		onclick?.(event);
+	}
+
+	const reasonId = $props.id();
+	const hover = $derived(blockedReason ? `${label}. ${blockedReason}` : tip ? `${label}. ${tip}` : label);
+	const controlClass = $derived(
+		cn(buttonVariants({ variant: 'ghost', size: 'icon-sm' }), destructive && 'text-destructive')
+	);
+</script>
+
+<Tooltip.Provider>
+	<Tooltip.Root>
+		<Tooltip.Trigger>
+			{#snippet child({ props })}
+				{#if disabled}
+					<span {...props} class={cn('inline-flex', tooltipClass(props.class))} title={hover}>
+						<Button
+							type="button"
+							disabled
+							aria-disabled="true"
+							variant="ghost"
+							size="icon-sm"
+							class="pointer-events-none"
+							aria-label={label}
+						>
+							<Icon class="size-4" />
+						</Button>
+					</span>
+				{:else if blockedReason}
+					<Button
+						{...props}
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						class={cn('cursor-not-allowed opacity-50', tooltipClass(props.class))}
+						aria-label={label}
+						aria-disabled="true"
+						aria-describedby={reasonId}
+						onclick={(event: MouseEvent) => event.preventDefault()}
+					>
+						<Icon class="size-4" />
+					</Button>
+				{:else if trigger}
+					{@render trigger({
+						...props,
+						class: cn(controlClass, tooltipClass(props.class)),
+						'aria-label': label
+					} as TriggerProps)}
+				{:else}
+					<Button
+						{...props}
+						id={id ?? (props.id as string | undefined)}
+						onclick={(event: MouseEvent) => runClick(props.onclick, event)}
+						{type}
+						{name}
+						{value}
+						variant="ghost"
+						size="icon-sm"
+						class={cn(destructive && 'text-destructive', tooltipClass(props.class))}
+						aria-label={label}
+					>
+						<Icon class="size-4" />
+					</Button>
+				{/if}
+			{/snippet}
+		</Tooltip.Trigger>
+		<Tooltip.Content>{hover}</Tooltip.Content>
+	</Tooltip.Root>
+</Tooltip.Provider>
+{#if blockedReason}
+	<span id={reasonId} class="sr-only">{blockedReason}</span>
+{/if}
