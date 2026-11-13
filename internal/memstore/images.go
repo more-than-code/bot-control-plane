@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -550,9 +551,8 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 	}
 	m.envSets[id] = set
 	m.envValues[id] = values
-	if created {
-		m.rehashSetLocked(projectID, name, at)
-	}
+	// Every write re-hashes; see the Postgres PutEnvKey (v1.22 amendment 1).
+	m.rehashSetLocked(projectID, name, at)
 	return storedEnvKey(in.Key, secret, in.Plain), created, nil
 }
 
@@ -625,6 +625,8 @@ func (m *Mem) MakeEnvKeysSecret(_ context.Context, projectID uuid.UUID, name str
 		set.UpdatedBy = actor
 		m.envSets[id] = set
 		m.envValues[id] = values
+		// A key that turns secret leaves a program's env_values.
+		m.rehashSetLocked(projectID, name, at)
 	}
 	sort.Strings(changed)
 	return m.envSetViewLocked(projectID, set), changed, nil
@@ -680,8 +682,32 @@ func entryRefs(e store.CatalogEntry) (catalog.EnvRefs, bool) {
 	return img.EnvRefs(), true
 }
 
+// envPlainLocked is the project's env values with is_secret false, per set
+// (api-v1 v1.22 amendment 1).
+func (m *Mem) envPlainLocked(projectID uuid.UUID) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	prefix := projectID.String() + "/"
+	for key, values := range m.envValues {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		name := key[len(prefix):]
+		for _, v := range values {
+			if v.IsSecret {
+				continue
+			}
+			if out[name] == nil {
+				out[name] = map[string]string{}
+			}
+			out[name][v.Key] = v.Plain
+		}
+	}
+	return out
+}
+
 func (m *Mem) rehashSetLocked(projectID uuid.UUID, set string, at time.Time) {
 	names := m.envKeyNamesLocked(projectID)
+	sets := catalog.SetState{Keys: names, Plain: m.envPlainLocked(projectID)}
 	for id, e := range m.entries {
 		if e.ProjectID != projectID {
 			continue
@@ -690,13 +716,12 @@ func (m *Mem) rehashSetLocked(projectID uuid.UUID, set string, at time.Time) {
 		if !ok || !refs.Uses(set) {
 			continue
 		}
-		digests := catalog.KeyDigests(refs.SetNames(), names)
 		var next string
 		if e.Kind == "image" {
 			img, _ := catalog.ParseStored(e.ImageRaw)
-			next = catalog.ImageHash(img, digests)
+			next = catalog.ImageHash(img, catalog.KeyDigests(refs.SetNames(), names))
 		} else {
-			next = catalog.ProgramHash(e.Spec.Program(), digests)
+			next = catalog.ProgramHash(e.Spec.Program(), sets)
 		}
 		if next == e.SpecHash {
 			continue

@@ -385,7 +385,8 @@ func policyReason(host store.Host, runAs, exec string, shell bool) string {
 
 // programGate is every program check against the host before a task is
 // built: the v1.6 policy, then for a Run the host's projects allowlist
-// (api-v1 v1.23 item 2) and the secrets gates (v1.22 item 4). Logs of an
+// (api-v1 v1.23 item 2), the secrets gates (v1.22 item 4) and the value
+// origin gates (v1.22 amendments 2 and 3). Logs of an
 // entry whose output may hold a secret need the secrets key, as for images.
 // code is empty when the action may go on.
 func (s *Server) programGate(ctx context.Context, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action string) (string, string, error) {
@@ -407,6 +408,10 @@ func (s *Server) programGate(ctx context.Context, projectID uuid.UUID, host stor
 		}
 		if s.Secrets == nil {
 			return "unavailable", errSecretsKey.Error(), nil
+		}
+		msg, err = s.originReason(ctx, projectID, refs)
+		if err != nil || msg != "" {
+			return "bad_request", msg, err
 		}
 	case "logs":
 		if !refs.Any() || s.Secrets != nil {

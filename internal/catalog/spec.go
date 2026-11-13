@@ -85,6 +85,13 @@ type ProgramInput struct {
 	Sets      SetKeys
 }
 
+// SetState is a project's env sets as a program spec_hash sees them: the key
+// names of each set, and the values of its keys with is_secret false.
+type SetState struct {
+	Keys  map[string][]string          // set -> key names
+	Plain map[string]map[string]string // set -> plain key -> value
+}
+
 // BuildProgram applies v1.6 rules 1–9, and the image env-set rules 6, 7 and
 // the 64-key merge limit (api-v1 v1.22 item 1), and returns the stored spec.
 // A non-program kind is refused by the caller (rule 10).
@@ -128,6 +135,11 @@ func BuildProgram(in ProgramInput) (Program, error) {
 	}
 	if err := validateSecretEnv(secretEnv, in.Sets); err != nil {
 		return Program{}, err
+	}
+	for k := range secretEnv {
+		if ChangesWhatRunsSecret(k) {
+			return Program{}, fieldErr("this variable changes what the program runs")
+		}
 	}
 	refs := EnvRefs{Sets: envSets, Secret: secretEnv, Inline: env}
 	if mergedKeyCount(refs, in.Sets) > MaxProgramEnv {
@@ -279,7 +291,7 @@ func validateEnv(env map[string]string) error {
 		if k == "PATH" || k == "HOME" {
 			return fieldErr(k + " is reserved")
 		}
-		if secretKey.MatchString(k) {
+		if LooksSecret(k) {
 			return fieldErr("use secret_env")
 		}
 		if changesWhatRuns(k) {
@@ -290,6 +302,35 @@ func validateEnv(env map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// ChangesWhatRunsSecret is api-v1 v1.22 amendment 2: the v1.6.1 list plus
+// the keys a secret value may not set on a program, because a secret value
+// is not shown in the host owner's approval. The proxy keys match in either
+// case.
+func ChangesWhatRunsSecret(key string) bool {
+	if changesWhatRuns(key) {
+		return true
+	}
+	switch key {
+	case "GIT_SSH", "GIT_SSH_COMMAND", "GIT_ASKPASS", "SSH_ASKPASS",
+		"JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS",
+		"PYTHONHOME", "PYTHONINSPECT", "GCONV_PATH", "DOTNET_STARTUP_HOOKS",
+		"NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR":
+		return true
+	}
+	switch strings.ToUpper(key) {
+	case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY":
+		return true
+	}
+	return false
+}
+
+// LooksSecret is the inline-env secret-looking rule ("use secret_env",
+// api-v1 v1.6 rule 8). The Run gate for plain set keys (v1.22 amendment 3)
+// uses the same rule.
+func LooksSecret(key string) bool {
+	return secretKey.MatchString(key)
 }
 
 // changesWhatRuns is api-v1 v1.6.1 item 2. The same keys are refused when
@@ -324,17 +365,25 @@ func Canonical(p Program) string {
 	return `{"kind":"program","spec":` + programSpecJSON(p, false) + `}`
 }
 
-// CanonicalProgram is the spec_hash input (api-v1 v1.22 item 2). An entry
-// that references an env set adds env_sets and secret_env to spec, and
-// env_keys {<set>: EnvKeyDigest} beside it, as images do. An entry without
-// sets keeps the v1.6 input, so its hash and host approvals do not change.
-// Env-set values never enter the hash; inline env values do.
-func CanonicalProgram(p Program, keyDigests map[string]string) string {
+// CanonicalProgram is the spec_hash input (api-v1 v1.22 item 2 and amendment
+// 1). An entry that references an env set adds env_sets and secret_env to
+// spec, and beside it env_keys {<set>: EnvKeyDigest} as images do, and
+// env_values {<set>: EnvValueDigest} of the set's plain taking-part keys.
+// Secret values never enter it; inline env values do. An entry without sets
+// keeps the v1.6 input, so its hash and host approvals do not change.
+func CanonicalProgram(p Program, sets SetState) string {
 	refs := p.EnvRefs()
 	if !refs.Any() {
 		return Canonical(p)
 	}
-	return `{"env_keys":` + envKeysJSON(refs.SetNames(), keyDigests) +
+	names := refs.SetNames()
+	values := refs.PlainTakingPart(sets.Plain)
+	valueDigests := make(map[string]string, len(names))
+	for _, set := range names {
+		valueDigests[set] = EnvValueDigest(values[set])
+	}
+	return `{"env_keys":` + envKeysJSON(names, KeyDigests(names, sets.Keys)) +
+		`,"env_values":` + envKeysJSON(names, valueDigests) +
 		`,"kind":"program","spec":` + programSpecJSON(p, true) + `}`
 }
 
@@ -396,13 +445,13 @@ func programSpecJSON(p Program, withRefs bool) string {
 
 // SpecHash is the spec_hash of a program without env sets (Canonical).
 func SpecHash(p Program) string {
-	return ProgramHash(p, nil)
+	return ProgramHash(p, SetState{})
 }
 
-// ProgramHash is the program spec_hash. keyDigests maps a referenced set to
-// EnvKeyDigest; a missing digest is the empty-key digest.
-func ProgramHash(p Program, keyDigests map[string]string) string {
-	sum := sha256.Sum256([]byte(CanonicalProgram(p, keyDigests)))
+// ProgramHash is the program spec_hash over the project's current sets. A
+// set missing from sets hashes as empty.
+func ProgramHash(p Program, sets SetState) string {
+	sum := sha256.Sum256([]byte(CanonicalProgram(p, sets)))
 	return hex.EncodeToString(sum[:])
 }
 

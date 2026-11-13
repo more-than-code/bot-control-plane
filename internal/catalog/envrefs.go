@@ -1,6 +1,10 @@
 package catalog
 
-import "strings"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+)
 
 // EnvRefs is the env an entry resolves when it is deployed (image) or Run
 // (program): env sets in order, then secret_env, then inline env
@@ -49,6 +53,47 @@ func (r EnvRefs) Uses(set string) bool {
 		}
 	}
 	return false
+}
+
+// PlainTakingPart is api-v1 v1.22 amendment 1: per referenced set, the plain
+// keys that take part, with their values. A key takes part when its set is in
+// env_sets, or when it is a secret_env target. plain holds only keys with
+// is_secret false, so a secret key is never returned.
+func (r EnvRefs) PlainTakingPart(plain map[string]map[string]string) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	add := func(set, key, value string) {
+		if out[set] == nil {
+			out[set] = map[string]string{}
+		}
+		out[set][key] = value
+	}
+	for _, set := range r.Sets {
+		for key, value := range plain[set] {
+			add(set, key, value)
+		}
+	}
+	for _, ref := range r.Secret {
+		set, key, ok := strings.Cut(ref, ".")
+		if !ok {
+			continue
+		}
+		if value, ok := plain[set][key]; ok {
+			add(set, key, value)
+		}
+	}
+	return out
+}
+
+// EnvValueDigest is sha256 of the sorted "KEY=value" lines joined by
+// newlines. An empty map hashes the empty string.
+func EnvValueDigest(values map[string]string) string {
+	lines := make([]string, 0, len(values))
+	for key, value := range values {
+		lines = append(lines, key+"="+value)
+	}
+	sortStrings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:])
 }
 
 // EnvRefs returns the image entry's env references.

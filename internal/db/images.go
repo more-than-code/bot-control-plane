@@ -624,10 +624,11 @@ FOR UPDATE
 	if err := upsertEnvValue(ctx, tx, projectID, name, in.Key, isSecret, in.Plain, in.Nonce, in.Ciphertext, in.KeyVersion, created); err != nil {
 		return store.EnvKey{}, false, err
 	}
-	if created {
-		if err := d.rehashTx(ctx, tx, projectID, name, at); err != nil {
-			return store.EnvKey{}, false, err
-		}
+	// Every write re-hashes: a new key changes key names, and a plain value
+	// change re-hashes program entries (api-v1 v1.22 amendment 1). Entries
+	// whose hash is unchanged keep their approvals.
+	if err := d.rehashTx(ctx, tx, projectID, name, at); err != nil {
+		return store.EnvKey{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.EnvKey{}, false, mapErr(err)
@@ -739,6 +740,10 @@ UPDATE app.env_sets SET updated_at = $3, updated_by = $4::uuid
 WHERE project_id = $1::uuid AND name = $2
 `, projectID.String(), name, at, actor.String()); err != nil {
 			return store.EnvSet{}, nil, mapErr(err)
+		}
+		// A key that turns secret leaves a program's env_values.
+		if err := d.rehashTx(ctx, tx, projectID, name, at); err != nil {
+			return store.EnvSet{}, nil, err
 		}
 	}
 	// Read the view before commit so nothing can fail after the change lands.
@@ -904,6 +909,11 @@ func (d *DB) rehashTx(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, set s
 	if err != nil {
 		return err
 	}
+	plain, err := envPlain(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
+	sets := catalog.SetState{Keys: names, Plain: plain}
 	rows, err := tx.Query(ctx, `
 SELECT id::text, kind, spec, spec_hash
 FROM app.catalog_entries
@@ -924,7 +934,7 @@ WHERE project_id = $1::uuid AND kind IN ('image', 'program')
 		if err := rows.Scan(&id, &kind, &spec, &hash); err != nil {
 			return mapErr(err)
 		}
-		next, ok := rehashStored(kind, spec, set, names)
+		next, ok := rehashStored(kind, spec, set, sets)
 		if !ok || next == hash {
 			continue
 		}
@@ -947,10 +957,37 @@ UPDATE app.catalog_entries SET spec_hash = $2, updated_at = $3 WHERE id = $1::uu
 	return nil
 }
 
-// rehashStored is the entry's spec_hash with the sets' current key names, for
-// an image or program entry that references set (api-v1 v1.22 item 2). ok is
-// false when the entry does not reference set or its spec does not parse.
-func rehashStored(kind string, spec []byte, set string, names map[string][]string) (string, bool) {
+// envPlain is the project's env values with is_secret false, per set
+// (api-v1 v1.22 amendment 1). Secret values are never read here.
+func envPlain(ctx context.Context, q queryer, projectID uuid.UUID) (map[string]map[string]string, error) {
+	rows, err := q.Query(ctx, `
+SELECT set_name, key, COALESCE(value, '')
+FROM app.env_values
+WHERE project_id = $1::uuid AND NOT is_secret
+`, projectID.String())
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := map[string]map[string]string{}
+	for rows.Next() {
+		var set, key, value string
+		if err := rows.Scan(&set, &key, &value); err != nil {
+			return nil, mapErr(err)
+		}
+		if out[set] == nil {
+			out[set] = map[string]string{}
+		}
+		out[set][key] = value
+	}
+	return out, mapErr(rows.Err())
+}
+
+// rehashStored is the entry's spec_hash with the sets' current state, for an
+// image or program entry that references set (api-v1 v1.22 item 2 and
+// amendment 1; images hash key names only). ok is false when the entry does
+// not reference set or its spec does not parse.
+func rehashStored(kind string, spec []byte, set string, sets catalog.SetState) (string, bool) {
 	if kind == "program" {
 		var ps store.ProgramSpec
 		if err := json.Unmarshal(spec, &ps); err != nil {
@@ -962,13 +999,13 @@ func rehashStored(kind string, spec []byte, set string, names map[string][]strin
 		if !refs.Uses(set) {
 			return "", false
 		}
-		return catalog.ProgramHash(prog, catalog.KeyDigests(refs.SetNames(), names)), true
+		return catalog.ProgramHash(prog, sets), true
 	}
 	img, err := catalog.ParseStored(spec)
 	if err != nil || !catalog.ReferencesSet(img, set) {
 		return "", false
 	}
-	return catalog.ImageHash(img, catalog.KeyDigests(catalog.ReferencedSets(img), names)), true
+	return catalog.ImageHash(img, catalog.KeyDigests(catalog.ReferencedSets(img), sets.Keys)), true
 }
 
 func (d *DB) ListEnvMaterial(ctx context.Context, projectID uuid.UUID, name string) ([]store.EnvMaterial, error) {

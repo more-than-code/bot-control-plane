@@ -196,15 +196,18 @@ type CatalogApproval struct {
 	Env            map[string]string `json:"env"`
 	// EnvSets and SecretEnv are the references (api-v1 v1.22 item 6), never
 	// a resolved value.
-	EnvSets     []string          `json:"env_sets"`
-	SecretEnv   map[string]string `json:"secret_env"`
-	RunAs       string            `json:"run_as"`
-	Shell       bool              `json:"shell"`
-	Status      string            `json:"status"`
-	RequestedBy uuid.UUID         `json:"requested_by"`
-	RequestedAt time.Time         `json:"requested_at"`
-	ApprovedBy  *uuid.UUID        `json:"approved_by"`
-	ApprovedAt  *time.Time        `json:"approved_at"`
+	EnvSets   []string          `json:"env_sets"`
+	SecretEnv map[string]string `json:"secret_env"`
+	// EnvSetValues is filled by the API (api-v1 v1.22 amendment 1): plain
+	// taking-part keys and values per set of a program entry; {} otherwise.
+	EnvSetValues map[string]map[string]string `json:"env_set_values"`
+	RunAs        string                       `json:"run_as"`
+	Shell        bool                         `json:"shell"`
+	Status       string                       `json:"status"`
+	RequestedBy  uuid.UUID                    `json:"requested_by"`
+	RequestedAt  time.Time                    `json:"requested_at"`
+	ApprovedBy   *uuid.UUID                   `json:"approved_by"`
+	ApprovedAt   *time.Time                   `json:"approved_at"`
 }
 
 // CatalogConfirmation is a single-use delegated action, stored by token hash.

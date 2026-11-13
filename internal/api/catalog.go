@@ -446,6 +446,10 @@ func (s *Server) handleCatalogApprovals(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, err)
 		return
 	}
+	if err := s.withSetValues(r.Context(), items); err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeOK(w, http.StatusOK, map[string]any{"items": items})
 }
 
@@ -484,7 +488,12 @@ func (s *Server) handleCatalogApprove(w http.ResponseWriter, r *http.Request) {
 		Action:    audit.ActionCatalogApprove,
 		Detail:    map[string]any{"entry_id": entryID.String(), "spec_hash": body.SpecHash},
 	})
-	writeOK(w, http.StatusOK, item)
+	one := []store.CatalogApproval{item}
+	if err := s.withSetValues(r.Context(), one); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, one[0])
 }
 
 func (s *Server) handleCatalogApprovalDelete(w http.ResponseWriter, r *http.Request) {
@@ -655,7 +664,12 @@ func (s *Server) buildProgram(w http.ResponseWriter, r *http.Request, projectID 
 		s.writeField(w, err)
 		return catalog.Program{}, "", false
 	}
-	return prog, catalog.ProgramHash(prog, catalog.KeyDigests(prog.EnvRefs().SetNames(), names)), true
+	sets, err := s.programSetState(r.Context(), projectID, prog.EnvRefs())
+	if err != nil {
+		s.fail(w, err)
+		return catalog.Program{}, "", false
+	}
+	return prog, catalog.ProgramHash(prog, sets), true
 }
 
 func (s *Server) writeField(w http.ResponseWriter, err error) {

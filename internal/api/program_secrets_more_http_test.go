@@ -48,7 +48,7 @@ func TestProgramEnvSetsOnlyKeyDelete(t *testing.T) {
 		Dir: "/home/joe/app", Exec: "gh", Args: []string{"api", "user"}, RunAs: "joe",
 		Env: map[string]string{}, EnvSets: []string{"gh"}, SecretEnv: map[string]string{}, Restart: "on-failure",
 	}
-	want := catalog.ProgramHash(prog, map[string]string{"gh": catalog.EnvKeyDigest([]string{"GH_TOKEN"})})
+	want := catalog.ProgramHash(prog, catalog.SetState{Keys: map[string][]string{"gh": {"GH_TOKEN"}}})
 	if got == hash || got != want {
 		t.Fatalf("hash after key delete %v, was %s, want %s", got, hash, want)
 	}

@@ -76,38 +76,100 @@ func TestProgramEnvSetRules(t *testing.T) {
 	}
 }
 
-// api-v1 v1.22 item 2: env_keys enters the program hash only when a set is
-// referenced; values never do.
+// api-v1 v1.22 item 2 and amendment 1: env_keys and env_values enter the
+// program hash only when a set is referenced; secret values never do.
 func TestProgramHashEnvKeys(t *testing.T) {
 	base := Program{
 		Dir: "/srv/app", Exec: "gh", Args: []string{"api", "user"}, RunAs: "joe",
 		Env: map[string]string{"A": "1"}, EnvSets: []string{}, SecretEnv: map[string]string{}, Restart: "on-failure",
 	}
-	if ProgramHash(base, map[string]string{"gh": "x"}) != SpecHash(base) {
+	if ProgramHash(base, SetState{Keys: map[string][]string{"gh": {"X"}}}) != SpecHash(base) {
 		t.Fatal("an entry without sets must keep its v1.6 hash")
 	}
 	withSets := base
 	withSets.EnvSets = []string{"gh"}
 	withSets.SecretEnv = map[string]string{"PGPASSWORD": "db.DB_PASSWORD"}
-	digests := map[string]string{"gh": EnvKeyDigest([]string{"GH_TOKEN"}), "db": EnvKeyDigest([]string{"DB_PASSWORD"})}
-	canon := `{"env_keys":{"db":"` + digests["db"] + `","gh":"` + digests["gh"] + `"},"kind":"program","spec":{"args":["api","user"],"dir":"/srv/app","env":{"A":"1"},"env_sets":["gh"],"exec":"gh","port":null,"restart":"on-failure","run_as":"joe","secret_env":{"PGPASSWORD":"db.DB_PASSWORD"},"shell":false}}`
-	if got := CanonicalProgram(withSets, digests); got != canon {
+	// gh: GH_TOKEN secret, GH_HOST plain. db: DB_PASSWORD secret, DB_HOST plain
+	// but not a secret_env target, so it does not take part.
+	state := SetState{
+		Keys:  map[string][]string{"gh": {"GH_HOST", "GH_TOKEN"}, "db": {"DB_HOST", "DB_PASSWORD"}},
+		Plain: map[string]map[string]string{"gh": {"GH_HOST": "github.com"}, "db": {"DB_HOST": "db1"}},
+	}
+	keys := map[string]string{"gh": EnvKeyDigest([]string{"GH_HOST", "GH_TOKEN"}), "db": EnvKeyDigest([]string{"DB_HOST", "DB_PASSWORD"})}
+	vals := map[string]string{"gh": EnvValueDigest(map[string]string{"GH_HOST": "github.com"}), "db": EnvValueDigest(nil)}
+	ghSum := sha256.Sum256([]byte("GH_HOST=github.com"))
+	if vals["gh"] != hex.EncodeToString(ghSum[:]) {
+		t.Fatal("env_values digest is sha256 of the KEY=value lines")
+	}
+	canon := `{"env_keys":{"db":"` + keys["db"] + `","gh":"` + keys["gh"] + `"},"env_values":{"db":"` + vals["db"] + `","gh":"` + vals["gh"] + `"},"kind":"program","spec":{"args":["api","user"],"dir":"/srv/app","env":{"A":"1"},"env_sets":["gh"],"exec":"gh","port":null,"restart":"on-failure","run_as":"joe","secret_env":{"PGPASSWORD":"db.DB_PASSWORD"},"shell":false}}`
+	if got := CanonicalProgram(withSets, state); got != canon {
 		t.Fatalf("canonical\n%s\nwant\n%s", got, canon)
 	}
 	sum := sha256.Sum256([]byte(canon))
-	if ProgramHash(withSets, digests) != hex.EncodeToString(sum[:]) {
+	if ProgramHash(withSets, state) != hex.EncodeToString(sum[:]) {
 		t.Fatal("hash is not sha256 of the canonical form")
 	}
-	added := map[string]string{"gh": EnvKeyDigest([]string{"GH_TOKEN", "GH_HOST"}), "db": digests["db"]}
-	if ProgramHash(withSets, added) == ProgramHash(withSets, digests) {
+	hash := ProgramHash(withSets, state)
+	added := state
+	added.Keys = map[string][]string{"gh": {"GH_HOST", "GH_TOKEN", "NEW"}, "db": state.Keys["db"]}
+	if ProgramHash(withSets, added) == hash {
 		t.Fatal("a key added to a set must change the hash")
+	}
+	plainChange := state
+	plainChange.Plain = map[string]map[string]string{"gh": {"GH_HOST": "ghe.example"}, "db": {"DB_HOST": "db1"}}
+	if ProgramHash(withSets, plainChange) == hash {
+		t.Fatal("a plain taking-part value change must change the hash")
+	}
+	notTaking := state
+	notTaking.Plain = map[string]map[string]string{"gh": {"GH_HOST": "github.com"}, "db": {"DB_HOST": "db2"}}
+	if ProgramHash(withSets, notTaking) != hash {
+		t.Fatal("a plain key that does not take part must not change the hash")
 	}
 	inline := withSets
 	inline.Env = map[string]string{"A": "2"}
-	if ProgramHash(inline, digests) == ProgramHash(withSets, digests) {
+	if ProgramHash(inline, state) == hash {
 		t.Fatal("inline env values stay in the hash")
 	}
-	if strings.Contains(CanonicalProgram(withSets, digests), "GH_TOKEN") {
-		t.Fatal("key names enter only as a digest")
+	if c := CanonicalProgram(withSets, state); strings.Contains(c, "GH_TOKEN") || strings.Contains(c, "github.com") {
+		t.Fatal("key names and values enter only as digests")
+	}
+}
+
+// api-v1 v1.22 amendment 1: which plain keys take part.
+func TestPlainTakingPart(t *testing.T) {
+	refs := EnvRefs{Sets: []string{"a"}, Secret: map[string]string{"X": "b.B1", "Y": "b.SECRET"}}
+	plain := map[string]map[string]string{"a": {"A1": "1", "A2": "2"}, "b": {"B1": "3", "B2": "4"}, "c": {"C": "5"}}
+	got := refs.PlainTakingPart(plain)
+	if len(got) != 2 || len(got["a"]) != 2 || len(got["b"]) != 1 || got["b"]["B1"] != "3" {
+		t.Fatalf("taking part %#v", got)
+	}
+}
+
+// api-v1 v1.22 amendments 2 and 3: the shared helpers.
+func TestSecretValueRules(t *testing.T) {
+	for _, k := range []string{"NODE_OPTIONS", "LD_PRELOAD", "GIT_SSH_COMMAND", "SSL_CERT_FILE", "HTTPS_PROXY", "https_proxy", "No_Proxy", "DOTNET_STARTUP_HOOKS"} {
+		if !ChangesWhatRunsSecret(k) {
+			t.Fatalf("%s not in the extended list", k)
+		}
+	}
+	for _, k := range []string{"GH_TOKEN", "HTTP_PROXY_USER", "PATHS"} {
+		if ChangesWhatRunsSecret(k) {
+			t.Fatalf("%s wrongly in the extended list", k)
+		}
+	}
+	if !LooksSecret("API_TOKEN") || !LooksSecret("db_password") || LooksSecret("GH_HOST") {
+		t.Fatal("LooksSecret")
+	}
+	// Inline env and validateEnv use the same rule.
+	if _, err := BuildProgram(ProgramInput{Command: "x", Dir: "/srv", RunAs: "joe", Env: map[string]string{"API_TOKEN": "v"}}); err == nil || err.Error() != "use secret_env" {
+		t.Fatalf("inline %v", err)
+	}
+	// The extended list is refused for secret_env on write; inline env keeps v1.6.1.
+	known := SetKeys{"s": {"V"}}
+	if _, err := BuildProgram(ProgramInput{Command: "x", Dir: "/srv", RunAs: "joe", SecretEnv: map[string]string{"GIT_SSH_COMMAND": "s.V"}, Sets: known}); err == nil || err.Error() != "this variable changes what the program runs" {
+		t.Fatalf("secret_env GIT_SSH_COMMAND %v", err)
+	}
+	if _, err := BuildProgram(ProgramInput{Command: "x", Dir: "/srv", RunAs: "joe", Env: map[string]string{"GIT_SSH_COMMAND": "ssh -i k"}}); err != nil {
+		t.Fatalf("inline GIT_SSH_COMMAND must stay allowed: %v", err)
 	}
 }

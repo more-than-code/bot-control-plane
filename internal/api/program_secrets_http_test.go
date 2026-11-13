@@ -92,8 +92,9 @@ func TestProgramSecretsWrite(t *testing.T) {
 		Env: map[string]string{}, EnvSets: []string{"cfg"}, SecretEnv: map[string]string{"GH_TOKEN": "gh.GH_TOKEN"},
 		Restart: "on-failure",
 	}
-	want := catalog.ProgramHash(prog, map[string]string{
-		"cfg": catalog.EnvKeyDigest([]string{"GH_HOST"}), "gh": catalog.EnvKeyDigest([]string{"GH_TOKEN"}),
+	want := catalog.ProgramHash(prog, catalog.SetState{
+		Keys:  map[string][]string{"cfg": {"GH_HOST"}, "gh": {"GH_TOKEN"}},
+		Plain: map[string]map[string]string{"cfg": {"GH_HOST": "github.com"}},
 	})
 	if created["spec_hash"] != want {
 		t.Fatalf("spec_hash %v want %s", created["spec_hash"], want)
