@@ -283,6 +283,7 @@ WHERE id = $1::uuid
 	assertEnvKeyUpsertDelete(t, d, ctx, at)
 	assertEnvMergeCreate(t, d, ctx, at)
 	assertEnvMakeSecret(t, d, ctx, at)
+	assertProgramSecrets(t, d, ctx, at)
 }
 
 // sharedHostsIntegration is the Postgres half of spec §6: backfill shape,

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"time"
@@ -880,7 +881,7 @@ SELECT EXISTS (SELECT 1 FROM app.env_sets WHERE project_id = $1::uuid AND name =
 	if err := d.pool.QueryRow(ctx, `
 SELECT EXISTS (
     SELECT 1 FROM app.catalog_entries e
-    WHERE e.project_id = $1::uuid AND e.kind = 'image'
+    WHERE e.project_id = $1::uuid AND e.kind IN ('image', 'program')
       AND (
         COALESCE(e.spec->'env_sets', '[]'::jsonb) ? $2
         OR EXISTS (
@@ -904,9 +905,9 @@ func (d *DB) rehashTx(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, set s
 		return err
 	}
 	rows, err := tx.Query(ctx, `
-SELECT id::text, spec, spec_hash
+SELECT id::text, kind, spec, spec_hash
 FROM app.catalog_entries
-WHERE project_id = $1::uuid AND kind = 'image'
+WHERE project_id = $1::uuid AND kind IN ('image', 'program')
 `, projectID.String())
 	if err != nil {
 		return mapErr(err)
@@ -918,21 +919,13 @@ WHERE project_id = $1::uuid AND kind = 'image'
 	}
 	var hits []hit
 	for rows.Next() {
-		var id, hash string
+		var id, kind, hash string
 		var spec []byte
-		if err := rows.Scan(&id, &spec, &hash); err != nil {
+		if err := rows.Scan(&id, &kind, &spec, &hash); err != nil {
 			return mapErr(err)
 		}
-		img, err := catalog.ParseStored(spec)
-		if err != nil || !catalog.ReferencesSet(img, set) {
-			continue
-		}
-		digests := map[string]string{}
-		for _, ref := range catalog.ReferencedSets(img) {
-			digests[ref] = catalog.EnvKeyDigest(names[ref])
-		}
-		next := catalog.ImageHash(img, digests)
-		if next == hash {
+		next, ok := rehashStored(kind, spec, set, names)
+		if !ok || next == hash {
 			continue
 		}
 		hits = append(hits, hit{id: id, next: next})
@@ -952,6 +945,38 @@ UPDATE app.catalog_entries SET spec_hash = $2, updated_at = $3 WHERE id = $1::uu
 		}
 	}
 	return nil
+}
+
+// rehashStored is the entry's spec_hash with the sets' current key names, for
+// an image or program entry that references set (api-v1 v1.22 item 2). ok is
+// false when the entry does not reference set or its spec does not parse.
+func rehashStored(kind string, spec []byte, set string, names map[string][]string) (string, bool) {
+	if kind == "program" {
+		var ps store.ProgramSpec
+		if err := json.Unmarshal(spec, &ps); err != nil {
+			return "", false
+		}
+		ps.Norm()
+		prog := ps.Program()
+		refs := prog.EnvRefs()
+		if !refs.Uses(set) {
+			return "", false
+		}
+		return catalog.ProgramHash(prog, keyDigests(refs.SetNames(), names)), true
+	}
+	img, err := catalog.ParseStored(spec)
+	if err != nil || !catalog.ReferencesSet(img, set) {
+		return "", false
+	}
+	return catalog.ImageHash(img, keyDigests(catalog.ReferencedSets(img), names)), true
+}
+
+func keyDigests(sets []string, names map[string][]string) map[string]string {
+	digests := map[string]string{}
+	for _, ref := range sets {
+		digests[ref] = catalog.EnvKeyDigest(names[ref])
+	}
+	return digests
 }
 
 func (d *DB) ListEnvMaterial(ctx context.Context, projectID uuid.UUID, name string) ([]store.EnvMaterial, error) {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
+	"github.com/more-than-code/bot-api-server/internal/agentws"
 	"github.com/more-than-code/bot-api-server/internal/secret"
 	"github.com/more-than-code/bot-api-server/internal/store"
 )
@@ -32,7 +33,10 @@ func TestCatalogValidation(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
 	status, env = w.do(tok, http.MethodPost, path, `{"kind":"image","command":"pnpm","shell":false,"dir":"/home/joe/app","run_as":"joe"}`)
 	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "invalid json")
-	status, env = w.do(tok, http.MethodPost, path, `{"kind":"program","secret_env":{"A":"b"},"command":"pnpm","shell":false,"dir":"/home/joe/app","run_as":"joe"}`)
+	// api-v1 v1.22 item 1: secret_env is a program field; the reference is then validated.
+	status, env = w.do(tok, http.MethodPost, path, `{"kind":"program","name":"a","secret_env":{"A":"b"},"command":"pnpm","shell":false,"dir":"/home/joe/app","run_as":"joe"}`)
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "invalid secret_env")
+	status, env = w.do(tok, http.MethodPost, path, `{"kind":"image","secret_env":{"A":"b"}}`)
 	mustHTTP(t, status, env, http.StatusNotImplemented, "not_implemented", "not implemented")
 	status, env = w.do(tok, http.MethodPost, path, `{"command":"pnpm","shell":false,"dir":"/home/joe/app","run_as":"joe","name":"a"}`)
 	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "kind must be program")
@@ -690,7 +694,7 @@ func TestCatalogOutcomes(t *testing.T) {
 		return fn(msg)
 	})
 	status, env := postAct(w, tok, project, "tra", "run", host, "out-1", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
+	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", agentws.PolicyDenied)
 	started := taskLog.raw(0)
 	startSpec, _ := started["spec"].(map[string]any)
 	startEnv, _ := startSpec["env"].(map[string]any)
@@ -701,12 +705,12 @@ func TestCatalogOutcomes(t *testing.T) {
 		t.Fatalf("tasks %d", taskLog.count())
 	}
 	status, env = postAct(w, tok, project, "tra", "run", host, "out-1", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
+	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", agentws.PolicyDenied)
 	if taskLog.count() != 1 {
 		t.Fatalf("error replay dispatched %d", taskLog.count())
 	}
 	status, env = postAct(w, tok, project, "tra", "run", host, "out-2", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
+	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", agentws.PolicyDenied)
 	status, env = postAct(w, tok, project, "tra", "run", host, "out-3", nil)
 	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "bad request")
 	status, env = postAct(w, tok, project, "tra", "run", host, "out-4", nil)

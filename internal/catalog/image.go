@@ -193,18 +193,8 @@ func BuildImage(name string, raw []byte, sets SetKeys, files map[string]struct{}
 	if err != nil {
 		return Image{}, err
 	}
-	if len(envSets) > maxEnvSets {
-		return Image{}, fieldErr("invalid env_sets")
-	}
-	seenSet := map[string]bool{}
-	for _, set := range envSets {
-		if !ValidName(set) || seenSet[set] {
-			return Image{}, fieldErr("invalid env_sets")
-		}
-		seenSet[set] = true
-		if _, ok := sets[set]; !ok {
-			return Image{}, fieldErr("unknown env set")
-		}
+	if err := validateEnvSets(envSets, sets); err != nil {
+		return Image{}, err
 	}
 	secretEnv, err := decodeStringMap(fields, "secret_env")
 	if err != nil {
@@ -354,37 +344,12 @@ func ShortTimeoutSec() int {
 
 // ReferencedSets is the sorted union of env_sets and secret_env set names.
 func ReferencedSets(img Image) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	add := func(set string) {
-		if set == "" {
-			return
-		}
-		if _, ok := seen[set]; ok {
-			return
-		}
-		seen[set] = struct{}{}
-		out = append(out, set)
-	}
-	for _, set := range img.EnvSets {
-		add(set)
-	}
-	for _, ref := range img.SecretEnv {
-		set, _, _ := strings.Cut(ref, ".")
-		add(set)
-	}
-	sortStrings(out)
-	return out
+	return img.EnvRefs().SetNames()
 }
 
 // ReferencesSet reports whether the entry's hash depends on set.
 func ReferencesSet(img Image, set string) bool {
-	for _, name := range ReferencedSets(img) {
-		if name == set {
-			return true
-		}
-	}
-	return false
+	return img.EnvRefs().Uses(set)
 }
 
 // EnvKeyDigest is sha256 of the sorted key names joined by newlines.
@@ -405,7 +370,12 @@ func ImageHash(img Image, keyDigests map[string]string) string {
 
 // CanonicalImage is the hash input: kind, spec, and env_keys, sorted keys, no whitespace.
 func CanonicalImage(img Image, keyDigests map[string]string) string {
-	sets := ReferencedSets(img)
+	return `{"env_keys":` + envKeysJSON(ReferencedSets(img), keyDigests) + `,"kind":"image","spec":` + hashSpecJSON(img) + `}`
+}
+
+// envKeysJSON is the env_keys hash object for the referenced sets. A missing
+// digest is the empty-key digest.
+func envKeysJSON(sets []string, keyDigests map[string]string) string {
 	var ek strings.Builder
 	ek.WriteByte('{')
 	for i, set := range sets {
@@ -424,7 +394,7 @@ func CanonicalImage(img Image, keyDigests map[string]string) string {
 		ek.WriteString(jsonString(d))
 	}
 	ek.WriteByte('}')
-	return `{"env_keys":` + ek.String() + `,"kind":"image","spec":` + hashSpecJSON(img) + `}`
+	return ek.String()
 }
 
 // SpecJSON is the stored ImageSpec object. An empty files list is [].

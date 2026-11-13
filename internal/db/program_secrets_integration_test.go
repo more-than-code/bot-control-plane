@@ -1,0 +1,120 @@
+package db
+
+import (
+	"bytes"
+	"context"
+	"testing"
+	"time"
+
+	"github.com/more-than-code/bot-api-server/internal/catalog"
+	"github.com/more-than-code/bot-api-server/internal/seal"
+	"github.com/more-than-code/bot-api-server/internal/store"
+)
+
+// assertProgramSecrets is the Postgres half of api-v1 v1.22 items 2 and 6,
+// and the HostPrograms fields of v1.22 item 5 and v1.23 item 1.
+func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time) {
+	t.Helper()
+	owner := catalogUser(t, d, ctx, "progsec-owner", at)
+	home := catalogProject(t, d, ctx, owner.ID, "ProgSec", "progsec", at)
+	host := enrollHostDB(t, d, ctx, home.ID, owner.ID, "progsec-host", at)
+	box, err := seal.New(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := func(key, value string) store.EnvSecret {
+		t.Helper()
+		nonce, ct, err := box.Seal(seal.EnvAAD(home.ID.String(), "gh", key), []byte(value))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store.EnvSecret{Key: key, Nonce: nonce, Ciphertext: ct, KeyVersion: seal.KeyVersion}
+	}
+	if _, err := d.PutEnvSet(ctx, home.ID, "gh", []store.EnvSecret{sealed("GH_TOKEN", "db-prog-secret-1")}, owner.ID, at, true); err != nil {
+		t.Fatal(err)
+	}
+	prog, err := catalog.BuildProgram(catalog.ProgramInput{
+		Command: "gh api user", Dir: "/srv/app", RunAs: "joe", Env: map[string]string{"MODE": "ci"},
+		SecretEnv: map[string]string{"GH_TOKEN": "gh.GH_TOKEN"}, Sets: catalog.SetKeys{"gh": {"GH_TOKEN"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := catalog.ProgramHash(prog, map[string]string{"gh": catalog.EnvKeyDigest([]string{"GH_TOKEN"})})
+	entry, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+		Name: "gh", Spec: store.ProgramSpec{
+			Dir: prog.Dir, Exec: prog.Exec, Args: prog.Args, RunAs: prog.RunAs, Env: prog.Env,
+			EnvSets: prog.EnvSets, SecretEnv: prog.SecretEnv, Restart: prog.Restart,
+		}, SpecHash: hash, CommandDisplay: prog.Display, Actor: owner.ID, At: at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.GetCatalogEntry(ctx, home.ID, "gh")
+	if err != nil || got.Spec.SecretEnv["GH_TOKEN"] != "gh.GH_TOKEN" || got.Spec.EnvSets == nil {
+		t.Fatalf("stored spec %+v %v", got.Spec, err)
+	}
+	if err := d.DeleteEnvSet(ctx, home.ID, "gh"); err != store.ErrConflict {
+		t.Fatalf("delete of a set a program uses: %v", err)
+	}
+	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := d.ListCatalogApprovals(ctx, host.ID)
+	if err != nil || len(approvals) != 1 || approvals[0].SecretEnv["GH_TOKEN"] != "gh.GH_TOKEN" ||
+		approvals[0].EnvSets == nil || approvals[0].Env["MODE"] != "ci" {
+		t.Fatalf("approval view %+v %v", approvals, err)
+	}
+	if _, err := d.PutEnvSet(ctx, home.ID, "gh", []store.EnvSecret{sealed("GH_TOKEN", "db-prog-secret-2")}, owner.ID, at.Add(time.Second), true); err != nil {
+		t.Fatal(err)
+	}
+	same, err := d.GetCatalogEntry(ctx, home.ID, "gh")
+	if err != nil || same.SpecHash != hash || catalogApprovalCount(t, d, ctx, entry.ID) != 1 {
+		t.Fatalf("value-only change: hash %s approvals %d %v", same.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	}
+	if _, err := d.PutEnvSet(ctx, home.ID, "gh", []store.EnvSecret{sealed("GH_TOKEN", "db-prog-secret-2"), sealed("GH_HOST", "github.com")}, owner.ID, at.Add(2*time.Second), true); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := d.GetCatalogEntry(ctx, home.ID, "gh")
+	want := catalog.ProgramHash(prog, map[string]string{"gh": catalog.EnvKeyDigest([]string{"GH_TOKEN", "GH_HOST"})})
+	if err != nil || changed.SpecHash != want || catalogApprovalCount(t, d, ctx, entry.ID) != 0 {
+		t.Fatalf("key add: hash %s want %s approvals %d %v", changed.SpecHash, want, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	}
+
+	// An entry without sets is untouched by a rehash of any set.
+	plain, err := catalog.BuildProgram(catalog.ProgramInput{Command: "pnpm run dev", Dir: "/srv/app", RunAs: "joe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+		Name: "plain", Spec: store.ProgramSpec{Dir: plain.Dir, Exec: plain.Exec, Args: plain.Args, RunAs: plain.RunAs, Restart: plain.Restart},
+		SpecHash: catalog.SpecHash(plain), CommandDisplay: plain.Display, Actor: owner.ID, At: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(ctx, `
+UPDATE app.catalog_entries SET spec = spec - 'env_sets' - 'secret_env' WHERE project_id = $1::uuid AND name = 'plain'
+`, home.ID.String()); err != nil {
+		t.Fatal(err)
+	}
+	old, err := d.GetCatalogEntry(ctx, home.ID, "plain")
+	if err != nil || old.Spec.EnvSets == nil || old.Spec.SecretEnv == nil || old.SpecHash != catalog.SpecHash(plain) {
+		t.Fatalf("pre-v1.22 spec %+v %v", old, err)
+	}
+
+	// Hello fields round-trip through the jsonb column; absent stays null.
+	if err := d.SetHostPrograms(ctx, host.ID, &store.HostPrograms{Enabled: true, RunAs: []string{"joe"}, Secrets: true, Projects: []string{"progsec"}}); err != nil {
+		t.Fatal(err)
+	}
+	h, err := d.GetHost(ctx, host.ID)
+	if err != nil || h.Programs == nil || !h.Programs.Secrets || len(h.Programs.Projects) != 1 || h.Programs.Projects[0] != "progsec" {
+		t.Fatalf("programs %+v %v", h.Programs, err)
+	}
+	if err := d.SetHostPrograms(ctx, host.ID, &store.HostPrograms{Enabled: true, RunAs: []string{"joe"}}); err != nil {
+		t.Fatal(err)
+	}
+	h, err = d.GetHost(ctx, host.ID)
+	if err != nil || h.Programs.Secrets || h.Programs.Projects != nil {
+		t.Fatalf("older agent programs %+v %v", h.Programs, err)
+	}
+}

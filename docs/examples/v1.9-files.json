@@ -82,9 +82,12 @@
     "images": true,
     "logging": false,
     "policy_hash": "abc",
+    "project_listed": null,
+    "projects": null,
     "run_as": [
       "joe"
-    ]
+    ],
+    "secrets": false
   },
   "list_files": {
     "code": "ok",

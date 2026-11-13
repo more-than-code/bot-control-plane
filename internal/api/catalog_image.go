@@ -196,6 +196,9 @@ func (s *Server) imageMutate(w http.ResponseWriter, r *http.Request, action stri
 		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "bad_request", reasonNoContainers)
 		return
 	}
+	if !s.imageListed(w, r, p, projectID, host, entry, action) {
+		return
+	}
 	if s.hostStatus(host) != "online" {
 		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "unavailable", "host unavailable")
 		return
@@ -259,6 +262,9 @@ func (s *Server) finishImageShort(w http.ResponseWriter, r *http.Request, p prin
 		writeCode(w, "bad_request", reasonNoContainers)
 		return
 	}
+	if !s.imageListed(w, r, p, projectID, host, entry, action) {
+		return
+	}
 	if s.hostStatus(host) != "online" {
 		writeCode(w, "unavailable", "host unavailable")
 		return
@@ -316,6 +322,9 @@ func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principa
 	}
 	if !containersReady(host) {
 		s.imageDeny(w, r, p, c.ProjectID, host.ID, host.Name, entry.Name, c.Action, "bad_request", reasonNoContainers)
+		return
+	}
+	if !s.imageListed(w, r, p, c.ProjectID, host, entry, c.Action) {
 		return
 	}
 	if s.hostStatus(host) != "online" {
@@ -666,7 +675,7 @@ func (s *Server) imageTask(ctx context.Context, projectID uuid.UUID, host store.
 	}
 	switch action {
 	case "deploy", "rollback":
-		env, secretKeys, err := s.mergeEnv(ctx, projectID, img)
+		env, secretKeys, err := s.mergeEnv(ctx, projectID, img.EnvRefs())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -728,7 +737,7 @@ func (s *Server) redactValues(ctx context.Context, projectID uuid.UUID, img cata
 	var other []string
 	failed := false
 	if s.Secrets != nil {
-		envSecrets, envFailed := s.redactEnvValues(ctx, projectID, img)
+		envSecrets, envFailed := s.redactEnvValues(ctx, projectID, img.EnvRefs())
 		envVals = append(envVals, envSecrets...)
 		failed = envFailed
 		reg, err := s.registryAuth(ctx, projectID, img.RegistryHost)
@@ -754,10 +763,10 @@ func (s *Server) redactValues(ctx context.Context, projectID uuid.UUID, img cata
 // replaces an earlier key. A winning secret that does not decrypt is omitted.
 // A store error skips that set and keeps values already opened. Deploy still
 // uses mergeEnv, which fails closed.
-func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, img catalog.Image) ([]string, bool) {
+func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs) ([]string, bool) {
 	out := map[string]string{}
 	failed := false
-	for _, set := range img.EnvSets {
+	for _, set := range refs.Sets {
 		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
 		if err != nil {
 			continue
@@ -778,7 +787,7 @@ func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, img c
 			out[m.Key] = val
 		}
 	}
-	for key, ref := range img.SecretEnv {
+	for key, ref := range refs.Secret {
 		set, name, ok := strings.Cut(ref, ".")
 		if !ok {
 			failed = true
@@ -816,7 +825,7 @@ func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, img c
 			delete(out, key)
 		}
 	}
-	for key := range img.Env {
+	for key := range refs.Inline {
 		delete(out, key)
 	}
 	secrets := make([]string, 0, len(out))
@@ -829,11 +838,12 @@ func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, img c
 // mergeEnv resolves env sets in order, then secret_env, then inline env.
 // The returned names are the keys whose winning value came from an env-set
 // key with is_secret, and which inline env did not override. The slice is
-// sorted and never nil.
-func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, img catalog.Image) (map[string]string, []string, error) {
+// sorted and never nil. Image deploys and program Runs share it (api-v1 v1.22
+// item 3).
+func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs) (map[string]string, []string, error) {
 	out := map[string]string{}
 	secret := map[string]bool{}
-	for _, set := range img.EnvSets {
+	for _, set := range refs.Sets {
 		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
 		if err != nil {
 			return nil, nil, err
@@ -847,7 +857,7 @@ func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, img catalog.
 			secret[m.Key] = m.IsSecret
 		}
 	}
-	for key, ref := range img.SecretEnv {
+	for key, ref := range refs.Secret {
 		set, name, ok := strings.Cut(ref, ".")
 		if !ok {
 			return nil, nil, errDecrypt
@@ -874,7 +884,7 @@ func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, img catalog.
 			return nil, nil, errDecrypt
 		}
 	}
-	for key, val := range img.Env {
+	for key, val := range refs.Inline {
 		out[key] = val
 		secret[key] = false
 	}
@@ -952,8 +962,18 @@ func policySupported(host store.Host) bool {
 // A plain winning value, a missing secret_env reference, and a registry
 // credential do not count. Inline env clears the flag.
 func (s *Server) logsNeedKey(ctx context.Context, projectID uuid.UUID, img catalog.Image) (bool, error) {
+	needs, err := s.envNeedsKey(ctx, projectID, img.EnvRefs())
+	if err != nil || needs {
+		return needs, err
+	}
+	return s.filesNeedKey(ctx, projectID, img)
+}
+
+// envNeedsKey reports whether a winning value of the merge comes from an
+// env-set key marked secret, so redacting output needs the secrets key.
+func (s *Server) envNeedsKey(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs) (bool, error) {
 	secret := map[string]bool{}
-	for _, set := range img.EnvSets {
+	for _, set := range refs.Sets {
 		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
 		if err != nil {
 			return false, err
@@ -962,7 +982,7 @@ func (s *Server) logsNeedKey(ctx context.Context, projectID uuid.UUID, img catal
 			secret[m.Key] = m.IsSecret
 		}
 	}
-	for key, ref := range img.SecretEnv {
+	for key, ref := range refs.Secret {
 		set, name, ok := strings.Cut(ref, ".")
 		if !ok {
 			continue
@@ -979,7 +999,7 @@ func (s *Server) logsNeedKey(ctx context.Context, projectID uuid.UUID, img catal
 			break
 		}
 	}
-	for key := range img.Env {
+	for key := range refs.Inline {
 		secret[key] = false
 	}
 	for _, isSecret := range secret {
@@ -987,7 +1007,7 @@ func (s *Server) logsNeedKey(ctx context.Context, projectID uuid.UUID, img catal
 			return true, nil
 		}
 	}
-	return s.filesNeedKey(ctx, projectID, img)
+	return false, nil
 }
 
 func (s *Server) filesNeedKey(ctx context.Context, projectID uuid.UUID, img catalog.Image) (bool, error) {
@@ -1149,6 +1169,25 @@ func storedSpec(img catalog.Image, host store.Host) (map[string]any, error) {
 		delete(spec, "health_policy")
 	}
 	return spec, nil
+}
+
+// imageListed is the api-v1 v1.23 pre-check for image deploy, rollback and
+// restart: a host whose projects allowlist is known and lacks the project is
+// refused before any task. false means the response was written.
+func (s *Server) imageListed(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action string) bool {
+	if action != "deploy" && action != "rollback" && action != "restart" {
+		return true
+	}
+	msg, err := s.unlistedReason(r.Context(), host, projectID)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	if msg != "" {
+		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "forbidden", msg)
+		return false
+	}
+	return true
 }
 
 func containersReady(host store.Host) bool {

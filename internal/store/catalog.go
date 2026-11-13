@@ -2,6 +2,8 @@ package store
 
 import (
 	"encoding/json"
+
+	"github.com/more-than-code/bot-api-server/internal/catalog"
 	"reflect"
 	"regexp"
 	"time"
@@ -33,19 +35,56 @@ type HostPrograms struct {
 	Healthcheck  bool     `json:"healthcheck"`
 	Logging      bool     `json:"logging"`
 	HealthPolicy bool     `json:"health_policy"`
+	// Secrets is hello.programs.secrets (api-v1 v1.22 item 5); absent = false.
+	Secrets bool `json:"secrets"`
+	// Projects is hello.programs.projects (api-v1 v1.23 item 1): the host's
+	// runner.toml allowlist. Nil (JSON null) when the agent did not send it.
+	// The API returns it only to members of the host's owning project.
+	Projects []string `json:"projects"`
+	// ProjectListed is computed by the API for the viewing project (api-v1
+	// v1.23 item 1). It is never read from hello and nil in the store.
+	ProjectListed *bool `json:"project_listed"`
 }
 
-// ProgramSpec is the stored program document. Env and Args are never nil
-// after a write.
+// ProgramSpec is the stored program document. Env, Args, EnvSets and
+// SecretEnv are never nil after a write or a read. EnvSets and SecretEnv are
+// api-v1 v1.22 item 1; a document stored before v1.22 reads as empty.
 type ProgramSpec struct {
-	Dir     string            `json:"dir"`
-	Exec    string            `json:"exec"`
-	Args    []string          `json:"args"`
-	Shell   bool              `json:"shell"`
-	RunAs   string            `json:"run_as"`
-	Env     map[string]string `json:"env"`
-	Port    *int              `json:"port"`
-	Restart string            `json:"restart"`
+	Dir       string            `json:"dir"`
+	Exec      string            `json:"exec"`
+	Args      []string          `json:"args"`
+	Shell     bool              `json:"shell"`
+	RunAs     string            `json:"run_as"`
+	Env       map[string]string `json:"env"`
+	EnvSets   []string          `json:"env_sets"`
+	SecretEnv map[string]string `json:"secret_env"`
+	Port      *int              `json:"port"`
+	Restart   string            `json:"restart"`
+}
+
+// Norm makes Args, Env, EnvSets and SecretEnv non-nil.
+func (s *ProgramSpec) Norm() {
+	if s.Args == nil {
+		s.Args = []string{}
+	}
+	if s.Env == nil {
+		s.Env = map[string]string{}
+	}
+	if s.EnvSets == nil {
+		s.EnvSets = []string{}
+	}
+	if s.SecretEnv == nil {
+		s.SecretEnv = map[string]string{}
+	}
+}
+
+// Program is the catalog form of the stored spec, for spec_hash and env
+// resolution. Display is not stored and stays empty.
+func (s ProgramSpec) Program() catalog.Program {
+	return catalog.Program{
+		Dir: s.Dir, Exec: s.Exec, Args: s.Args, Shell: s.Shell, RunAs: s.RunAs,
+		Env: s.Env, EnvSets: s.EnvSets, SecretEnv: s.SecretEnv, Port: s.Port, Restart: s.Restart,
+	}
 }
 
 // CatalogEntry is one program the project may run. MyActions is filled by
@@ -154,13 +193,17 @@ type CatalogApproval struct {
 	Exec           string            `json:"exec"`
 	Args           []string          `json:"args"`
 	Env            map[string]string `json:"env"`
-	RunAs          string            `json:"run_as"`
-	Shell          bool              `json:"shell"`
-	Status         string            `json:"status"`
-	RequestedBy    uuid.UUID         `json:"requested_by"`
-	RequestedAt    time.Time         `json:"requested_at"`
-	ApprovedBy     *uuid.UUID        `json:"approved_by"`
-	ApprovedAt     *time.Time        `json:"approved_at"`
+	// EnvSets and SecretEnv are the references (api-v1 v1.22 item 6), never
+	// a resolved value.
+	EnvSets     []string          `json:"env_sets"`
+	SecretEnv   map[string]string `json:"secret_env"`
+	RunAs       string            `json:"run_as"`
+	Shell       bool              `json:"shell"`
+	Status      string            `json:"status"`
+	RequestedBy uuid.UUID         `json:"requested_by"`
+	RequestedAt time.Time         `json:"requested_at"`
+	ApprovedBy  *uuid.UUID        `json:"approved_by"`
+	ApprovedAt  *time.Time        `json:"approved_at"`
 }
 
 // CatalogConfirmation is a single-use delegated action, stored by token hash.

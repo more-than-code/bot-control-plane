@@ -15,6 +15,7 @@ const (
 	CodeNotImplemented = "not_implemented"
 	restartOnFailure   = "on-failure"
 	restartNo          = "no"
+	maxProgramEnv      = 64
 )
 
 var (
@@ -49,17 +50,20 @@ func notImplemented(msg string) error {
 	return &FieldError{Code: CodeNotImplemented, Msg: msg}
 }
 
-// Program is a normalized program spec.
+// Program is a normalized program spec. EnvSets and SecretEnv (api-v1
+// v1.22) are non-nil after BuildProgram.
 type Program struct {
-	Dir     string
-	Exec    string
-	Args    []string
-	Shell   bool
-	RunAs   string
-	Env     map[string]string
-	Port    *int
-	Restart string
-	Display string
+	Dir       string
+	Exec      string
+	Args      []string
+	Shell     bool
+	RunAs     string
+	Env       map[string]string
+	EnvSets   []string
+	SecretEnv map[string]string
+	Port      *int
+	Restart   string
+	Display   string
 }
 
 // ProgramInput is the create and replace body after the command is split.
@@ -71,10 +75,16 @@ type ProgramInput struct {
 	Env     map[string]string
 	Port    *int
 	Restart string // empty means the default
+	// EnvSets and SecretEnv follow the image rules 6 and 7 (api-v1 v1.22).
+	// Sets holds the project's env sets and their key names.
+	EnvSets   []string
+	SecretEnv map[string]string
+	Sets      SetKeys
 }
 
-// BuildProgram applies v1.6 rules 1–9 and returns the stored spec.
-// secret_env and a non-program kind are refused by the caller (rule 10).
+// BuildProgram applies v1.6 rules 1–9, and the image env-set rules 6, 7 and
+// the 64-key merge limit (api-v1 v1.22 item 1), and returns the stored spec.
+// A non-program kind is refused by the caller (rule 10).
 func BuildProgram(in ProgramInput) (Program, error) {
 	split, err := Split(in.Command, in.Shell)
 	if err != nil {
@@ -99,6 +109,27 @@ func BuildProgram(in ProgramInput) (Program, error) {
 	if err := validateEnv(env); err != nil {
 		return Program{}, err
 	}
+	envSets := in.EnvSets
+	if envSets == nil {
+		envSets = []string{}
+	}
+	if err := validateEnvSets(envSets, in.Sets); err != nil {
+		return Program{}, err
+	}
+	secretEnv := map[string]string{}
+	for k, v := range in.SecretEnv {
+		secretEnv[k] = v
+	}
+	if len(secretEnv) > maxSecretEnv {
+		return Program{}, fieldErr("invalid secret_env")
+	}
+	if err := validateSecretEnv(secretEnv, in.Sets); err != nil {
+		return Program{}, err
+	}
+	refs := EnvRefs{Sets: envSets, Secret: secretEnv, Inline: env}
+	if mergedKeyCount(refs, in.Sets) > maxProgramEnv {
+		return Program{}, fieldErr("too many env keys")
+	}
 	if in.Port != nil && (*in.Port < 1 || *in.Port > 65535) {
 		return Program{}, fieldErr("invalid port")
 	}
@@ -113,15 +144,17 @@ func BuildProgram(in ProgramInput) (Program, error) {
 		split.Args = []string{}
 	}
 	return Program{
-		Dir:     in.Dir,
-		Exec:    split.Exec,
-		Args:    split.Args,
-		Shell:   split.Shell,
-		RunAs:   in.RunAs,
-		Env:     env,
-		Port:    in.Port,
-		Restart: restart,
-		Display: split.Display,
+		Dir:       in.Dir,
+		Exec:      split.Exec,
+		Args:      split.Args,
+		Shell:     split.Shell,
+		RunAs:     in.RunAs,
+		Env:       env,
+		EnvSets:   envSets,
+		SecretEnv: secretEnv,
+		Port:      in.Port,
+		Restart:   restart,
+		Display:   split.Display,
 	}, nil
 }
 
@@ -233,7 +266,7 @@ func ValidateEnvValue(value string) error {
 }
 
 func validateEnv(env map[string]string) error {
-	if len(env) > 64 {
+	if len(env) > maxProgramEnv {
 		return fieldErr("too many env keys")
 	}
 	for k, v := range env {
@@ -282,8 +315,27 @@ func ValidIdempotencyKey(key string) bool {
 	return idemKeyRe.MatchString(key)
 }
 
-// Canonical is the spec_hash input: {"kind","spec"} with sorted keys and no whitespace.
+// Canonical is the v1.6 spec_hash input: {"kind","spec"} with sorted keys and
+// no whitespace. It is the whole input for an entry without env sets.
 func Canonical(p Program) string {
+	return `{"kind":"program","spec":` + programSpecJSON(p, false) + `}`
+}
+
+// CanonicalProgram is the spec_hash input (api-v1 v1.22 item 2). An entry
+// that references an env set adds env_sets and secret_env to spec, and
+// env_keys {<set>: EnvKeyDigest} beside it, as images do. An entry without
+// sets keeps the v1.6 input, so its hash and host approvals do not change.
+// Env-set values never enter the hash; inline env values do.
+func CanonicalProgram(p Program, keyDigests map[string]string) string {
+	refs := p.EnvRefs()
+	if !refs.Any() {
+		return Canonical(p)
+	}
+	return `{"env_keys":` + envKeysJSON(refs.SetNames(), keyDigests) +
+		`,"kind":"program","spec":` + programSpecJSON(p, true) + `}`
+}
+
+func programSpecJSON(p Program, withRefs bool) string {
 	envKeys := make([]string, 0, len(p.Env))
 	for k := range p.Env {
 		envKeys = append(envKeys, k)
@@ -317,19 +369,37 @@ func Canonical(p Program) string {
 	if p.Shell {
 		shell = "true"
 	}
-	return `{"kind":"program","spec":{"args":` + args.String() +
+	if !withRefs {
+		return `{"args":` + args.String() +
+			`,"dir":` + jsonString(p.Dir) +
+			`,"env":` + env.String() +
+			`,"exec":` + jsonString(p.Exec) +
+			`,"port":` + port +
+			`,"restart":` + jsonString(p.Restart) +
+			`,"run_as":` + jsonString(p.RunAs) +
+			`,"shell":` + shell + `}`
+	}
+	return `{"args":` + args.String() +
 		`,"dir":` + jsonString(p.Dir) +
 		`,"env":` + env.String() +
+		`,"env_sets":` + stringArrayJSON(p.EnvSets) +
 		`,"exec":` + jsonString(p.Exec) +
 		`,"port":` + port +
 		`,"restart":` + jsonString(p.Restart) +
 		`,"run_as":` + jsonString(p.RunAs) +
-		`,"shell":` + shell + `}}`
+		`,"secret_env":` + stringMapJSON(p.SecretEnv) +
+		`,"shell":` + shell + `}`
 }
 
-// SpecHash is the lowercase hex SHA-256 of Canonical.
+// SpecHash is the spec_hash of a program without env sets (Canonical).
 func SpecHash(p Program) string {
-	sum := sha256.Sum256([]byte(Canonical(p)))
+	return ProgramHash(p, nil)
+}
+
+// ProgramHash is the program spec_hash. keyDigests maps a referenced set to
+// EnvKeyDigest; a missing digest is the empty-key digest.
+func ProgramHash(p Program, keyDigests map[string]string) string {
+	sum := sha256.Sum256([]byte(CanonicalProgram(p, keyDigests)))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -342,10 +412,11 @@ func jsonString(s string) string {
 }
 
 // RejectKind reports rule 10. A missing kind is not this error.
-// kind image is accepted. A program body that carries top-level secret_env
-// is still not implemented. Image files are a spec field, not a kind.
+// kind image is accepted. Top-level secret_env is a program field (api-v1
+// v1.22 item 1); on any other body it is still not implemented. Image files
+// are a spec field, not a kind.
 func RejectKind(kind string, secretEnv bool) error {
-	if secretEnv || (kind != "" && kind != "program" && kind != "image") {
+	if (secretEnv && kind != "program") || (kind != "" && kind != "program" && kind != "image") {
 		return notImplemented("not implemented")
 	}
 	return nil

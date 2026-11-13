@@ -3,8 +3,10 @@ package api
 import (
 	"net/http"
 	"regexp"
+	"slices"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/more-than-code/bot-api-server/internal/audit"
 	"github.com/more-than-code/bot-api-server/internal/authz"
 	"github.com/more-than-code/bot-api-server/internal/secret"
@@ -165,8 +167,14 @@ func (s *Server) handleHostList(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	viewer, err := s.Store.GetProject(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	for i := range items {
 		items[i].Status = s.hostStatus(items[i])
+		items[i] = projectsView(items[i], id, viewer.Slug)
 	}
 	writeList(w, items, next)
 }
@@ -182,7 +190,61 @@ func (s *Server) handleHostGet(w http.ResponseWriter, r *http.Request) {
 	}
 	host = withRelation(host, rel)
 	host.Status = s.hostStatus(host)
-	writeOK(w, http.StatusOK, host)
+	viewer, slug, err := s.hostViewer(r, host, rel)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, projectsView(host, viewer, slug))
+}
+
+// hostViewer is the project whose view GET /v1/hosts/{id} shows: the owning
+// project for its members, or the caller's one sharing project. A caller in
+// several sharing projects gets uuid.Nil, so project_listed stays null.
+func (s *Server) hostViewer(r *http.Request, host store.Host, rel authz.Relation) (uuid.UUID, string, error) {
+	viewer := uuid.Nil
+	switch rel.Kind {
+	case authz.RelOwner:
+		viewer = host.ProjectID
+	case authz.RelShare:
+		for _, sh := range rel.Shares {
+			if viewer != uuid.Nil && sh.ProjectID != viewer {
+				return uuid.Nil, "", nil
+			}
+			viewer = sh.ProjectID
+		}
+	}
+	if viewer == uuid.Nil {
+		return uuid.Nil, "", nil
+	}
+	project, err := s.Store.GetProject(r.Context(), viewer)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+	return viewer, project.Slug, nil
+}
+
+// projectsView applies api-v1 v1.23 item 1 for the viewing project: the
+// projects allowlist only for the owning project, and project_listed for the
+// viewer's slug (null when the list is unknown or the viewer is unknown).
+// Programs is copied, never changed in place.
+func projectsView(h store.Host, viewer uuid.UUID, slug string) store.Host {
+	if h.Programs == nil {
+		return h
+	}
+	cp := *h.Programs
+	cp.ProjectListed = nil
+	if cp.Projects != nil && viewer != uuid.Nil {
+		listed := slices.Contains(cp.Projects, slug)
+		cp.ProjectListed = &listed
+	}
+	if viewer == uuid.Nil || viewer != h.ProjectID {
+		cp.Projects = nil
+	} else if cp.Projects != nil {
+		cp.Projects = append([]string{}, cp.Projects...)
+	}
+	h.Programs = &cp
+	return h
 }
 
 func (s *Server) handleHostRevoke(w http.ResponseWriter, r *http.Request) {

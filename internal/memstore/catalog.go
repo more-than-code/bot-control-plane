@@ -43,6 +43,9 @@ func clonePrograms(p *store.HostPrograms) *store.HostPrograms {
 	}
 	cp := *p
 	cp.RunAs = append([]string(nil), p.RunAs...)
+	if p.Projects != nil {
+		cp.Projects = append([]string{}, p.Projects...)
+	}
 	return &cp
 }
 
@@ -53,6 +56,13 @@ func cloneEntry(e store.CatalogEntry) store.CatalogEntry {
 		env[k] = v
 	}
 	e.Spec.Env = env
+	e.Spec.EnvSets = append([]string(nil), e.Spec.EnvSets...)
+	secret := make(map[string]string, len(e.Spec.SecretEnv))
+	for k, v := range e.Spec.SecretEnv {
+		secret[k] = v
+	}
+	e.Spec.SecretEnv = secret
+	e.Spec.Norm()
 	if e.MyActions != nil {
 		e.MyActions = append([]string(nil), e.MyActions...)
 	}
@@ -88,6 +98,13 @@ func normWrite(spec store.ProgramSpec) store.ProgramSpec {
 		spec.Env = env
 	}
 	spec.Args = append([]string(nil), spec.Args...)
+	spec.EnvSets = append([]string(nil), spec.EnvSets...)
+	secret := make(map[string]string, len(spec.SecretEnv))
+	for k, v := range spec.SecretEnv {
+		secret[k] = v
+	}
+	spec.SecretEnv = secret
+	spec.Norm()
 	return spec
 }
 
@@ -357,6 +374,11 @@ func (m *Mem) approvalViewLocked(a store.CatalogApproval) (store.CatalogApproval
 	a.Env = make(map[string]string, len(e.Spec.Env))
 	for k, v := range e.Spec.Env {
 		a.Env[k] = v
+	}
+	a.EnvSets = append([]string{}, e.Spec.EnvSets...)
+	a.SecretEnv = make(map[string]string, len(e.Spec.SecretEnv))
+	for k, v := range e.Spec.SecretEnv {
+		a.SecretEnv[k] = v
 	}
 	a.RunAs = e.Spec.RunAs
 	a.Shell = e.Spec.Shell

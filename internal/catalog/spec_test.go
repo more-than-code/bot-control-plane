@@ -159,8 +159,12 @@ func TestProgramFieldRules(t *testing.T) {
 	if err := RejectKind("file", false); err == nil || err.(*FieldError).Code != CodeNotImplemented {
 		t.Fatalf("file %v", err)
 	}
-	if err := RejectKind("program", true); err == nil || err.(*FieldError).Code != CodeNotImplemented {
-		t.Fatalf("secret_env %v", err)
+	// api-v1 v1.22 item 1: rule 10 no longer refuses secret_env on a program.
+	if err := RejectKind("program", true); err != nil {
+		t.Fatalf("program secret_env %v", err)
+	}
+	if err := RejectKind("image", true); err == nil || err.(*FieldError).Code != CodeNotImplemented {
+		t.Fatalf("image top-level secret_env %v", err)
 	}
 	if err := RejectKind("program", false); err != nil {
 		t.Fatal(err)

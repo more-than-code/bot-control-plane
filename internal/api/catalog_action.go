@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/more-than-code/bot-api-server/internal/audit"
 	"github.com/more-than-code/bot-api-server/internal/authz"
 	"github.com/more-than-code/bot-api-server/internal/catalog"
-	"github.com/more-than-code/bot-api-server/internal/ingest"
 	"github.com/more-than-code/bot-api-server/internal/secret"
 	"github.com/more-than-code/bot-api-server/internal/store"
 )
@@ -27,6 +27,12 @@ const (
 	reasonShell      = "shell is not allowed on this host"
 	reasonWaiting    = "waiting for the host owner's approval"
 	reasonInProgress = "request in progress"
+	reasonNoSecrets  = "this host's agent does not support program secrets"
+	// reasonProgramEnvTooLarge is api-v1 v1.22 item 4: the agent caps a
+	// program task spec at 64 KiB (agent-protocol v1.3).
+	reasonProgramEnvTooLarge = "the resolved environment is too large for one task"
+	maxProgramSpecBytes      = 64 * 1024
+	maxProgramEnvKeys        = 64
 )
 
 // catalogAct is checks 1–6 for run, stop, restart, logs, and status.
@@ -93,8 +99,13 @@ func (s *Server) catalogAct(w http.ResponseWriter, r *http.Request, p principal,
 		s.finishImageShort(w, r, p, projectID, host, entry, action, key, lines)
 		return
 	}
-	if msg := policyReason(host, entry.Spec.RunAs, entry.Spec.Exec, entry.Spec.Shell); msg != "" {
-		s.programDeny(w, r, p, projectID, host.ID, entry.Name, action, "forbidden", msg)
+	code, msg, err := s.programGate(r.Context(), projectID, host, entry, action)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if code != "" {
+		s.programDeny(w, r, p, projectID, host.ID, entry.Name, action, code, msg)
 		return
 	}
 	if s.hostStatus(host) != "online" {
@@ -206,8 +217,13 @@ func (s *Server) handleConfirmation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if msg := policyReason(host, entry.Spec.RunAs, entry.Spec.Exec, entry.Spec.Shell); msg != "" {
-		s.programDeny(w, r, p, c.ProjectID, host.ID, entry.Name, c.Action, "forbidden", msg)
+	code, msg, err := s.programGate(r.Context(), c.ProjectID, host, entry, c.Action)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if code != "" {
+		s.programDeny(w, r, p, c.ProjectID, host.ID, entry.Name, c.Action, code, msg)
 		return
 	}
 	if s.hostStatus(host) != "online" {
@@ -368,6 +384,63 @@ func policyReason(host store.Host, runAs, exec string, shell bool) string {
 	return ""
 }
 
+// programGate is every program check against the host before a task is
+// built: the v1.6 policy, then for a Run the host's projects allowlist
+// (api-v1 v1.23 item 2) and the secrets gates (v1.22 item 4). Logs of an
+// entry whose output may hold a secret need the secrets key, as for images.
+// code is empty when the action may go on.
+func (s *Server) programGate(ctx context.Context, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action string) (string, string, error) {
+	if msg := policyReason(host, entry.Spec.RunAs, entry.Spec.Exec, entry.Spec.Shell); msg != "" {
+		return "forbidden", msg, nil
+	}
+	refs := entry.Spec.Program().EnvRefs()
+	switch action {
+	case "run":
+		msg, err := s.unlistedReason(ctx, host, projectID)
+		if err != nil || msg != "" {
+			return "forbidden", msg, err
+		}
+		if !refs.Any() {
+			return "", "", nil
+		}
+		if !host.Programs.Secrets {
+			return "bad_request", reasonNoSecrets, nil
+		}
+		if s.Secrets == nil {
+			return "unavailable", errSecretsKey.Error(), nil
+		}
+	case "logs":
+		if !refs.Any() || s.Secrets != nil {
+			return "", "", nil
+		}
+		needs, err := s.envNeedsKey(ctx, projectID, refs)
+		if err != nil {
+			return "", "", err
+		}
+		if needs {
+			return "unavailable", errSecretsKey.Error(), nil
+		}
+	}
+	return "", "", nil
+}
+
+// unlistedReason is the api-v1 v1.23 pre-check: when the host reported its
+// projects allowlist and the project's slug is not in it, the refusal
+// message. An older agent (list unknown) is never refused here.
+func (s *Server) unlistedReason(ctx context.Context, host store.Host, projectID uuid.UUID) (string, error) {
+	if host.Programs == nil || host.Programs.Projects == nil {
+		return "", nil
+	}
+	project, err := s.Store.GetProject(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	if slices.Contains(host.Programs.Projects, project.Slug) {
+		return "", nil
+	}
+	return "this host's allowlist does not include project " + project.Slug, nil
+}
+
 func shellExec(exec string) bool {
 	base := exec
 	if i := strings.LastIndex(exec, "/"); i >= 0 {
@@ -457,12 +530,12 @@ func (s *Server) issueConfirmation(w http.ResponseWriter, r *http.Request, p pri
 func (s *Server) performProgram(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action string, lines int, key string, _ []byte) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	res, callErr := s.dispatchProgram(ctx, projectID, host, entry, action, lines)
+	res, forms, callErr := s.dispatchProgram(ctx, projectID, host, entry, action, lines)
 	var taskID *uuid.UUID
 	if callErr == nil && res.TaskID != uuid.Nil {
 		taskID = idPtr(res.TaskID)
 	}
-	status, body, _ := liveEnvelope(res, callErr)
+	status, body, _ := liveEnvelopeForms(res, callErr, forms)
 	if key != "" {
 		s.finishIdempotency(r.Context(), p.User.ID, key, status, body)
 	}
@@ -481,16 +554,61 @@ func (s *Server) failClaimed(w http.ResponseWriter, r *http.Request, userID uuid
 	writeJSON(w, status, body)
 }
 
-func (s *Server) dispatchProgram(ctx context.Context, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action string, lines int) (agentws.LiveResult, error) {
+// dispatchProgram builds and sends the program task. It also returns the
+// secret value forms used to redact the result lines (api-v1 v1.22 item 6).
+func (s *Server) dispatchProgram(ctx context.Context, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action string, lines int) (agentws.LiveResult, []secretForm, error) {
 	if s.Hub == nil {
-		return agentws.LiveResult{}, &agentws.CallError{Code: "error", Msg: "internal error"}
+		return agentws.LiveResult{}, nil, &agentws.CallError{Code: "error", Msg: "internal error"}
 	}
 	project, err := s.Store.GetProject(ctx, projectID)
 	if err != nil {
-		return agentws.LiveResult{}, err
+		return agentws.LiveResult{}, nil, err
 	}
 	kind, spec := programTask(project.Slug, entry, action, lines)
-	return s.Hub.Program(ctx, host, kind, spec)
+	refs := entry.Spec.Program().EnvRefs()
+	var forms []secretForm
+	if refs.Any() && action == "run" {
+		env, secretKeys, err := s.mergeEnv(ctx, projectID, refs)
+		if err != nil {
+			return agentws.LiveResult{}, nil, s.programEnvErr(err)
+		}
+		forms = envValueForms(secretValues(env, secretKeys, nil))
+		if len(env) > maxProgramEnvKeys {
+			return agentws.LiveResult{}, forms, &agentws.CallError{Code: "bad_request", Msg: "too many env keys"}
+		}
+		spec["env"] = env
+		spec["secret_keys"] = secretKeys
+		raw, err := json.Marshal(spec)
+		if err != nil {
+			return agentws.LiveResult{}, forms, err
+		}
+		if len(raw) > maxProgramSpecBytes {
+			return agentws.LiveResult{}, forms, &agentws.CallError{Code: "bad_request", Msg: reasonProgramEnvTooLarge}
+		}
+	} else if refs.Any() && s.Secrets != nil {
+		vals, failed := s.redactEnvValues(ctx, projectID, refs)
+		if failed {
+			s.logger().Error("decrypt failed")
+		}
+		forms = envValueForms(vals)
+	}
+	res, err := s.Hub.Program(ctx, host, kind, spec)
+	return res, forms, err
+}
+
+// programEnvErr maps a resolve failure to the envelope, as imageFail does.
+// No value is logged.
+func (s *Server) programEnvErr(err error) error {
+	switch {
+	case errors.Is(err, errDecrypt):
+		s.logger().Error("decrypt failed")
+		return &agentws.CallError{Code: "error", Msg: "internal error"}
+	case errors.Is(err, errSecretsKey):
+		return &agentws.CallError{Code: "unavailable", Msg: errSecretsKey.Error()}
+	case errors.Is(err, store.ErrNotFound):
+		return &agentws.CallError{Code: "bad_request", Msg: "unknown env set"}
+	}
+	return err
 }
 
 func programTask(slug string, entry store.CatalogEntry, action string, lines int) (string, map[string]any) {
@@ -650,6 +768,12 @@ func envelopeRaw(code, msg string, payload any) []byte {
 }
 
 func liveEnvelope(res agentws.LiveResult, err error) (int, []byte, string) {
+	return liveEnvelopeForms(res, err, nil)
+}
+
+// liveEnvelopeForms is liveEnvelope with the entry's secret value forms
+// redacted from result lines, before the keyword rule.
+func liveEnvelopeForms(res agentws.LiveResult, err error, forms []secretForm) (int, []byte, string) {
 	if err != nil {
 		var call *agentws.CallError
 		if errors.As(err, &call) {
@@ -659,22 +783,23 @@ func liveEnvelope(res agentws.LiveResult, err error) (int, []byte, string) {
 			}
 			var payload any
 			if call.Code == "error" && len(call.Payload) > 0 && json.Valid(call.Payload) && string(call.Payload) != "null" {
-				payload = jsonRaw{redactProgramLines(call.Payload)}
+				payload = jsonRaw{redactProgramLines(call.Payload, forms)}
 			}
 			return statusFor(call.Code), envelopeRaw(call.Code, msg, payload), call.Code
 		}
 		return http.StatusInternalServerError, envelopeRaw("error", "internal error", nil), "error"
 	}
-	payload := redactProgramLines(res.Payload)
+	payload := redactProgramLines(res.Payload, forms)
 	if len(payload) == 0 || !json.Valid(payload) {
 		payload = []byte("null")
 	}
 	return http.StatusOK, envelopeRaw("ok", "ok", jsonRaw{payload}), "ok"
 }
 
-// redactProgramLines applies the v1.0.1 cmdline redactor to each journal
-// line. Other fields are left as the agent sent them.
-func redactProgramLines(raw json.RawMessage) json.RawMessage {
+// redactProgramLines replaces each secret value form (api-v1 v1.22 item 6),
+// then applies the v1.0.1 cmdline redactor, on each journal line. Other
+// fields are left as the agent sent them.
+func redactProgramLines(raw json.RawMessage, forms []secretForm) json.RawMessage {
 	if len(raw) == 0 || !json.Valid(raw) {
 		return raw
 	}
@@ -696,7 +821,7 @@ func redactProgramLines(raw json.RawMessage) json.RawMessage {
 		if !ok {
 			continue
 		}
-		next := ingest.RedactCmdline(s)
+		next := redactExact(s, forms)
 		if next != s {
 			lines[i] = next
 			changed = true

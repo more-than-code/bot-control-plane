@@ -211,15 +211,19 @@ func rejectCode(code string) (string, string) {
 	case "busy":
 		return "unavailable", "host unavailable"
 	case "policy_denied":
-		return "forbidden", "forbidden"
+		return "forbidden", PolicyDenied
 	default:
 		return "error", "internal error"
 	}
 }
 
+// PolicyDenied is the message for an agent policy_denied (api-v1 v1.23 item
+// 3). The agent's own reason is never part of it.
+const PolicyDenied = "the host refused this under its policy (runner.toml)"
+
 func failedTask(code string, payload json.RawMessage) *CallError {
 	if code == "policy_denied" {
-		return &CallError{Code: "forbidden", Msg: "forbidden"}
+		return &CallError{Code: "forbidden", Msg: PolicyDenied}
 	}
 	return &CallError{Code: "error", Msg: code, Payload: payload}
 }

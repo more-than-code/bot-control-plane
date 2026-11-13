@@ -23,6 +23,8 @@ type catalogBody struct {
 	Dir            string            `json:"dir"`
 	RunAs          string            `json:"run_as"`
 	Env            map[string]string `json:"env"`
+	EnvSets        []string          `json:"env_sets"`
+	SecretEnv      map[string]string `json:"secret_env"`
 	Port           *int              `json:"port"`
 	Restart        string            `json:"restart"`
 	Spec           json.RawMessage   `json:"spec"`
@@ -36,6 +38,8 @@ type catalogReplaceBody struct {
 	Dir            string            `json:"dir"`
 	RunAs          string            `json:"run_as"`
 	Env            map[string]string `json:"env"`
+	EnvSets        []string          `json:"env_sets"`
+	SecretEnv      map[string]string `json:"secret_env"`
 	Port           *int              `json:"port"`
 	Restart        string            `json:"restart"`
 	Spec           json.RawMessage   `json:"spec"`
@@ -180,7 +184,7 @@ func (s *Server) handleCatalogCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Kind == "image" {
-		if programFieldsSet(body.Command, body.Dir, body.RunAs, body.Restart, body.Shell, body.Env, body.Port) {
+		if programFieldsSet(body.Command, body.Dir, body.RunAs, body.Restart, body.Shell, body.Env, body.Port) || body.EnvSets != nil || body.SecretEnv != nil {
 			writeCode(w, "bad_request", "invalid json")
 			return
 		}
@@ -199,14 +203,17 @@ func (s *Server) handleCatalogCreate(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "bad_request", "invalid name")
 		return
 	}
-	prog, ok := s.buildProgram(w, body.Command, body.Shell, body.Dir, body.RunAs, body.Env, body.Port, body.Restart)
+	prog, hash, ok := s.buildProgram(w, r, id, catalog.ProgramInput{
+		Command: body.Command, Shell: body.Shell, Dir: body.Dir, RunAs: body.RunAs, Env: body.Env,
+		Port: body.Port, Restart: body.Restart, EnvSets: body.EnvSets, SecretEnv: body.SecretEnv,
+	})
 	if !ok {
 		return
 	}
 	entry, err := s.Store.CreateCatalogEntry(r.Context(), id, store.CatalogWrite{
 		Name:           body.Name,
 		Spec:           specOf(prog),
-		SpecHash:       catalog.SpecHash(prog),
+		SpecHash:       hash,
 		CommandDisplay: prog.Display,
 		Actor:          p.User.ID,
 		At:             s.now(),
@@ -284,7 +291,7 @@ func (s *Server) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing.Kind == "image" {
-		if programFieldsSet(body.Command, body.Dir, body.RunAs, body.Restart, body.Shell, body.Env, body.Port) {
+		if programFieldsSet(body.Command, body.Dir, body.RunAs, body.Restart, body.Shell, body.Env, body.Port) || body.EnvSets != nil || body.SecretEnv != nil {
 			writeCode(w, "bad_request", "invalid json")
 			return
 		}
@@ -295,13 +302,16 @@ func (s *Server) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "bad_request", "invalid json")
 		return
 	}
-	prog, ok := s.buildProgram(w, body.Command, body.Shell, body.Dir, body.RunAs, body.Env, body.Port, body.Restart)
+	prog, hash, ok := s.buildProgram(w, r, id, catalog.ProgramInput{
+		Command: body.Command, Shell: body.Shell, Dir: body.Dir, RunAs: body.RunAs, Env: body.Env,
+		Port: body.Port, Restart: body.Restart, EnvSets: body.EnvSets, SecretEnv: body.SecretEnv,
+	})
 	if !ok {
 		return
 	}
 	old, entry, err := s.Store.ReplaceCatalogEntry(r.Context(), id, name, store.CatalogWrite{
 		Spec:           specOf(prog),
-		SpecHash:       catalog.SpecHash(prog),
+		SpecHash:       hash,
 		CommandDisplay: prog.Display,
 		Actor:          p.User.ID,
 		At:             s.now(),
@@ -628,21 +638,24 @@ func (s *Server) catalogByName(r *http.Request, projectID uuid.UUID, name string
 	return s.Store.GetCatalogEntry(r.Context(), projectID, name)
 }
 
-func (s *Server) buildProgram(w http.ResponseWriter, command string, shell bool, dir, runAs string, env map[string]string, port *int, restart string) (catalog.Program, bool) {
-	prog, err := catalog.BuildProgram(catalog.ProgramInput{
-		Command: command,
-		Shell:   shell,
-		Dir:     dir,
-		RunAs:   runAs,
-		Env:     env,
-		Port:    port,
-		Restart: restart,
-	})
+// buildProgram validates a program body against the project's env sets and
+// returns the spec and its spec_hash (api-v1 v1.22 items 1 and 2).
+func (s *Server) buildProgram(w http.ResponseWriter, r *http.Request, projectID uuid.UUID, in catalog.ProgramInput) (catalog.Program, string, bool) {
+	names, err := s.Store.ListEnvKeyNames(r.Context(), projectID)
+	if err != nil {
+		s.fail(w, err)
+		return catalog.Program{}, "", false
+	}
+	if names == nil {
+		names = map[string][]string{}
+	}
+	in.Sets = names
+	prog, err := catalog.BuildProgram(in)
 	if err != nil {
 		s.writeField(w, err)
-		return catalog.Program{}, false
+		return catalog.Program{}, "", false
 	}
-	return prog, true
+	return prog, catalog.ProgramHash(prog, refDigests(names, prog.EnvRefs().SetNames())), true
 }
 
 func (s *Server) writeField(w http.ResponseWriter, err error) {
@@ -722,10 +735,13 @@ func specOf(p catalog.Program) store.ProgramSpec {
 	if env == nil {
 		env = map[string]string{}
 	}
-	return store.ProgramSpec{
+	spec := store.ProgramSpec{
 		Dir: p.Dir, Exec: p.Exec, Args: args, Shell: p.Shell,
-		RunAs: p.RunAs, Env: env, Port: p.Port, Restart: p.Restart,
+		RunAs: p.RunAs, Env: env, EnvSets: p.EnvSets, SecretEnv: p.SecretEnv,
+		Port: p.Port, Restart: p.Restart,
 	}
+	spec.Norm()
+	return spec
 }
 
 var grantActionOrder = []string{"run", "stop", "restart", "logs", "deploy"}

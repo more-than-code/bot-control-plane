@@ -60,12 +60,14 @@ func TestParseProgramsLogging(t *testing.T) {
 }
 
 func TestPolicyDeniedMapping(t *testing.T) {
+	// api-v1 v1.23 item 3: a policy refusal names runner.toml, never the agent's reason.
+	const want = "the host refused this under its policy (runner.toml)"
 	code, msg := rejectCode("policy_denied")
-	if code != "forbidden" || msg != "forbidden" {
+	if code != "forbidden" || msg != want {
 		t.Fatalf("reject %s %s", code, msg)
 	}
 	denied := failedTask("policy_denied", json.RawMessage(`{"lines":["secret"]}`))
-	if denied.Code != "forbidden" || denied.Msg != "forbidden" || denied.Payload != nil {
+	if denied.Code != "forbidden" || denied.Msg != want || denied.Payload != nil {
 		t.Fatalf("failed policy %#v", denied)
 	}
 	failed := failedTask("start_failed", json.RawMessage(`{"lines":["boom"]}`))
@@ -82,6 +84,40 @@ func TestPolicyDeniedMapping(t *testing.T) {
 		got, text := rejectCode(tc.in)
 		if got != tc.code || text != tc.msg {
 			t.Fatalf("%s → %s %s", tc.in, got, text)
+		}
+	}
+}
+
+// api-v1 v1.22 item 5 and v1.23 item 1: secrets and projects from hello.
+func TestParseProgramsSecretsProjects(t *testing.T) {
+	base := `{"enabled":true,"run_as":["joe"],"allow_shell":false,"policy_hash":"abc","images":true,"docker":true}`
+	old, ok := parsePrograms(json.RawMessage(base))
+	if !ok || old == nil || old.Secrets || old.Projects != nil || old.ProjectListed != nil {
+		t.Fatalf("older agent %#v %v", old, ok)
+	}
+	on, ok := parsePrograms(json.RawMessage(base[:len(base)-1] + `,"secrets":true,"projects":["home-lab","acme"]}`))
+	if !ok || on == nil || !on.Secrets || len(on.Projects) != 2 || on.Projects[0] != "home-lab" {
+		t.Fatalf("new agent %#v %v", on, ok)
+	}
+	empty, ok := parsePrograms(json.RawMessage(base[:len(base)-1] + `,"projects":[]}`))
+	if !ok || empty.Projects == nil || len(empty.Projects) != 0 {
+		t.Fatalf("empty list must stay known %#v %v", empty, ok)
+	}
+	many := `"p0"`
+	for i := 1; i < 33; i++ {
+		many += `,"p"`
+	}
+	for _, bad := range []string{
+		`,"secrets":"yes"}`,
+		`,"projects":"home-lab"}`,
+		`,"projects":[1]}`,
+		`,"projects":[""]}`,
+		`,"projects":[` + many + `]}`,
+		`,"project_listed":true}`,
+		`,"project_listed":null}`,
+	} {
+		if _, ok := parsePrograms(json.RawMessage(base[:len(base)-1] + bad)); ok {
+			t.Fatalf("accepted %s", bad)
 		}
 	}
 }

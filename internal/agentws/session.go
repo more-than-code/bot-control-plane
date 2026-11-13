@@ -317,15 +317,36 @@ func parsePrograms(raw json.RawMessage) (*store.HostPrograms, bool) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var p store.HostPrograms
-	if err := dec.Decode(&p); err != nil {
+	// project_listed is computed by the API (api-v1 v1.23); it is not a hello
+	// field. The outer field shadows the embedded one so a hello that sends
+	// it is refused like any other unknown field.
+	var wire struct {
+		store.HostPrograms
+		ProjectListed json.RawMessage `json:"project_listed"`
+	}
+	if err := dec.Decode(&wire); err != nil || wire.ProjectListed != nil {
 		return nil, false
 	}
+	p := wire.HostPrograms
 	if p.RunAs == nil {
 		p.RunAs = []string{}
 	}
+	// agent-protocol v1.12 item 5: at most 32 project slugs.
+	if len(p.Projects) > maxHelloProjects {
+		return nil, false
+	}
+	for _, slug := range p.Projects {
+		if slug == "" || len(slug) > maxHelloSlug {
+			return nil, false
+		}
+	}
 	return &p, true
 }
+
+const (
+	maxHelloProjects = 32
+	maxHelloSlug     = 64 // the agent's slug limit
+)
 
 // servicesComplete is true when hello omits services_complete or sends true.
 // JSON null is incomplete. A non-bool never reaches here: parseFrame rejects it.

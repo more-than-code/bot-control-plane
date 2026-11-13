@@ -661,6 +661,9 @@ func scanApproval(row pgx.Row) (store.CatalogApproval, error) {
 	if a.Env == nil {
 		a.Env = map[string]string{}
 	}
+	parsed.Norm()
+	a.EnvSets = parsed.EnvSets
+	a.SecretEnv = parsed.SecretEnv
 	a.RunAs = parsed.RunAs
 	a.Shell = parsed.Shell
 	var err error
@@ -716,12 +719,7 @@ func marshalWrite(in store.CatalogWrite) ([]byte, error) {
 }
 
 func normSpec(spec *store.ProgramSpec) {
-	if spec.Args == nil {
-		spec.Args = []string{}
-	}
-	if spec.Env == nil {
-		spec.Env = map[string]string{}
-	}
+	spec.Norm()
 }
 
 func programsJSON(p *store.HostPrograms) (any, error) {

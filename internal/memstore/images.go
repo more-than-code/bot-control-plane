@@ -653,37 +653,54 @@ func (m *Mem) DeleteEnvSet(_ context.Context, projectID uuid.UUID, name string) 
 	return nil
 }
 
+// setReferencedLocked reports whether an image or program entry of the
+// project references the set (api-v1 v1.22 item 2).
 func (m *Mem) setReferencedLocked(projectID uuid.UUID, name string) bool {
 	for _, e := range m.entries {
-		if e.ProjectID != projectID || e.Kind != "image" {
+		if e.ProjectID != projectID {
 			continue
 		}
-		img, err := catalog.ParseStored(e.ImageRaw)
-		if err != nil {
-			continue
-		}
-		if catalog.ReferencesSet(img, name) {
+		if refs, ok := entryRefs(e); ok && refs.Uses(name) {
 			return true
 		}
 	}
 	return false
 }
 
+// entryRefs is the env references of an image or program entry. ok is false
+// for a stored image spec that does not parse.
+func entryRefs(e store.CatalogEntry) (catalog.EnvRefs, bool) {
+	if e.Kind != "image" {
+		return e.Spec.Program().EnvRefs(), true
+	}
+	img, err := catalog.ParseStored(e.ImageRaw)
+	if err != nil {
+		return catalog.EnvRefs{}, false
+	}
+	return img.EnvRefs(), true
+}
+
 func (m *Mem) rehashSetLocked(projectID uuid.UUID, set string, at time.Time) {
 	names := m.envKeyNamesLocked(projectID)
 	for id, e := range m.entries {
-		if e.ProjectID != projectID || e.Kind != "image" {
+		if e.ProjectID != projectID {
 			continue
 		}
-		img, err := catalog.ParseStored(e.ImageRaw)
-		if err != nil || !catalog.ReferencesSet(img, set) {
+		refs, ok := entryRefs(e)
+		if !ok || !refs.Uses(set) {
 			continue
 		}
 		digests := map[string]string{}
-		for _, ref := range catalog.ReferencedSets(img) {
+		for _, ref := range refs.SetNames() {
 			digests[ref] = catalog.EnvKeyDigest(names[ref])
 		}
-		next := catalog.ImageHash(img, digests)
+		var next string
+		if e.Kind == "image" {
+			img, _ := catalog.ParseStored(e.ImageRaw)
+			next = catalog.ImageHash(img, digests)
+		} else {
+			next = catalog.ProgramHash(e.Spec.Program(), digests)
+		}
 		if next == e.SpecHash {
 			continue
 		}
