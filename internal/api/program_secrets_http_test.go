@@ -159,7 +159,8 @@ func TestProgramSecretsRun(t *testing.T) {
 
 	// Agent with programs.secrets.
 	conn = helloAgent(t, w, sc.host, sc.credPlain, sc.credID, secretsPrograms(true, nil), nil)
-	echo := "token=" + progSecret + " again " + progSecret
+	// No keyword in the line, so only the exact-value redaction can hide it.
+	echo := "got " + progSecret + " and " + progSecret
 	log = watchTasks(t, conn, runReply(echo))
 	status, env, raw := postImageLike(t, w, tok, project, "gh", "run", host, "new-1")
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
@@ -167,7 +168,8 @@ func TestProgramSecretsRun(t *testing.T) {
 		t.Fatalf("run response leaked the value: %s", raw)
 	}
 	lines := stringList(objectPayload(t, env)["lines"])
-	if len(lines) != 1 || !strings.Contains(lines[0], catalog.SecretPreview(progSecret)) {
+	want := "got " + catalog.SecretPreview(progSecret) + " and " + catalog.SecretPreview(progSecret)
+	if len(lines) != 1 || lines[0] != want {
 		t.Fatalf("lines %#v", lines)
 	}
 	frame, _ = log.raw(0)["spec"].(map[string]any)

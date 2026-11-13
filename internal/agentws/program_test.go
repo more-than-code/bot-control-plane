@@ -2,6 +2,7 @@ package agentws
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -118,6 +119,39 @@ func TestParseProgramsSecretsProjects(t *testing.T) {
 	} {
 		if _, ok := parsePrograms(json.RawMessage(base[:len(base)-1] + bad)); ok {
 			t.Fatalf("accepted %s", bad)
+		}
+	}
+}
+
+// agent-protocol v1.4 slug grammar and the v1.12 item 5 cap of 32.
+func TestParseProgramsProjectsBoundaries(t *testing.T) {
+	base := `{"enabled":true,"run_as":["joe"],"allow_shell":false,"policy_hash":"abc","images":true,"docker":true`
+	list := func(n int) string {
+		out := ""
+		for i := 0; i < n; i++ {
+			if i > 0 {
+				out += ","
+			}
+			out += `"p` + string(rune('a'+i/26)) + string(rune('a'+i%26)) + `"`
+		}
+		return out
+	}
+	if p, ok := parsePrograms(json.RawMessage(base + `,"projects":[` + list(32) + `]}`)); !ok || len(p.Projects) != 32 {
+		t.Fatalf("32 slugs refused %v", ok)
+	}
+	if _, ok := parsePrograms(json.RawMessage(base + `,"projects":[` + list(33) + `]}`)); ok {
+		t.Fatal("33 slugs accepted")
+	}
+	long := "a" + strings.Repeat("b-", 31) + "c" // 64 characters, valid
+	if len(long) != 64 {
+		t.Fatalf("len %d", len(long))
+	}
+	if p, ok := parsePrograms(json.RawMessage(base + `,"projects":["` + long + `"]}`)); !ok || p.Projects[0] != long {
+		t.Fatalf("64-character slug refused %v", ok)
+	}
+	for _, bad := range []string{long + "d", "-lead", "Upper", "under_score", "dot.ted", ""} {
+		if _, ok := parsePrograms(json.RawMessage(base + `,"projects":["` + bad + `"]}`)); ok {
+			t.Fatalf("slug %q accepted", bad)
 		}
 	}
 }

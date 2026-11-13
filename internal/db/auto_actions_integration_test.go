@@ -71,9 +71,6 @@ func TestAutoActionsMigration(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	t.Cleanup(func() {
-		restoreAutoActions(t, url)
-	})
 	d, err := Open(ctx, url)
 	if err != nil {
 		t.Fatal("connect failed")
@@ -86,6 +83,10 @@ func TestAutoActionsMigration(t *testing.T) {
 	if !isTestDatabase(dbName) {
 		t.Fatalf("refusing database %s: integration tests run only on deploybot_test or deploybot_test_*", dbName)
 	}
+	// Registered only after the guard: the restore migrates.
+	t.Cleanup(func() {
+		restoreAutoActions(t, url)
+	})
 	if err := Migrate(ctx, url); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -442,6 +443,10 @@ func restoreAutoActions(t *testing.T, url string) {
 		return
 	}
 	defer d.Close()
+	if !onTestDatabase(ctx, d) {
+		t.Errorf("restore 0014: refusing a database that is not a test database")
+		return
+	}
 	if _, err := d.pool.Exec(ctx, `DROP VIEW IF EXISTS app.tmp_auto_action_dep`); err != nil {
 		t.Errorf("restore 0014: drop view: %v", err)
 	}

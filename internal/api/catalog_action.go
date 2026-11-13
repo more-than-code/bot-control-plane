@@ -32,7 +32,6 @@ const (
 	// program task spec at 64 KiB (agent-protocol v1.3).
 	reasonProgramEnvTooLarge = "the resolved environment is too large for one task"
 	maxProgramSpecBytes      = 64 * 1024
-	maxProgramEnvKeys        = 64
 )
 
 // catalogAct is checks 1–6 for run, stop, restart, logs, and status.
@@ -573,7 +572,7 @@ func (s *Server) dispatchProgram(ctx context.Context, projectID uuid.UUID, host 
 			return agentws.LiveResult{}, nil, s.programEnvErr(err)
 		}
 		forms = envValueForms(secretValues(env, secretKeys, nil))
-		if len(env) > maxProgramEnvKeys {
+		if len(env) > catalog.MaxProgramEnv {
 			return agentws.LiveResult{}, forms, &agentws.CallError{Code: "bad_request", Msg: "too many env keys"}
 		}
 		spec["env"] = env
@@ -596,19 +595,21 @@ func (s *Server) dispatchProgram(ctx context.Context, projectID uuid.UUID, host 
 	return res, forms, err
 }
 
-// programEnvErr maps a resolve failure to the envelope, as imageFail does.
-// No value is logged.
+// programEnvErr maps a resolve failure to the envelope with imageFail's
+// mapping. Nothing it logs holds a value.
 func (s *Server) programEnvErr(err error) error {
 	switch {
 	case errors.Is(err, errDecrypt):
 		s.logger().Error("decrypt failed")
 		return &agentws.CallError{Code: "error", Msg: "internal error"}
 	case errors.Is(err, errSecretsKey):
+		s.logger().Error("secrets key not configured")
 		return &agentws.CallError{Code: "unavailable", Msg: errSecretsKey.Error()}
 	case errors.Is(err, store.ErrNotFound):
-		return &agentws.CallError{Code: "bad_request", Msg: "unknown env set"}
+		return &agentws.CallError{Code: "not_found", Msg: "not found"}
 	}
-	return err
+	s.logErr(err)
+	return &agentws.CallError{Code: "error", Msg: "internal error"}
 }
 
 func programTask(slug string, entry store.CatalogEntry, action string, lines int) (string, map[string]any) {
@@ -785,7 +786,13 @@ func liveEnvelopeForms(res agentws.LiveResult, err error, forms []secretForm) (i
 			if call.Code == "error" && len(call.Payload) > 0 && json.Valid(call.Payload) && string(call.Payload) != "null" {
 				payload = jsonRaw{redactProgramLines(call.Payload, forms)}
 			}
-			return statusFor(call.Code), envelopeRaw(call.Code, msg, payload), call.Code
+			if len(forms) == 0 {
+				return statusFor(call.Code), envelopeRaw(call.Code, msg, payload), call.Code
+			}
+			// An entry with secrets: the message and every string of the
+			// envelope get the exact-value redaction, as imageFail does.
+			body := redactBody(envelopeRaw(call.Code, redactExact(msg, forms), payload), forms)
+			return statusFor(call.Code), body, call.Code
 		}
 		return http.StatusInternalServerError, envelopeRaw("error", "internal error", nil), "error"
 	}

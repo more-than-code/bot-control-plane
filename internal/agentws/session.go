@@ -336,17 +336,18 @@ func parsePrograms(raw json.RawMessage) (*store.HostPrograms, bool) {
 		return nil, false
 	}
 	for _, slug := range p.Projects {
-		if slug == "" || len(slug) > maxHelloSlug {
+		if !helloSlugRe.MatchString(slug) {
 			return nil, false
 		}
 	}
 	return &p, true
 }
 
-const (
-	maxHelloProjects = 32
-	maxHelloSlug     = 64 // the agent's slug limit
-)
+// maxHelloProjects is the agent-protocol v1.12 item 5 cap. helloSlugRe is
+// the runner.toml projects grammar (agent-protocol v1.4).
+const maxHelloProjects = 32
+
+var helloSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 // servicesComplete is true when hello omits services_complete or sends true.
 // JSON null is incomplete. A non-bool never reaches here: parseFrame rejects it.

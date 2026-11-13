@@ -54,16 +54,7 @@ func imageSpecForBuild(body []byte) []byte {
 }
 
 func digestMap(names map[string][]string, img catalog.Image) map[string]string {
-	return refDigests(names, catalog.ReferencedSets(img))
-}
-
-// refDigests maps each referenced set to the digest of its current key names.
-func refDigests(names map[string][]string, sets []string) map[string]string {
-	digests := map[string]string{}
-	for _, set := range sets {
-		digests[set] = catalog.EnvKeyDigest(names[set])
-	}
-	return digests
+	return catalog.KeyDigests(catalog.ReferencedSets(img), names)
 }
 
 // catalogWriteRequestHash binds the action, project, entry name, and

@@ -85,9 +85,6 @@ func TestCatalogWriteConfirmationsMigration(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	t.Cleanup(func() {
-		restoreCatalogWriteTable(url)
-	})
 	d, err := Open(ctx, url)
 	if err != nil {
 		t.Fatal("connect failed")
@@ -100,6 +97,10 @@ func TestCatalogWriteConfirmationsMigration(t *testing.T) {
 	if !isTestDatabase(dbName) {
 		t.Fatalf("refusing database %s: integration tests run only on deploybot_test or deploybot_test_*", dbName)
 	}
+	// Registered only after the guard: the restore migrates.
+	t.Cleanup(func() {
+		restoreCatalogWriteTable(url)
+	})
 	if err := Migrate(ctx, url); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -378,6 +379,9 @@ func restoreCatalogWriteTable(url string) {
 		return
 	}
 	defer d.Close()
+	if !onTestDatabase(ctx, d) {
+		return
+	}
 	var table *string
 	if err := d.pool.QueryRow(ctx, `SELECT to_regclass('app.catalog_write_confirmations')::text`).Scan(&table); err != nil {
 		return

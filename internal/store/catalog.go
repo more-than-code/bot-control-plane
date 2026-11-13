@@ -121,8 +121,9 @@ type CatalogWrite struct {
 	At             time.Time
 }
 
-// MarshalJSON keeps a program entry on the v1.6 shape. An image entry
-// returns its stored ImageSpec instead of the program spec.
+// MarshalJSON returns a program entry with its ProgramSpec (the v1.6 fields
+// plus env_sets and secret_env from api-v1 v1.22). An image entry returns its
+// stored ImageSpec instead of the program spec.
 func (e CatalogEntry) MarshalJSON() ([]byte, error) {
 	if e.Kind != "image" {
 		type alias CatalogEntry

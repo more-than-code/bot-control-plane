@@ -690,10 +690,7 @@ func (m *Mem) rehashSetLocked(projectID uuid.UUID, set string, at time.Time) {
 		if !ok || !refs.Uses(set) {
 			continue
 		}
-		digests := map[string]string{}
-		for _, ref := range refs.SetNames() {
-			digests[ref] = catalog.EnvKeyDigest(names[ref])
-		}
+		digests := catalog.KeyDigests(refs.SetNames(), names)
 		var next string
 		if e.Kind == "image" {
 			img, _ := catalog.ParseStored(e.ImageRaw)

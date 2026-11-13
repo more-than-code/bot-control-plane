@@ -302,7 +302,7 @@ func BuildImage(name string, raw []byte, sets SetKeys, files map[string]struct{}
 
 // ReferencesEnv reports whether a deploy must resolve an env set or secret_env.
 func (img Image) ReferencesEnv() bool {
-	return len(img.EnvSets) > 0 || len(img.SecretEnv) > 0
+	return img.EnvRefs().Any()
 }
 
 // DeployTimeoutSec is the image_deploy task timeout.
@@ -350,6 +350,15 @@ func ReferencedSets(img Image) []string {
 // ReferencesSet reports whether the entry's hash depends on set.
 func ReferencesSet(img Image, set string) bool {
 	return img.EnvRefs().Uses(set)
+}
+
+// KeyDigests maps each set to EnvKeyDigest of its key names in names.
+func KeyDigests(sets []string, names map[string][]string) map[string]string {
+	digests := make(map[string]string, len(sets))
+	for _, set := range sets {
+		digests[set] = EnvKeyDigest(names[set])
+	}
+	return digests
 }
 
 // EnvKeyDigest is sha256 of the sorted key names joined by newlines.

@@ -962,21 +962,13 @@ func rehashStored(kind string, spec []byte, set string, names map[string][]strin
 		if !refs.Uses(set) {
 			return "", false
 		}
-		return catalog.ProgramHash(prog, keyDigests(refs.SetNames(), names)), true
+		return catalog.ProgramHash(prog, catalog.KeyDigests(refs.SetNames(), names)), true
 	}
 	img, err := catalog.ParseStored(spec)
 	if err != nil || !catalog.ReferencesSet(img, set) {
 		return "", false
 	}
-	return catalog.ImageHash(img, keyDigests(catalog.ReferencedSets(img), names)), true
-}
-
-func keyDigests(sets []string, names map[string][]string) map[string]string {
-	digests := map[string]string{}
-	for _, ref := range sets {
-		digests[ref] = catalog.EnvKeyDigest(names[ref])
-	}
-	return digests
+	return catalog.ImageHash(img, catalog.KeyDigests(catalog.ReferencedSets(img), names)), true
 }
 
 func (d *DB) ListEnvMaterial(ctx context.Context, projectID uuid.UUID, name string) ([]store.EnvMaterial, error) {

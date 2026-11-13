@@ -81,6 +81,50 @@ func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time
 		t.Fatalf("key add: hash %s want %s approvals %d %v", changed.SpecHash, want, catalogApprovalCount(t, d, ctx, entry.ID), err)
 	}
 
+	// An entry that uses a set only through env_sets (the env_sets ? $2 branch).
+	cfgSealed := func(key, value string) store.EnvSecret {
+		t.Helper()
+		nonce, ct, err := box.Seal(seal.EnvAAD(home.ID.String(), "cfg", key), []byte(value))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store.EnvSecret{Key: key, Nonce: nonce, Ciphertext: ct, KeyVersion: seal.KeyVersion}
+	}
+	if _, err := d.PutEnvSet(ctx, home.ID, "cfg", []store.EnvSecret{cfgSealed("A_KEY", "a-value"), cfgSealed("B_KEY", "b-value")}, owner.ID, at, true); err != nil {
+		t.Fatal(err)
+	}
+	setsOnly, err := catalog.BuildProgram(catalog.ProgramInput{
+		Command: "gh api user", Dir: "/srv/app", RunAs: "joe",
+		EnvSets: []string{"cfg"}, Sets: catalog.SetKeys{"cfg": {"A_KEY", "B_KEY"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setsHash := catalog.ProgramHash(setsOnly, map[string]string{"cfg": catalog.EnvKeyDigest([]string{"A_KEY", "B_KEY"})})
+	setsEntry, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+		Name: "sets-only", Spec: store.ProgramSpec{
+			Dir: setsOnly.Dir, Exec: setsOnly.Exec, Args: setsOnly.Args, RunAs: setsOnly.RunAs, Env: setsOnly.Env,
+			EnvSets: setsOnly.EnvSets, SecretEnv: setsOnly.SecretEnv, Restart: setsOnly.Restart,
+		}, SpecHash: setsHash, CommandDisplay: setsOnly.Display, Actor: owner.ID, At: at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ApproveCatalog(ctx, host.ID, setsEntry.ID, setsHash, owner.ID, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.DeleteEnvKey(ctx, home.ID, "cfg", "B_KEY", owner.ID, at.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	afterDelete, err := d.GetCatalogEntry(ctx, home.ID, "sets-only")
+	wantSets := catalog.ProgramHash(setsOnly, map[string]string{"cfg": catalog.EnvKeyDigest([]string{"A_KEY"})})
+	if err != nil || afterDelete.SpecHash != wantSets || catalogApprovalCount(t, d, ctx, setsEntry.ID) != 0 {
+		t.Fatalf("key delete: hash %s want %s approvals %d %v", afterDelete.SpecHash, wantSets, catalogApprovalCount(t, d, ctx, setsEntry.ID), err)
+	}
+	if err := d.DeleteEnvSet(ctx, home.ID, "cfg"); err != store.ErrConflict {
+		t.Fatalf("delete of a set used through env_sets: %v", err)
+	}
+
 	// An entry without sets is untouched by a rehash of any set.
 	plain, err := catalog.BuildProgram(catalog.ProgramInput{Command: "pnpm run dev", Dir: "/srv/app", RunAs: "joe"})
 	if err != nil {

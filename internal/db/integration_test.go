@@ -26,6 +26,16 @@ func isTestDatabase(name string) bool {
 	return name == "deploybot_test" || (strings.HasPrefix(name, prefix) && len(name) > len(prefix))
 }
 
+// onTestDatabase reports whether d is connected to a test database. Restore
+// helpers call it before they migrate.
+func onTestDatabase(ctx context.Context, d *DB) bool {
+	var name string
+	if err := d.pool.QueryRow(ctx, `SELECT current_database()`).Scan(&name); err != nil {
+		return false
+	}
+	return isTestDatabase(name)
+}
+
 func TestIsTestDatabase(t *testing.T) {
 	for name, want := range map[string]bool{
 		"deploybot_test": true, "deploybot_test_progsec": true,

@@ -655,7 +655,7 @@ func (s *Server) buildProgram(w http.ResponseWriter, r *http.Request, projectID 
 		s.writeField(w, err)
 		return catalog.Program{}, "", false
 	}
-	return prog, catalog.ProgramHash(prog, refDigests(names, prog.EnvRefs().SetNames())), true
+	return prog, catalog.ProgramHash(prog, catalog.KeyDigests(prog.EnvRefs().SetNames(), names)), true
 }
 
 func (s *Server) writeField(w http.ResponseWriter, err error) {

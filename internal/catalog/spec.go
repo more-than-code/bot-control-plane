@@ -15,7 +15,6 @@ const (
 	CodeNotImplemented = "not_implemented"
 	restartOnFailure   = "on-failure"
 	restartNo          = "no"
-	maxProgramEnv      = 64
 )
 
 var (
@@ -28,6 +27,10 @@ var (
 	safeWord   = regexp.MustCompile(`^[A-Za-z0-9._@%+=:,/-]+$`)
 	idemKeyRe  = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 )
+
+// MaxProgramEnv is the most env keys a program may have, inline and after
+// the env-set merge (api-v1 v1.6 rule 8, v1.22 item 1).
+const MaxProgramEnv = 64
 
 // FieldError is one v1.6 validation failure. Code is an envelope code.
 type FieldError struct {
@@ -127,7 +130,7 @@ func BuildProgram(in ProgramInput) (Program, error) {
 		return Program{}, err
 	}
 	refs := EnvRefs{Sets: envSets, Secret: secretEnv, Inline: env}
-	if mergedKeyCount(refs, in.Sets) > maxProgramEnv {
+	if mergedKeyCount(refs, in.Sets) > MaxProgramEnv {
 		return Program{}, fieldErr("too many env keys")
 	}
 	if in.Port != nil && (*in.Port < 1 || *in.Port > 65535) {
@@ -266,7 +269,7 @@ func ValidateEnvValue(value string) error {
 }
 
 func validateEnv(env map[string]string) error {
-	if len(env) > maxProgramEnv {
+	if len(env) > MaxProgramEnv {
 		return fieldErr("too many env keys")
 	}
 	for k, v := range env {
