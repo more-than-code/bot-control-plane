@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -456,6 +457,17 @@ func sameProject(a, b *uuid.UUID) bool {
 // ownerConflictLocked records a refused owned report (audit
 // service.owner_conflict, via agent). The caller holds m.mu.
 func (m *Mem) ownerConflictLocked(hostID uuid.UUID, existing store.Service, item store.Discovered, at time.Time) {
+	// Audit only a new conflict: none for the same service, project and
+	// entry within audit.OwnerConflictWindow (as Postgres).
+	for _, a := range m.audits {
+		if a.Action != audit.ActionServiceOwnerConflict || a.ServiceID == nil || *a.ServiceID != existing.ID || !a.At.After(at.Add(-audit.OwnerConflictWindow)) {
+			continue
+		}
+		var d struct{ Project, Entry string }
+		if json.Unmarshal(a.Detail, &d) == nil && d.Project == item.Owner.Project && d.Entry == item.Owner.Entry {
+			return
+		}
+	}
 	org := m.hosts[hostID].OrgID
 	host := hostID
 	svc := existing.ID

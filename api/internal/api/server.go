@@ -49,7 +49,7 @@ type Server struct {
 // DELETE) in the route wrapper, so a write that sets nothing is refused.
 // delegatedDeny does not cover reads: a read is refused only by
 // delegatedDenyRead, and every read route declares delegatedAllow or
-// delegatedDenyRead explicitly (TestDelegatedReadPolicies).
+// delegatedDenyRead explicitly (TestDelegatedRouteGuard fails otherwise).
 type delegatedPolicy int
 
 const (

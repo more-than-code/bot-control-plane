@@ -392,6 +392,15 @@ WHERE table_schema = 'app' AND table_name = $1 AND column_name = $2
 	if err := MigrateWith(ctx, url, OrgSource{Chosen: true, Mapping: strict}); err == nil || !strings.Contains(err.Error(), "require_all_projects") || !strings.Contains(err.Error(), q.Slug) {
 		t.Fatalf("require_all %v", err)
 	}
+	// The SQL duplicate-slug check (review B14), reached without
+	// ParseOrgMapping, which refuses the same mapping first.
+	dup := &OrgMapping{Orgs: []OrgMappingOrg{
+		{Slug: "mig-d1-" + tag, Name: "D1", OwnerEmail: owner.Email, Projects: []string{p.Slug}},
+		{Slug: "mig-d2-" + tag, Name: "D2", OwnerEmail: owner.Email, Projects: []string{p.Slug}},
+	}}
+	if err := MigrateWith(ctx, url, OrgSource{Chosen: true, Mapping: dup}); err == nil || !strings.Contains(err.Error(), "a project slug is listed more than once") {
+		t.Fatalf("duplicate slug %v", err)
+	}
 	if err := d.pool.QueryRow(ctx, `SELECT to_regclass('app.orgs') IS NOT NULL`).Scan(&orgsLeft); err != nil || orgsLeft {
 		t.Fatalf("a refused mapping applied 0015 %v %v", orgsLeft, err)
 	}

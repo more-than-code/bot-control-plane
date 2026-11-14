@@ -91,6 +91,12 @@ const (
 	DecisionDenied  = "denied"
 )
 
+// OwnerConflictWindow is how long an identical service.owner_conflict (same
+// service, reported project and entry) is not audited again. Agents resend
+// their report every 300 s, so a stuck service would otherwise write about
+// 288 rows a day (review batch 2, item 30).
+const OwnerConflictWindow = 24 * time.Hour
+
 // Writer appends audit rows. A write failure is logged and not returned:
 // the caller's HTTP result must not depend on the audit insert succeeding
 // after the action has already committed. Callers that need the insert to

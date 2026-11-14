@@ -366,7 +366,7 @@ func TestDelegatedHandlerRoutes(t *testing.T) {
 
 func TestDelegatedRouteGuard(t *testing.T) {
 	if got := undeclaredDelegated(contractRoutes(), delegatedDenyPatterns); len(got) != 0 {
-		t.Fatalf("mutating routes with no delegated decision: %s", strings.Join(got, ", "))
+		t.Fatalf("routes with no delegated decision: %s", strings.Join(got, ", "))
 	}
 	found := map[string]delegatedPolicy{}
 	for _, rt := range contractRoutes() {
@@ -391,7 +391,7 @@ func TestDelegatedRouteGuard(t *testing.T) {
 		}
 	}
 
-	deny := []string{"POST /v1/projects"}
+	deny := []string{"POST /v1/projects", "GET /v1/projects"}
 	cases := []struct {
 		name    string
 		pattern string
@@ -402,7 +402,10 @@ func TestDelegatedRouteGuard(t *testing.T) {
 		{"zero value on the deny list", "POST /v1/projects", delegatedDeny, false},
 		{"explicit allow", "POST /v1/made-up", delegatedAllow, false},
 		{"explicit handler", "PATCH /v1/made-up", delegatedHandler, false},
-		{"get is not checked", "GET /v1/made-up", delegatedDeny, false},
+		{"zero-value GET is flagged", "GET /v1/made-up", delegatedDeny, true},
+		{"zero-value GET on the deny list is still flagged", "GET /v1/projects", delegatedDeny, true},
+		{"explicit read allow", "GET /v1/made-up", delegatedAllow, false},
+		{"explicit read deny", "GET /v1/made-up", delegatedDenyRead, false},
 		{"zero-value POST /oauth/token is flagged", "POST /oauth/token", delegatedDeny, true},
 	}
 	for _, tc := range cases {
@@ -416,9 +419,11 @@ func TestDelegatedRouteGuard(t *testing.T) {
 	}
 }
 
-// undeclaredDelegated returns mutating patterns whose policy is the zero
-// value and that are not on deny. Every mutating route needs an explicit
-// value. A route added with no decision shows up here.
+// undeclaredDelegated returns the routes whose policy is the zero value
+// without a decision behind it. A mutating route may be the zero value only
+// when it is on deny. A read route never may: delegatedDeny does not refuse
+// reads, so a read must say delegatedAllow or delegatedDenyRead (review
+// batch 2, item 29). A route added with no decision shows up here.
 func undeclaredDelegated(routes []route, deny []string) []string {
 	listed := map[string]bool{}
 	for _, pattern := range deny {
@@ -426,11 +431,11 @@ func undeclaredDelegated(routes []route, deny []string) []string {
 	}
 	var out []string
 	for _, rt := range routes {
-		method, _, ok := strings.Cut(rt.pattern, " ")
-		if !ok || !mutating(method) {
+		if rt.delegated != delegatedDeny {
 			continue
 		}
-		if rt.delegated != delegatedDeny || listed[rt.pattern] {
+		method, _, ok := strings.Cut(rt.pattern, " ")
+		if ok && mutating(method) && listed[rt.pattern] {
 			continue
 		}
 		out = append(out, rt.pattern)

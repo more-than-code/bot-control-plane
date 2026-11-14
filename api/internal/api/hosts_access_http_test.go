@@ -416,6 +416,7 @@ func assertHTTP(t *testing.T, status int, env envelope, want int) {
 	wantCode := map[int]string{
 		http.StatusOK:         "ok",
 		http.StatusCreated:    "ok",
+		http.StatusAccepted:   "ok",
 		http.StatusBadRequest: "bad_request",
 		http.StatusForbidden:  "forbidden",
 		http.StatusNotFound:   "not_found",

@@ -327,14 +327,17 @@ func TestProgramsNeedAllowlistAgent(t *testing.T) {
 	host := fx.sc.host.ID.String()
 	old := &store.HostPrograms{Enabled: true, RunAs: []string{"joe"}, Images: true, Docker: true}
 	setPrograms(t, fx.w, fx.sc.host.ID, old)
-	run := func(p store.Project) (int, envelope) {
-		return fx.do(actOwnerOwner, http.MethodPost, "/v1/projects/"+p.ID.String()+"/catalog/job/run", actionBody(host, "run", uuid.NewString()))
+	act := func(p store.Project, action string) (int, envelope) {
+		return fx.do(actOwnerOwner, http.MethodPost, "/v1/projects/"+p.ID.String()+"/catalog/job/"+action, actionBody(host, action, uuid.NewString()))
 	}
-	// Two deploy projects (home and deploy): both refused.
+	run := func(p store.Project) (int, envelope) { return act(p, "run") }
+	// Two deploy projects (home and deploy): run, stop and restart refused.
 	for _, p := range []store.Project{fx.home, fx.deploy} {
-		code, env := run(p)
-		if code != http.StatusForbidden || env.Msg != msg {
-			t.Fatalf("%s with two deploy projects: %d %q", p.Slug, code, env.Msg)
+		for _, action := range []string{"run", "stop", "restart"} {
+			code, env := act(p, action)
+			if code != http.StatusForbidden || env.Msg != msg {
+				t.Fatalf("%s %s with two deploy projects: %d %q", p.Slug, action, code, env.Msg)
+			}
 		}
 	}
 	// An image deploy is unaffected (offline host: past authorization).
@@ -351,6 +354,31 @@ func TestProgramsNeedAllowlistAgent(t *testing.T) {
 	}
 	if code, _ := run(fx.deploy); code != http.StatusForbidden {
 		t.Fatalf("metrics project ran %d", code)
+	}
+	// The confirmation re-checks D-10: a delegated run issued with one deploy
+	// project is refused at confirm once a second deploy grant exists.
+	// It needs a connected agent (an offline host is unavailable before
+	// issue); its hello reports no projects.
+	ownerID := fx.users[actOwnerOwner].ID
+	online, cred, credID := enrollAgentHost(t, fx.w, fx.home, ownerID, "d10-online")
+	conn := helloAgent(t, fx.w, online, cred, credID, allowPrograms(false), nil)
+	tasks := watchTasks(t, conn, succeededTask)
+	delegated := tokenKind(t, fx.w, ownerID, store.KindDelegated)
+	code, env = fx.w.do(delegated, http.MethodPost, "/v1/projects/"+fx.home.ID.String()+"/catalog/job/run", actionBody(online.ID.String(), "run", "d10-confirm"))
+	assertHTTP(t, code, env, http.StatusAccepted)
+	id, _ := objectPayload(t, env)["confirmation_id"].(string)
+	if id == "" {
+		t.Fatalf("no confirmation %#v", env)
+	}
+	if _, _, err := fx.w.grant(context.Background(), online.ID, fx.deploy.ID, "deploy", ownerID, fx.w.now); err != nil {
+		t.Fatal(err)
+	}
+	code, env = fx.w.do(delegated, http.MethodPost, "/v1/confirmations/"+id, confirmBody("d10-confirm"))
+	if code != http.StatusForbidden || env.Msg != msg {
+		t.Fatalf("confirm after a second deploy grant: %d %q", code, env.Msg)
+	}
+	if tasks.count() != 0 {
+		t.Fatal("refused confirm dispatched a task")
 	}
 	// A v0.2.8 host that reports the list is unaffected.
 	old.Projects = []string{fx.home.Slug, fx.deploy.Slug}

@@ -583,9 +583,9 @@ func decodePrograms(raw []byte) (*store.HostPrograms, error) {
 	return &p, nil
 }
 
-// catalogLookup finds a live project slug that has a catalog entry of that name.
-// ownerLookup is catalogLookup for a services report on hostID: the project
-// must be in the host's org and have deploy access to it (api-v1 v1.24 item 6).
+// ownerLookup finds the live project with that slug and a catalog entry of
+// that name and kind, for a services report on hostID: the project must be
+// in the host's org and have deploy access to it (api-v1 v1.24 item 6).
 func (d *DB) ownerLookup(ctx context.Context, q queryer, hostID uuid.UUID, slug, entry, kind string) (uuid.UUID, bool) {
 	var id string
 	err := q.QueryRow(ctx, `

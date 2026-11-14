@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -172,7 +173,11 @@ func TestParityTokensAndEnrolment(t *testing.T) {
 		owner, admin := p.user("to"), p.user("ta")
 		org := p.org(owner.ID)
 		home := p.project(org, owner.ID, "thome")
-		other := p.project(org, owner.ID, "tother")
+		// other is created later, so home is the org's oldest live project.
+		other, err := p.st.CreateProject(p.ctx, org, owner.ID, "tother", "tother-"+p.tag, p.at.Add(time.Second))
+		if err != nil {
+			p.t.Fatal(err)
+		}
 		// Mirror (review A6): deploy grant names the project; a metrics
 		// grant or no grant takes the org's oldest live project.
 		if h := p.enroll(org, &store.TokenGrant{ProjectID: other.ID, Level: "deploy"}, owner.ID, "d"); h.ProjectID == nil || *h.ProjectID != other.ID {
@@ -180,7 +185,7 @@ func TestParityTokensAndEnrolment(t *testing.T) {
 		}
 		for _, g := range []*store.TokenGrant{{ProjectID: other.ID, Level: "metrics"}, nil} {
 			h := p.enroll(org, g, owner.ID, "m")
-			if h.ProjectID == nil || (*h.ProjectID != home.ID && *h.ProjectID != other.ID) {
+			if h.ProjectID == nil || *h.ProjectID != home.ID {
 				p.t.Fatalf("mirror %+v -> %v", g, h.ProjectID)
 			}
 		}
@@ -336,6 +341,76 @@ func TestParitySignInOrg(t *testing.T) {
 		p.user("si")
 		if orgs, _ := p.st.ListUserOrgs(p.ctx, u.ID); len(orgs) != 1 {
 			p.t.Fatalf("second sign-in made another org %+v", orgs)
+		}
+	})
+}
+
+// TestParityOwnerConflictDedupe is review batch 2, item 30: an agent resends
+// the same refused owned report every 300 s; it is audited once per
+// audit.OwnerConflictWindow, and a different reported project is a new row.
+func TestParityOwnerConflictDedupe(t *testing.T) {
+	runParity(t, func(p parity) {
+		owner := p.user("co")
+		org := p.org(owner.ID)
+		home := p.project(org, owner.ID, "chome")
+		app := p.project(org, owner.ID, "capp")
+		other := p.project(org, owner.ID, "coth")
+		host := p.enroll(org, &store.TokenGrant{ProjectID: home.ID, Level: "deploy"}, owner.ID, "c")
+		for _, pr := range []store.Project{app, other} {
+			if _, _, err := p.st.PutHostAccess(p.ctx, host.ID, pr.ID, "deploy", owner.ID, p.at); err != nil {
+				p.t.Fatal(err)
+			}
+		}
+		if err := p.st.SetHostPrograms(p.ctx, host.ID, &store.HostPrograms{Enabled: true, RunAs: []string{"joe"}, Projects: []string{home.Slug, app.Slug, other.Slug}}); err != nil {
+			p.t.Fatal(err)
+		}
+		spec, hash, display := catalogSpec(p.t, "pnpm run dev")
+		for _, pr := range []store.Project{app, other} {
+			if _, err := p.st.CreateCatalogEntry(p.ctx, pr.ID, store.CatalogWrite{Name: "cweb", Spec: spec, SpecHash: hash, CommandDisplay: display, Actor: owner.ID, At: p.at}); err != nil {
+				p.t.Fatal(err)
+			}
+		}
+		// An org-level row named like the entry.
+		if err := p.st.UpsertDiscovered(p.ctx, host.ID, []store.Discovered{{Name: "cweb", Kind: "process", Ports: []int{80}}}, p.at, true, false); err != nil {
+			p.t.Fatal(err)
+		}
+		report := func(pr store.Project, at time.Time) {
+			if err := p.st.UpsertDiscovered(p.ctx, host.ID, []store.Discovered{{Name: "x", Kind: "process", Owner: &store.DiscoveredOwner{Kind: "program", Project: pr.Slug, Entry: "cweb"}}}, at, true, false); err != nil {
+				p.t.Fatal(err)
+			}
+		}
+		conflicts := func() []string {
+			rows, _, err := p.st.ListOrgAudit(p.ctx, org, 200, nil)
+			if err != nil {
+				p.t.Fatal(err)
+			}
+			var out []string
+			for _, a := range rows {
+				if a.Action == "service.owner_conflict" {
+					var d struct{ Project string }
+					_ = json.Unmarshal(a.Detail, &d)
+					out = append(out, d.Project)
+				}
+			}
+			return out
+		}
+		for i := 1; i <= 3; i++ {
+			report(app, p.at.Add(time.Duration(i)*5*time.Minute))
+		}
+		if got := conflicts(); len(got) != 1 || got[0] != app.Slug {
+			p.t.Fatalf("3 identical reports wrote %v", got)
+		}
+		report(other, p.at.Add(20*time.Minute))
+		if got := conflicts(); len(got) != 2 {
+			p.t.Fatalf("a different project wrote %v", got)
+		}
+		// After the window the same conflict is audited again.
+		report(app, p.at.Add(25*time.Hour))
+		if got := conflicts(); len(got) != 3 {
+			p.t.Fatalf("after the window %v", got)
+		}
+		if got := p.service(host.ID, "cweb"); got.ProjectID != nil {
+			p.t.Fatalf("org-level row claimed %+v", got)
 		}
 	})
 }

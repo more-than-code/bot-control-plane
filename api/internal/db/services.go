@@ -427,12 +427,24 @@ FOR UPDATE
 	if item.Owner != nil {
 		owner, entry = item.Owner.Project, item.Owner.Entry
 	}
+	// Audit only a new conflict: none for the same service, project and entry
+	// within audit.OwnerConflictWindow (the org index bounds the scan).
 	if err := exec(ctx, tx, `
 INSERT INTO app.audit_log (at, via, org_id, host_id, service_id, action, decision, detail)
 SELECT $1, 'agent', h.org_id, h.id, $3::uuid, $4, 'denied', $5::jsonb
-FROM app.hosts h WHERE h.id = $2::uuid
+FROM app.hosts h
+WHERE h.id = $2::uuid
+  AND NOT EXISTS (
+    SELECT 1 FROM app.audit_log a
+    WHERE a.org_id = h.org_id
+      AND a.at > $8
+      AND a.action = $4
+      AND a.service_id = $3::uuid
+      AND a.detail->>'project' = $6
+      AND a.detail->>'entry' = $7
+  )
 `, at, hostID.String(), serviceText, audit.ActionServiceOwnerConflict,
-		auditDetail(map[string]any{"name": name, "project": owner, "entry": entry})); err != nil {
+		auditDetail(map[string]any{"name": name, "project": owner, "entry": entry}), owner, entry, at.Add(-audit.OwnerConflictWindow)); err != nil {
 		return false, mapErr(err)
 	}
 	return true, nil
