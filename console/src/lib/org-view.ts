@@ -1,4 +1,4 @@
-import type { CreatedJoin, OrgRole } from './api-types';
+import type { CreatedJoin, JoinGrant, JoinToken, OrgRole } from './api-types';
 
 /** Org page tabs (spec-organizations §4.3). Hosts, Join tokens and Settings are for org owners and admins. */
 export type OrgScope = 'projects' | 'hosts' | 'members' | 'tokens' | 'settings';
@@ -29,4 +29,26 @@ export type OrgActionData = {
 	created?: CreatedJoin;
 	/** The slug of the project the created token grants access to, for the agent instructions. */
 	createdSlug?: string | null;
+	/** The grant the created token carries, shown with it. Null when it names no project. */
+	createdGrant?: JoinGrant | null;
 };
+
+export type JoinTokenState = 'revoked' | 'used' | 'expired' | 'active';
+
+/**
+ * A join token's state on the Join tokens tab: revoked, then used, then expired, then active. An expiry that is
+ * missing or cannot be parsed counts as expired. Only an active token can be revoked.
+ */
+export function joinTokenState(token: Pick<JoinToken, 'revoked_at' | 'used_at' | 'expires_at'>, now: number): JoinTokenState {
+	if (token.revoked_at) return 'revoked';
+	if (token.used_at) return 'used';
+	const expires = token.expires_at ? Date.parse(token.expires_at) : Number.NaN;
+	if (Number.isNaN(expires) || expires <= now) return 'expired';
+	return 'active';
+}
+
+/** A created token's grant for its dialog, as "<project> (<level>)". Null when it names no project. */
+export function joinGrantText(grant: JoinGrant | null, projectNames: Readonly<Record<string, string>>): string | null {
+	if (!grant) return null;
+	return `${projectNames[grant.project_id] ?? 'a project'} (${grant.level})`;
+}

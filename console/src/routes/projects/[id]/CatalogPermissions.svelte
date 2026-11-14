@@ -1,62 +1,67 @@
 <script lang="ts">
-	import { afterNavigate, goto } from '$app/navigation';
-	import { navigating, page } from '$app/state';
+	import { untrack } from 'svelte';
+	import { deserialize } from '$app/forms';
+	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import DrawerResize from '$lib/components/DrawerResize.svelte';
-	import type { CatalogGrant, Member } from '$lib/api-types';
+	import Notice from '$lib/components/Notice.svelte';
+	import type { Member } from '$lib/api-types';
 	import { restoreFocusTo } from '$lib/dialog-focus';
-	import { isPlainClick, permissionsCloseTarget, permissionsRequested } from '$lib/url';
+	import { readPermissions } from '$lib/permissions-read';
+	import type { CatalogPermissionsState } from '$lib/project-action';
 	import CatalogPermissionsForm from './CatalogPermissionsForm.svelte';
 
 	let {
 		action,
+		readAction,
 		name,
-		grants,
 		members,
-		message = null,
-		loaded,
-		closeHref,
 		returnFocusId = null,
-		includeDeploy = false
+		includeDeploy = false,
+		onClosed
 	}: {
+		/** The existing `catalogPermissions` save action. */
 		action: string;
+		/** The `catalogPermissionsRead` action: the drawer reads the entry's grants through it when it opens. */
+		readAction: string;
 		name: string;
-		grants: CatalogGrant[];
 		members: Member[];
-		message?: string | null;
-		loaded: boolean;
-		closeHref: string;
-		/** The row's Permissions button: focus goes back there on close and after a save. */
+		/** The row's ⋯ button: focus goes back there on close and after a save. */
 		returnFocusId?: string | null;
 		includeDeploy?: boolean;
+		/** Runs once the drawer has finished closing; the section then unmounts it. */
+		onClosed: () => void;
 	} = $props();
 
-	// The `permissions` query opens this drawer; closing it drops the query.
+	// Mounted open. Closing never navigates: the page and its URL stay as they are.
 	let open = $state(true);
+	/** Null while the read runs. */
+	let view = $state<CatalogPermissionsState | null>(null);
 
-	// Only a navigation that lands on a `permissions` URL (the same or another row) reopens it, never the drawer's own close.
-	afterNavigate((navigation) => {
-		if (navigation.to && permissionsRequested(navigation.to.url)) open = true;
+	// One read per mount: the section remounts the drawer for each opening, and a later URL change does not re-read.
+	$effect(() => {
+		const controller = new AbortController();
+		const deps = untrack(() => ({ fetch, deserialize, action: readAction, origin: location.origin }));
+		void readPermissions(deps, untrack(() => name), controller.signal).then((read) => {
+			if (controller.signal.aborted) return;
+			if (read.kind === 'redirect') void goto(read.path);
+			else view = read.state;
+		});
+		return () => controller.abort();
 	});
 
-	// A user close drops the query, unless a click on another row's Permissions is already navigating.
 	function onOpenChangeComplete(isOpen: boolean) {
-		if (isOpen) return;
-		const target = permissionsCloseTarget(closeHref, page.url, navigating.to?.url ?? null);
-		if (target != null) void goto(target, { keepFocus: true, noScroll: true });
+		if (!isOpen) onClosed();
 	}
 
-	/** Back to this row's Permissions button, which opened the drawer through the URL. */
 	function onCloseAutoFocus(event: Event) {
 		if (returnFocusId) restoreFocusTo(returnFocusId)(event);
 	}
 
-	/** A plain click closes the drawer first; a new-tab click follows the link. */
-	function onCancel(event: MouseEvent) {
-		if (!isPlainClick(event)) return;
-		event.preventDefault();
-		open = false;
+	/** A refused save keeps the drawer open with the boxes as ticked, the message, and Save. */
+	function onFailed(state: CatalogPermissionsState) {
+		view = { ...state, name, loaded: true };
 	}
 </script>
 
@@ -68,12 +73,26 @@
 			<Sheet.Title class="break-all">Permissions for {name}</Sheet.Title>
 			<Sheet.Description>The owner always has every action. Admins, viewers, and members get only what is checked.</Sheet.Description>
 		</Sheet.Header>
-		{#key name}
-			<CatalogPermissionsForm {action} {name} {grants} {members} {message} {loaded} {includeDeploy} {returnFocusId}>
+		{#if view}
+			<CatalogPermissionsForm
+				{action}
+				{name}
+				grants={view.grants}
+				{members}
+				message={view.message}
+				loaded={view.loaded}
+				{includeDeploy}
+				onSaved={() => (open = false)}
+				{onFailed}
+			>
 				{#snippet cancel()}
-					<Button href={closeHref} variant="outline" onclick={onCancel}>Cancel</Button>
+					<Button type="button" variant="outline" onclick={() => (open = false)}>Cancel</Button>
 				{/snippet}
 			</CatalogPermissionsForm>
-		{/key}
+		{:else}
+			<div class="px-4 pb-4">
+				<Notice kind="info">Loading permissions…</Notice>
+			</div>
+		{/if}
 	</Sheet.Content>
 </Sheet.Root>

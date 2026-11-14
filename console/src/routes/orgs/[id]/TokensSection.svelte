@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ORG_ERROR_ID } from '$lib/org-view';
+	import { ORG_ERROR_ID, joinTokenState } from '$lib/org-view';
 	import { page } from '$app/state';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
@@ -29,11 +29,11 @@
 		return `${projectNames[token.grant.project_id] ?? 'a project'} (${token.grant.level})`;
 	}
 
-	function stateOf(token: JoinToken): string {
-		if (token.revoked_at) return 'revoked';
-		if (token.used_at) return 'used';
-		return 'active';
-	}
+	// Read once per render of the list: a token that expires while the page is open shows it on the next load.
+	const now = $derived.by(() => {
+		void tokens;
+		return Date.now();
+	});
 
 	const columns = $derived<Column<JoinToken>[]>([
 		{ key: 'hint', label: 'Hint' },
@@ -65,10 +65,10 @@
 		<tr>
 			<td class="p-2 align-middle">{token.host_name_hint ?? 'n/a'}</td>
 			<td class="p-2 align-middle">{grantText(token)}</td>
-			<td class="p-2 align-middle">{stateOf(token)}</td>
+			<td class="p-2 align-middle">{joinTokenState(token, now)}</td>
 			<td class="p-2 align-middle"><LocalTime iso={token.created_at} /></td>
 			<td class="p-2 align-middle"><LocalTime iso={token.expires_at} /></td>
-			{#if !token.revoked_at}
+			{#if joinTokenState(token, now) === 'active'}
 				<td class="p-2 align-middle">
 					<ConfirmAction
 						closeOnFailure

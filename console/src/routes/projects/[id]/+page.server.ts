@@ -1,6 +1,6 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
 import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectFile, ProjectServiceRow, Registry, ServiceRuntime } from '$lib/api-types';
-import { catalogForCaller, isCatalogName } from '$lib/catalog';
+import { catalogForCaller } from '$lib/catalog';
 import { COPIES_CAPPED_NOTE, COPIES_MAX_PAGES, COPIES_PAGE_LIMIT, groupCopies, STATUS_READ_LIMIT } from '$lib/catalog-copies';
 import {
 	HEALTH_CHECK_LIMIT,
@@ -28,7 +28,7 @@ import {
 	type NotRunningPair,
 	type ServiceEntryRef
 } from '$lib/service-actions';
-import type { ActionField, CatalogPermissionsState, ProjectScope } from '$lib/project-action';
+import type { ActionField, ProjectScope } from '$lib/project-action';
 import { ApiError, actionFailure, apiFetch, emptyList, loadFailure, loadList } from '$lib/server/api';
 import {
 	catalogCreate,
@@ -36,6 +36,7 @@ import {
 	catalogLogs,
 	catalogParse,
 	catalogPermissions,
+	catalogPermissionsRead,
 	catalogRestart,
 	catalogRun,
 	catalogStop,
@@ -71,7 +72,6 @@ import { isOrgAdmin, roleAtLeast, uiRole } from '$lib/server/roles';
 import { buildJoinTokenBody, removeAccessAction, revokeCredentialAction } from '$lib/server/access-actions';
 import {
 	isRecord,
-	parseCatalogGrants,
 	parseCatalogList,
 	parseCreatedInvite,
 	parseCreatedJoin,
@@ -328,7 +328,6 @@ const empty = {
 	catalogOmitted: 0,
 	catalogTruncated: false,
 	catalogMessage: null as string | null,
-	permissions: null as CatalogPermissionsState | null,
 	envSets: [] as EnvSet[],
 	envSetsMessage: null as string | null,
 	files: [] as ProjectFile[],
@@ -410,7 +409,6 @@ export const load: PageServerLoad = async (event) => {
 	const catalogOmitted = catalogLoad?.catalogOmitted ?? 0;
 	const catalogTruncated = catalogLoad?.catalogTruncated ?? false;
 	const catalogMessage = catalogLoad?.catalogMessage ?? null;
-	const permissions = catalogLoad?.permissions ?? null;
 	const envSets = settings?.envSets ?? [];
 	const envSetsMessage = settings?.envSetsMessage ?? null;
 	const files = settings?.files ?? [];
@@ -448,7 +446,6 @@ export const load: PageServerLoad = async (event) => {
 			catalogOmitted,
 			catalogTruncated,
 			catalogMessage,
-			permissions,
 			envSets,
 			envSetsMessage,
 			files,
@@ -461,38 +458,25 @@ export const load: PageServerLoad = async (event) => {
 	};
 };
 
-/** The catalog list and, when an owner asked for it, one entry's permissions, fetched together. */
+/**
+ * The catalog list. One entry's permissions are not read here: the Permissions drawer reads them on demand through
+ * the `catalogPermissionsRead` action, so opening or closing it does not re-run this load.
+ */
 async function loadCatalog(event: RequestEvent, id: string, canOwner: boolean) {
-	const requested = event.url.searchParams.get('permissions');
-	const [listed, permissions] = await Promise.all([
-		apiFetch(event, `/v1/projects/${id}/catalog`).then(
-			(payload) => ({ parsed: parseCatalogList(payload), message: null }),
-			(err) => ({ parsed: null, message: loadFailure(err).message })
-		),
-		canOwner && requested && isCatalogName(requested) ? loadPermissions(event, id, requested) : null
-	]);
+	const listed = await apiFetch(event, `/v1/projects/${id}/catalog`).then(
+		(payload) => ({ parsed: parseCatalogList(payload), message: null }),
+		(err) => ({ parsed: null, message: loadFailure(err).message })
+	);
 	const failed = listed.message ?? (listed.parsed ? null : 'The API returned an unexpected response.');
 	if (failed || !listed.parsed) {
-		return { catalog: [], catalogOmitted: 0, catalogTruncated: false, catalogMessage: failed, permissions };
+		return { catalog: [], catalogOmitted: 0, catalogTruncated: false, catalogMessage: failed };
 	}
 	return {
 		catalog: catalogForCaller(listed.parsed.items, canOwner),
 		catalogOmitted: listed.parsed.omitted,
 		catalogTruncated: listed.parsed.truncated,
-		catalogMessage: null,
-		permissions
+		catalogMessage: null
 	};
-}
-
-async function loadPermissions(event: RequestEvent, id: string, name: string): Promise<CatalogPermissionsState> {
-	try {
-		const grants = parseCatalogGrants(await apiFetch(event, `/v1/projects/${id}/catalog/${name}/permissions`));
-		if (!grants) return { name, grants: [], message: 'The API returned an unexpected response.', loaded: false };
-		return { name, grants, message: null, loaded: true };
-	} catch (err) {
-		if (isRedirect(err) || isHttpError(err)) throw err;
-		return { name, grants: [], message: loadFailure(err).message, loaded: false };
-	}
 }
 
 const INVITE_EXPIRY_SEC: Record<string, number> = {
@@ -647,6 +631,7 @@ export const actions: Actions = {
 	catalogRestart,
 	catalogLogs,
 	catalogPermissions,
+	catalogPermissionsRead,
 	catalogDeploy,
 	catalogRollback,
 	catalogRemove,

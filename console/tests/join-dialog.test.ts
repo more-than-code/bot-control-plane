@@ -197,6 +197,13 @@ test('the result view: copy instructions, the token once under its notice, the m
 	assert.match(live(view(TIMEOUT)), /^Stopped checking after 15 minutes\./);
 	for (const status of [WAITING, ENROLLED, REVOKED, EXPIRED, TIMEOUT]) assert.equal(live(view(status)).includes(JOIN), false);
 
+	// The grant, when the token carries one, sits after Copy token; without one there is no access line.
+	assert.equal(html.includes('gets access to'), false);
+	const granted = strip(
+		render(JoinTokenResult, { props: { created: CREATED, slug: PROJECT.slug, grant: 'Lab (deploy)', enrolment: WAITING, copyId: 'join-token-copy-instructions' } }).body
+	);
+	assert.ok(granted.indexOf('The host gets access to Lab (deploy) when it enrols.') > granted.indexOf('Copy token'));
+
 	const note = view(WAITING, 'Server URL not shown: unexpected format', { ...CREATED, server: null });
 	assert.match(note, /<div class="max-w-full min-w-0 break-words">[\s\S]*?Server URL not shown: unexpected format/);
 	assert.equal(note.includes(PLACEHOLDER_SERVER.replace('<', '&lt;')), true);

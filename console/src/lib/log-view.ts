@@ -43,7 +43,15 @@ export function logsOutcome(result: ActionResult): LogsOutcome {
  * or a URL on `origin`. Returns the path to go to, or null.
  */
 export function sameOriginPath(location: string, origin: string): string | null {
-	if (location.startsWith('/') && !location.startsWith('//') && !location.startsWith('/\\')) return location;
+	// A control character (tab, newline) is dropped by URL parsing, so "/\t/evil.example" would resolve off-site.
+	if (/[\u0000-\u001f\u007f]/.test(location)) return null;
+	if (location.startsWith('/') && !location.startsWith('//') && !location.startsWith('/\\')) {
+		try {
+			return new URL(location, origin).origin === origin ? location : null;
+		} catch {
+			return null;
+		}
+	}
 	try {
 		const url = new URL(location);
 		return url.origin === origin ? `${url.pathname}${url.search}${url.hash}` : null;

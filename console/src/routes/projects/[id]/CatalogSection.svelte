@@ -55,7 +55,6 @@
 	import { catalogEntryMenuId } from '$lib/row-menu';
 	import type {
 		CatalogEditorState,
-		CatalogPermissionsState,
 		CatalogRunState,
 		ImageDeployState,
 		ImageEditorState
@@ -92,12 +91,10 @@
 		type Column
 	} from '$lib/table';
 	import { timeZoneSource } from '$lib/time-zone';
-	import { actionUrlFrom, permissionsCloseHrefFor } from '$lib/url';
+	import { actionUrlFrom } from '$lib/url';
 	import ServicesTable from './ServicesTable.svelte';
 	import CatalogEntryRow from './CatalogEntryRow.svelte';
 	import CatalogPermissions from './CatalogPermissions.svelte';
-
-	const permissionsCloseHref = $derived(permissionsCloseHrefFor(page.url));
 
 	/** The row under an entry that holds its services table. */
 	function servicesRowId(entryId: string): string {
@@ -116,7 +113,6 @@
 		hosts,
 		members,
 		editor = null,
-		permissions = null,
 		imageEditor = null,
 		imageDeploy = null,
 		onImageSaved,
@@ -153,7 +149,6 @@
 		hosts: Host[];
 		members: Member[];
 		editor?: CatalogEditorState | null;
-		permissions?: CatalogPermissionsState | null;
 		imageEditor?: ImageEditorState | null;
 		imageDeploy?: ImageDeployState | null;
 		onImageSaved?: (name: string) => void;
@@ -242,7 +237,20 @@
 		return Date.now();
 	});
 
-	const permissionEntry = $derived(permissions ? (entries.find((item) => item.name === permissions.name) ?? null) : null);
+	// The entry whose Permissions drawer is open. Opening reads its grants on demand; nothing navigates.
+	let permissionsName = $state<string | null>(null);
+	// Each opening gets its own drawer. A drawer that finishes closing after a newer opening leaves that one alone.
+	let permissionsOpening = $state(0);
+
+	function openPermissions(name: string) {
+		permissionsName = name;
+		permissionsOpening += 1;
+	}
+
+	function permissionsClosed(opening: number) {
+		if (opening === permissionsOpening) permissionsName = null;
+	}
+	const permissionEntry = $derived(permissionsName ? (entries.find((item) => item.name === permissionsName) ?? null) : null);
 
 	// Host filter (`catalog.host`): hosts with deploy access. Anything else is ignored with a notice.
 	const serviceHosts = $derived(hostChoices(hosts));
@@ -597,6 +605,7 @@
 			imageEditor={imageEditor?.mode === 'edit' && imageEditor.name === entry.name ? imageEditor : null}
 			imageDeploy={imageDeploy?.name === entry.name ? imageDeploy : null}
 			{onImageSaved}
+			onPermissions={() => openPermissions(entry.name)}
 			{now}
 			timeZone={zones?.current}
 		/>
@@ -652,16 +661,17 @@
 		}}
 	/>
 {/snippet}
-{#if permissions}
-	<CatalogPermissions
-		action={actionUrlFrom(page.url, 'catalogPermissions')}
-		name={permissions.name}
-		grants={permissions.grants}
-		{members}
-		message={permissions.message}
-		loaded={permissions.loaded}
-		closeHref={permissionsCloseHref}
-		returnFocusId={permissionEntry ? catalogEntryMenuId(permissionEntry.id) : null}
-		includeDeploy={permissionEntry?.kind === 'image'}
-	/>
+{#if permissionsName}
+	{#key permissionsOpening}
+		{@const opening = permissionsOpening}
+		<CatalogPermissions
+			action={actionUrlFrom(page.url, 'catalogPermissions')}
+			readAction={actionUrlFrom(page.url, 'catalogPermissionsRead')}
+			name={permissionsName}
+			{members}
+			returnFocusId={permissionEntry ? catalogEntryMenuId(permissionEntry.id) : null}
+			includeDeploy={permissionEntry?.kind === 'image'}
+			onClosed={() => permissionsClosed(opening)}
+		/>
+	{/key}
 {/if}

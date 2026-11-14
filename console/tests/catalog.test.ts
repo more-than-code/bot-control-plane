@@ -35,7 +35,7 @@ import {
 } from '../src/lib/server/shape.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { assertDrawerForm, assertDrawerSource } from './drawer-assert.ts';
-import { permissionsCloseHrefFor, permissionsCloseTarget, permissionsOpenFields, permissionsOpenHref, permissionsRequested } from '../src/lib/url.ts';
+import { PERMISSIONS_FAILED, readPermissions, saveRedirectOutcome } from '../src/lib/permissions-read.ts';
 import { entryMenuItems } from '../src/lib/row-menu.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 import { COPY_ID, copyRow, renderCopies } from './copies.ts';
@@ -333,7 +333,7 @@ describe('catalog', { concurrency: false }, () => {
 			async () => {
 				await projectActions.catalogPermissions(
 					fakeEvent({
-						url: `http://console.example/projects/${PROJECT.id}?tab=catalog&permissions=web&/catalogPermissions`,
+						url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogPermissions`,
 						session: TOKEN,
 						user: USER,
 						projects: [PROJECT],
@@ -351,7 +351,8 @@ describe('catalog', { concurrency: false }, () => {
 					}).event as never
 				);
 			},
-			(err: unknown) => isRedirect(err) && err.status === 303 && err.location === `/projects/${PROJECT.id}?tab=catalog`
+			(err: unknown) =>
+				isRedirect(err) && err.status === 303 && err.location === `/projects/${PROJECT.id}?tab=catalog` && !err.location.includes('permissions')
 		);
 		const put = calls.find((call) => call.method === 'PUT');
 		assert.equal(put?.url.pathname, `/v1/projects/${PROJECT.id}/catalog/web/permissions`);
@@ -397,6 +398,11 @@ describe('catalog', { concurrency: false }, () => {
 			}
 		}).body;
 		assert.equal(unloaded.includes('>Save<'), false);
+		// A failed read shows only its Notice (and the drawer's Cancel): no empty boxes and no Add member.
+		assert.equal(unloaded.includes('Could not load grants.'), true);
+		assert.equal(unloaded.includes('admin_run'), false);
+		assert.equal(unloaded.includes('Add member'), false);
+		assert.equal(unloaded.includes('>Admins<'), false);
 	});
 
 	test('the Access section shows to org admins only, and its grant posts the level for that project', async () => {
@@ -692,7 +698,7 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(timer.includes('requestSubmit'), false);
 	});
 
-	test('permissions open in a drawer, and cancel drops the permissions query', () => {
+	test('permissions open in a drawer that reads its grants on demand and closes without navigating', () => {
 		// The drawer content renders only in the browser, so render the form and the row's opener.
 		const html = decode(
 			render(CatalogPermissionsForm, {
@@ -710,10 +716,21 @@ describe('catalog', { concurrency: false }, () => {
 		);
 		assert.equal(html.includes('name="admin_run"'), true);
 		assertDrawerForm(html, 'Save', 'permissions');
-		const permissionsSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogPermissions.svelte', import.meta.url), 'utf8');
-		assertDrawerSource(permissionsSource, 'permissions');
+		const source = readFileSync(new URL('../src/routes/projects/[id]/CatalogPermissions.svelte', import.meta.url), 'utf8');
+		assertDrawerSource(source, 'permissions');
+		// It reads through the named action with fetch and shows a loading Notice first. The only navigation is the
+		// read's or the save's redirect off this page (an expired session), decided by the pure functions tested below.
+		assert.match(source, /readPermissions\(/);
+		assert.match(source, /Loading permissions…/);
+		assert.deepEqual(source.match(/goto\(/g), ['goto(']);
+		assert.match(source, /if \(read\.kind === 'redirect'\) void goto\(read\.path\);/);
+		assert.match(source, /<Button type="button" variant="outline" onclick=\{\(\) => \(open = false\)\}>Cancel<\/Button>/);
+		const formSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogPermissionsForm.svelte', import.meta.url), 'utf8');
+		assert.deepEqual(formSource.match(/goto\(/g), ['goto(']);
+		assert.match(formSource, /if \(next\.kind === 'navigate'\) \{\s*await goto\(next\.path\);/);
+		assert.equal(formSource.includes('label={member.name}'), true);
 
-		// The row's opener carries the table state, so closing returns to the same search and sort.
+		// The ⋯ menu's Permissions item opens the drawer in the page; it does not build a `permissions` URL.
 		const tableUrl = `http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=we&catalog.sort=name&/catalogDelete`;
 		setPageUrl(tableUrl);
 		const section = decode(
@@ -721,42 +738,158 @@ describe('catalog', { concurrency: false }, () => {
 				props: { canOwner: true, entries: [entry(['run'])], omitted: 0, truncated: false, message: null, hosts: [host()], members: [member()] }
 			}).body
 		);
-		// The ⋯ menu's Permissions item navigates (keeping focus and scroll) to this URL; focus returns to the ⋯ button.
 		assert.match(section, new RegExp(`<button[^>]*id="catalog-menu-${ENTRY_ID}"[^>]*aria-label="More actions for web"`));
-		const href = permissionsOpenHref(new URL(tableUrl), 'web');
-		assert.equal(href, `/projects/${PROJECT.id}?tab=catalog&catalog.q=we&catalog.sort=name&permissions=web`);
-		const opened = new URL(href, 'http://console.example');
-		assert.equal(permissionsRequested(opened), true);
-		assert.equal(permissionsCloseHrefFor(opened), `/projects/${PROJECT.id}?tab=catalog&catalog.q=we&catalog.sort=name`);
-
-		// From another tab or another row's drawer, the opener moves to Catalog & services and names this row.
-		assert.deepEqual(permissionsOpenFields(new URL(`http://console.example/projects/${PROJECT.id}?tab=members&permissions=old`), 'web'), [
-			{ name: 'tab', value: 'catalog' },
-			{ name: 'permissions', value: 'web' }
-		]);
-		assert.equal(permissionsCloseHrefFor(new URL(`http://console.example/projects/${PROJECT.id}?permissions=web`)), `/projects/${PROJECT.id}`);
-		assert.equal(permissionsRequested(new URL(`http://console.example/projects/${PROJECT.id}?tab=catalog`)), false);
-		assert.equal(permissionsRequested(new URL(`http://console.example/projects/${PROJECT.id}?permissions=`)), false);
+		const rowSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogEntryRow.svelte', import.meta.url), 'utf8');
+		assert.equal(/goto\(|permissionsOpenHref/.test(rowSource), false);
+		const sectionSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
+		assert.match(sectionSource, /readAction=\{actionUrlFrom\(page\.url, 'catalogPermissionsRead'\)\}/);
 	});
 
-	test('a user close of the Permissions drawer drops the query unless another row is already opening', () => {
-		const base = `http://console.example/projects/${PROJECT.id}`;
-		const current = new URL(`${base}?tab=catalog&catalog.q=my-website&permissions=my-website`);
-		const closeHref = permissionsCloseHrefFor(current);
-		assert.equal(closeHref, `/projects/${PROJECT.id}?tab=catalog&catalog.q=my-website`);
-		// Escape, the X or Cancel with nothing else navigating: always back to the table, though the URL still has the query.
-		assert.equal(permissionsCloseTarget(closeHref, current, null), closeHref);
-		// A click on another row's Permissions during the close animation is on its way and wins.
-		assert.equal(permissionsCloseTarget(closeHref, current, new URL(`${base}?tab=catalog&catalog.q=my-website&permissions=api`)), null);
-		// A navigation to this same drawer's URL, or to a URL without the query, does not keep the drawer.
-		assert.equal(permissionsCloseTarget(closeHref, current, new URL(current.href)), closeHref);
-		assert.equal(permissionsCloseTarget(closeHref, current, new URL(`${base}?tab=catalog`)), closeHref);
-		// Only a navigation that lands on a permissions URL reopens; the close's own landing does not.
-		assert.equal(permissionsRequested(new URL(`${base}${closeHref.slice(`/projects/${PROJECT.id}`.length)}`)), false);
-		const source = readFileSync(new URL('../src/routes/projects/[id]/CatalogPermissions.svelte', import.meta.url), 'utf8');
-		assert.equal(source.includes('$effect('), false, 'no effect re-reads the URL while the drawer closes');
-		const formSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogPermissionsForm.svelte', import.meta.url), 'utf8');
-		assert.equal(formSource.includes('label={member.name}'), true);
+	test('the Permissions read posts the named action with fetch and maps every answer', async () => {
+		const sent: Array<{ url: string; init: RequestInit }> = [];
+		const deps = (answer: unknown) => ({
+			fetch: (async (url: string, init: RequestInit) => {
+				sent.push({ url, init });
+				return new Response(JSON.stringify(answer));
+			}) as unknown as typeof fetch,
+			deserialize: (text: string) => JSON.parse(text),
+			action: '?tab=catalog&/catalogPermissionsRead',
+			origin: 'http://console.example'
+		});
+		const grants: CatalogGrant[] = [{ subject: 'role:viewer', actions: ['logs'] }];
+		const ok = await readPermissions(deps({ type: 'success', status: 200, data: { scope: 'catalog', permissions: { name: 'web', grants, message: null, loaded: true } } }), 'web');
+		assert.deepEqual(ok, { kind: 'state', state: { name: 'web', grants, message: null, loaded: true } });
+		assert.equal(sent[0].url, '?tab=catalog&/catalogPermissionsRead');
+		assert.equal(sent[0].init.method, 'POST');
+		assert.equal((sent[0].init.headers as Record<string, string>)['x-sveltekit-action'], 'true');
+		assert.equal((sent[0].init.body as FormData).get('name'), 'web');
+
+		const refused = await readPermissions(
+			deps({ type: 'failure', status: 403, data: { scope: 'catalog', permissions: { name: 'web', grants: [], message: 'owner role required', loaded: false } } }),
+			'web'
+		);
+		assert.deepEqual(refused, { kind: 'state', state: { name: 'web', grants: [], message: 'owner role required', loaded: false } });
+		const broken = await readPermissions(deps({ type: 'error', status: 500, error: { message: 'x' } }), 'web');
+		assert.deepEqual(broken, { kind: 'state', state: { name: 'web', grants: [], message: PERMISSIONS_FAILED, loaded: false } });
+		assert.deepEqual(await readPermissions(deps({ type: 'redirect', status: 303, location: '/signin?next=%2Fprojects' }), 'web'), {
+			kind: 'redirect',
+			path: '/signin?next=%2Fprojects'
+		});
+		// A redirect off this site is not followed.
+		assert.equal((await readPermissions(deps({ type: 'redirect', status: 303, location: 'https://evil.example/' }), 'web')).kind, 'state');
+		// A success without a grants array, or a refusal with no message, reads as the generic failure.
+		assert.deepEqual(await readPermissions(deps({ type: 'success', status: 200, data: { scope: 'catalog', permissions: { name: 'web', message: null, loaded: true } } }), 'web'), {
+			kind: 'state',
+			state: { name: 'web', grants: [], message: PERMISSIONS_FAILED, loaded: false }
+		});
+		assert.deepEqual(await readPermissions(deps({ type: 'failure', status: 403, data: { scope: 'catalog', permissions: { name: 'web', grants: [], message: '', loaded: false } } }), 'web'), {
+			kind: 'state',
+			state: { name: 'web', grants: [], message: PERMISSIONS_FAILED, loaded: false }
+		});
+		const offline = await readPermissions({ ...deps(null), fetch: (async () => Promise.reject(new Error('offline'))) as unknown as typeof fetch }, 'web');
+		assert.equal(offline.kind === 'state' && offline.state.message, PERMISSIONS_FAILED);
+	});
+
+	test('a save redirect back to this page is a save; sign-in is followed; off-site is left to SvelteKit', () => {
+		const page = new URL(`http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=we`);
+		assert.deepEqual(saveRedirectOutcome(`/projects/${PROJECT.id}?tab=catalog&catalog.q=we`, page), { kind: 'saved' });
+		assert.deepEqual(saveRedirectOutcome(`http://console.example/projects/${PROJECT.id}`, page), { kind: 'saved' });
+		assert.deepEqual(saveRedirectOutcome('/signin?next=%2Fprojects', page), { kind: 'navigate', path: '/signin?next=%2Fprojects' });
+		assert.deepEqual(saveRedirectOutcome('https://evil.example/projects', page), { kind: 'update' });
+		assert.deepEqual(saveRedirectOutcome('/\t/evil.example', page), { kind: 'update' });
+	});
+
+	test('a refused save keeps Save: only the first read can come back unloaded', async () => {
+		installFetch(() => envelope(null, 503, 'unavailable', 'down'));
+		const refused = await projectActions.catalogPermissions(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogPermissions`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: 'web', admin_run: '1' }
+			}).event as never
+		);
+		assert.equal(isActionFailure(refused), true);
+		assert.equal((refused as { data: { permissions: { loaded: boolean; message: string } } }).data.permissions.loaded, true);
+		const invalid = await projectActions.catalogPermissions(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogPermissions`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: '../x' }
+			}).event as never
+		);
+		assert.deepEqual((invalid as { data: { permissions: unknown } }).data.permissions, {
+			name: '../x',
+			grants: [],
+			message: 'That catalog entry is not valid.',
+			loaded: true
+		});
+	});
+
+	test('the Permissions read action asks the API for one entry, and a non-owner gets the refusal', async () => {
+		const event = (form: Record<string, string>) =>
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogPermissionsRead`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form
+			}).event as never;
+		const grants: CatalogGrant[] = [{ subject: 'role:admin', actions: ['run'] }];
+		const calls = installFetch(() => envelope({ grants }));
+		const read = await projectActions.catalogPermissionsRead(event({ name: 'web' }));
+		assert.deepEqual(calls.map((call) => `${call.method} ${call.url.pathname}`), [`GET /v1/projects/${PROJECT.id}/catalog/web/permissions`]);
+		assert.deepEqual((read as { permissions: unknown }).permissions, { name: 'web', grants, message: null, loaded: true });
+
+		installFetch(() => envelope(null, 403, 'forbidden', 'owner role required'));
+		const refused = await projectActions.catalogPermissionsRead(event({ name: 'web' }));
+		assert.equal(isActionFailure(refused), true);
+		assert.equal((refused as { status: number }).status, 403);
+		assert.deepEqual((refused as { data: { permissions: unknown } }).data.permissions, { name: 'web', grants: [], message: 'owner role required', loaded: false });
+
+		const none = installFetch(() => envelope({ grants }));
+		const bad = await projectActions.catalogPermissionsRead(event({ name: '../members' }));
+		assert.equal(isActionFailure(bad), true);
+		// The console checks the session role first: an admin is refused without an API call.
+		const admin = await projectActions.catalogPermissionsRead(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogPermissionsRead`,
+				session: TOKEN,
+				user: USER,
+				projects: [{ ...PROJECT, role: 'admin' }],
+				params: { id: PROJECT.id },
+				form: { name: 'web' }
+			}).event as never
+		);
+		assert.equal((admin as { status: number }).status, 403);
+		assert.equal((admin as { data: { permissions: { loaded: boolean } } }).data.permissions.loaded, false);
+		assert.equal(none.length, 0);
+	});
+
+	test('the project load never reads permissions, even for an old ?permissions= link', async () => {
+		const calls = installFetch((call) => {
+			const path = call.url.pathname;
+			if (path === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
+			if (path.endsWith('/permissions')) return envelope({ grants: [] });
+			return envelope({ items: [], next_cursor: null });
+		});
+		const data = await projectLoad(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&permissions=web`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id }
+			}).event as never
+		);
+		assert.equal(calls.some((call) => call.url.pathname.endsWith('/permissions')), false);
+		assert.equal('permissions' in (data as object), false);
 	});
 
 	test('deploy reuses one idempotency key until success, and dialogs scroll', () => {
@@ -827,6 +960,46 @@ describe('catalog', { concurrency: false }, () => {
 		const body = calls.find((call) => call.method === 'POST')?.body ?? '';
 		assert.equal(body.includes('NODE_OPTIONS'), true);
 		assert.equal(body.includes('--inspect'), true);
+	});
+
+	test('a duplicate program name on create reads as a sentence, not the bare conflict', async () => {
+		const calls = installFetch((call) => {
+			if (call.url.pathname.endsWith('/hosts')) return envelope({ items: [host()], next_cursor: null });
+			return envelope(null, 409, 'conflict', 'conflict');
+		});
+		const refused = await projectActions.catalogCreate(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogCreate`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: editorForm({ name: 'web' })
+			}).event as never
+		);
+		assert.equal(isActionFailure(refused), true);
+		assert.equal((refused as { status: number }).status, 409);
+		assert.equal(editorOf(refused)?.message, 'A program named web already exists in this project.');
+		assert.equal(editorOf(refused)?.mode, 'create');
+		assert.equal(calls.filter((call) => call.method === 'POST').length, 1);
+
+		// Edit keeps the entry's name (it is in the path), so another refusal keeps the API's message.
+		installFetch((call) => {
+			if (call.url.pathname.endsWith('/hosts')) return envelope({ items: [host()], next_cursor: null });
+			return envelope(null, 409, 'conflict', 'spec changed');
+		});
+		const edited = await projectActions.catalogUpdate(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogUpdate`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { ...editorForm({}), entry_name: 'web' }
+			}).event as never
+		);
+		assert.equal(isActionFailure(edited), true);
+		assert.equal(editorOf(edited)?.message, 'spec changed');
 	});
 
 	test('a viewer catalog load omits env, exec, and args', async () => {
@@ -981,7 +1154,6 @@ function projectData(canOwner: boolean) {
 		catalogOmitted: 0,
 		catalogTruncated: false,
 		catalogMessage: null,
-		permissions: null,
 		copies: {},
 		copiesComplete: true,
 		copiesOmitted: 0,

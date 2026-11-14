@@ -10,6 +10,7 @@ import {
 	cleanPort,
 	cleanRestart,
 	cleanRunAs,
+	duplicateEntryMessage,
 	isAllowedRunAs,
 	isCatalogName,
 	isIdempotencyKey
@@ -20,14 +21,16 @@ import type { CatalogDraft, CatalogEditorState, CatalogPermissionsState, Catalog
 import { ApiError, actionFailure, apiFetch, apiList } from '$lib/server/api';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
+import { roleAtLeast } from '$lib/server/roles';
 import { present } from '$lib/server/redact';
 import { cleanEnvSources, envSourcesFromForm } from '$lib/image-spec';
 import { saveImageEntry } from '$lib/server/image-actions';
-import { parseCatalogPreview, parseHost, parseImageLogs, parseImageStatus, parseMember, parseProgramLogs, parseProgramStatus } from '$lib/server/shape';
+import { parseCatalogGrants, parseCatalogPreview, parseHost, parseImageLogs, parseImageStatus, parseMember, parseProgramLogs, parseProgramStatus } from '$lib/server/shape';
 import { isUuid } from '$lib/server/validate';
 import { backTo } from '$lib/url';
 
 const UNEXPECTED = 'The API returned an unexpected response.';
+const OWNER_ONLY = 'Only the project owner can change permissions.';
 
 function projectIdOf(params: { id?: string }): string {
 	if (!params.id || !isUuid(params.id)) error(404, 'Not found');
@@ -280,6 +283,9 @@ async function saveEntry(event: RequestEvent, mode: 'create' | 'edit') {
 		redirect(303, backTo(event.url));
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
+		if (mode === 'create' && err instanceof ApiError && err.code === 'conflict') {
+			return editorResult(event, 409, mode, name, built.draft, null, null, duplicateEntryMessage(built.draft.name));
+		}
 		return editorResult(event, apiStatus(err), mode, name, built.draft, null, null, apiMessage(err));
 	}
 }
@@ -396,15 +402,43 @@ export async function catalogLogs(event: RequestEvent) {
 	return catalogAct(event, 'logs');
 }
 
+/**
+ * One entry's grants, for the Permissions drawer. The drawer posts this with `fetch`, so the page load does not run.
+ * Only the project owner reads grants: the console checks the session role first, and the API refuses anyone else too.
+ */
+export async function catalogPermissionsRead(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const name = formText(await event.request.formData(), 'name');
+	if (!isCatalogName(name)) {
+		return fail(400, present(event, { scope: 'catalog' as const, permissions: permissionsState('', [], 'That catalog entry is not valid.', false) }));
+	}
+	const role = event.locals.projects.find((project) => project.id === id)?.role ?? null;
+	if (!roleAtLeast(role, 'owner')) {
+		return fail(403, present(event, { scope: 'catalog' as const, permissions: permissionsState(name, [], OWNER_ONLY, false) }));
+	}
+	try {
+		const grants = parseCatalogGrants(await apiFetch(event, `/v1/projects/${id}/catalog/${name}/permissions`));
+		if (!grants) return fail(502, present(event, { scope: 'catalog' as const, permissions: permissionsState(name, [], UNEXPECTED, false) }));
+		return present(event, { scope: 'catalog' as const, permissions: permissionsState(name, grants, null, true) });
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return fail(apiStatus(err), present(event, { scope: 'catalog' as const, permissions: permissionsState(name, [], apiMessage(err), false) }));
+	}
+}
+
 export async function catalogPermissions(event: RequestEvent) {
 	requireUser(event);
 	const id = projectIdOf(event.params);
 	const form = await event.request.formData();
 	const name = formText(form, 'name');
-	if (!isCatalogName(name)) return fail(400, present(event, { scope: 'catalog' as const, message: 'That catalog entry is not valid.' }));
+	// A refused save keeps the drawer's form and Save (`loaded` stays true): only the first read can leave it without them.
+	if (!isCatalogName(name)) {
+		return fail(400, present(event, { scope: 'catalog' as const, permissions: permissionsState(name, [], 'That catalog entry is not valid.', true) }));
+	}
 	const members = await loadMembers(event, id);
 	if (!members) {
-		return fail(503, present(event, { scope: 'catalog' as const, permissions: permissionsState(name, [], 'Members could not be loaded.', false) }));
+		return fail(503, present(event, { scope: 'catalog' as const, permissions: permissionsState(name, [], 'Members could not be loaded.', true) }));
 	}
 	const read = readGrants(form, members);
 	if (read.message) {
@@ -415,10 +449,7 @@ export async function catalogPermissions(event: RequestEvent) {
 			method: 'PUT',
 			body: JSON.stringify({ grants: read.grants })
 		});
-		const dest = new URL(backTo(event.url), event.url.origin);
-		dest.searchParams.delete('permissions');
-		const qs = dest.searchParams.toString();
-		redirect(303, qs ? `${dest.pathname}?${qs}` : dest.pathname);
+		redirect(303, backTo(event.url));
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
 		return fail(apiStatus(err), present(event, { scope: 'catalog' as const, permissions: permissionsState(name, read.grants, apiMessage(err), true) }));

@@ -76,54 +76,6 @@ export function backTo(url: URL): string {
 	return qs ? `${url.pathname}?${qs}` : url.pathname;
 }
 
-/** The page's query without `permissions`, `catalog.logs` or a `/name` action key: the table state the Permissions drawer opens over. */
-function withoutPermissions(url: URL): URLSearchParams {
-	const params = new URLSearchParams(url.searchParams);
-	params.delete('permissions');
-	params.delete(CATALOG_LOGS_PARAM);
-	for (const key of [...params.keys()]) {
-		if (key.startsWith('/')) params.delete(key);
-	}
-	return params;
-}
-
-/** Where the Catalog Permissions drawer closes to: the same page without `permissions` or a `/name` action key. */
-export function permissionsCloseHrefFor(url: URL): string {
-	const qs = withoutPermissions(url).toString();
-	return qs ? `${url.pathname}?${qs}` : url.pathname;
-}
-
-/**
- * Hidden fields of a row's Permissions GET form: the current query (search, sort, filters) on the Catalog & services tab,
- * plus `permissions`, so closing the drawer returns to the same table state.
- */
-export function permissionsOpenFields(url: URL, name: string): Array<{ name: string; value: string }> {
-	const params = withoutPermissions(url);
-	params.set('tab', 'catalog');
-	params.set('permissions', name);
-	return [...params].map(([key, value]) => ({ name: key, value }));
-}
-
-/** The same page with the Permissions drawer open for `name`: where the entry's ⋯ menu item navigates. */
-export function permissionsOpenHref(url: URL, name: string): string {
-	const params = new URLSearchParams(permissionsOpenFields(url, name).map((field) => [field.name, field.value]));
-	return `${url.pathname}?${params.toString()}`;
-}
-
-/**
- * Where a user close of the Permissions drawer navigates: `closeHref`, unless a navigation to a different
- * `permissions` URL is already on its way (a click on another row's Permissions during the close), which wins.
- */
-export function permissionsCloseTarget(closeHref: string, current: URL, pending: URL | null): string | null {
-	if (pending != null && permissionsRequested(pending) && pending.href !== current.href) return null;
-	return closeHref;
-}
-
-/** The URL asks for a Permissions drawer. A navigation that lands on one opens it, even if the last one was closing. */
-export function permissionsRequested(url: URL): boolean {
-	return (url.searchParams.get('permissions') ?? '') !== '';
-}
-
 /** A click the router turns into an in-page navigation: primary button, no modifier, not already handled. */
 export function isPlainClick(event: ClickInfo): boolean {
 	return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented;

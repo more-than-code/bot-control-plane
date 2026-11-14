@@ -19,7 +19,7 @@ import { filterHref, hostFilterHiddenFields, pageHrefKeepingAll, rowPage, search
 import { openOnRequest } from '../src/lib/log-view.ts';
 import CatalogDeployForm from '../src/routes/projects/[id]/CatalogDeployForm.svelte';
 import LogsDrawer from '../src/routes/projects/[id]/LogsDrawer.svelte';
-import { actionUrlFrom, backTo, onPlainClick, permissionsCloseHrefFor, permissionsOpenFields } from '../src/lib/url.ts';
+import { actionUrlFrom, backTo, onPlainClick } from '../src/lib/url.ts';
 import { actions as projectActions } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { imageCatalogEntry, renderCopies } from './copies.ts';
@@ -150,14 +150,12 @@ describe('catalog.logs link helpers', () => {
 		assert.equal(next.searchParams.get('tab'), 'catalog');
 	});
 
-	test('table links, filter forms and the Permissions drawer never carry catalog.logs on', () => {
+	test('table links and filter forms never carry catalog.logs on', () => {
 		// After use the param leaves the address bar, but `page.url` keeps it, so every link must drop it.
 		const url = new URL(catalogUrl({ 'catalog.host': HOST_ID, 'catalog.q': 'web', 'catalog.logs': 'web' }));
 		const names = (fields: Array<{ name: string }>) => fields.map((field) => field.name);
 		assert.equal(names(hostFilterHiddenFields(url.searchParams, 'catalog')).includes(CATALOG_LOGS_PARAM), false);
 		assert.equal(names(searchHiddenFields(url.searchParams, 'catalog')).includes(CATALOG_LOGS_PARAM), false);
-		assert.equal(names(permissionsOpenFields(url, 'web')).includes(CATALOG_LOGS_PARAM), false);
-		assert.equal(permissionsCloseHrefFor(url).includes('catalog.logs'), false);
 		assert.equal(tableHref(url, 'catalog', { page: 2 }).includes('catalog.logs'), false);
 		assert.equal(sortHref(url, 'catalog', { key: 'name' }, { sort: null, dir: 'asc' }).includes('catalog.logs'), false);
 		assert.equal(filterHref(url, 'catalog', 'kind', 'service').includes('catalog.logs'), false);

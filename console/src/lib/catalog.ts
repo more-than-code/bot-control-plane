@@ -106,6 +106,11 @@ export function isCatalogName(value: string): boolean {
 	return CATALOG_NAME.test(value);
 }
 
+/** A create refused with `conflict` (api-v1: the name exists in the project). Edit keeps its name, so it cannot hit this. */
+export function duplicateEntryMessage(name: string, kind: 'program' | 'image' = 'program'): string {
+	return kind === 'image' ? `An image entry named ${name} already exists in this project.` : `A program named ${name} already exists in this project.`;
+}
+
 export function isIdempotencyKey(value: string): boolean {
 	return IDEMPOTENCY_KEY.test(value);
 }

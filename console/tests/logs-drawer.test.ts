@@ -480,7 +480,9 @@ describe('logs-load', () => {
 			['//evil.example/signin', null],
 			['/\\evil.example', null],
 			['https://evil.example/signin', null],
-			['javascript:alert(1)', null]
+			['javascript:alert(1)', null],
+			['/\t/evil.example', null],
+			['/\n/evil.example/signin', null]
 		];
 		for (const [location, expected] of cases) {
 			assert.equal(sameOriginPath(location, ORIGIN), expected, location);
