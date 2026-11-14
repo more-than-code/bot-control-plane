@@ -191,7 +191,9 @@ func (s *Service) StartGoogle(ctx context.Context, redirectURI string) (GoogleSt
 	if err := s.putState(plain, verifier, redirectURI); err != nil {
 		return GoogleStart{}, err
 	}
-	u := s.oauthConf(p, redirectURI).AuthCodeURL(plain, oauth2.S256ChallengeOption(verifier))
+	// prompt=select_account: Google shows its account chooser on every sign-in
+	// instead of silently reusing the account the browser is signed in to.
+	u := s.oauthConf(p, redirectURI).AuthCodeURL(plain, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("prompt", "select_account"))
 	return GoogleStart{AuthorizeURL: u, State: plain}, nil
 }
 

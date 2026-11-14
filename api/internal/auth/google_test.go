@@ -141,6 +141,10 @@ func TestGoogleOIDC(t *testing.T) {
 	if q.Get("code_challenge_method") != "S256" || q.Get("code_challenge") == "" {
 		t.Fatalf("pkce query %v", q)
 	}
+	// Signing in again must offer the Google account chooser, not reuse the browser's default account silently.
+	if q.Get("prompt") != "select_account" {
+		t.Fatalf("prompt %q, want select_account", q.Get("prompt"))
+	}
 	if strings.Contains(started.AuthorizeURL, "code_verifier=") {
 		t.Fatal("code_verifier leaked into the authorize URL")
 	}

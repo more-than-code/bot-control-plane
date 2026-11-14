@@ -11,7 +11,7 @@ Paths are relative to `api/`; the binary is `cmd/deploybot-server` at the reposi
 run.go                     Run(ctx, args): config, DB pool, migrations on start (flag), HTTP server
 internal/config/           env config (below)
 internal/db/               pgx pool, migrations (embedded SQL), queries
-internal/auth/             Google OIDC + PKCE, sessions, device flow, MCP OAuth tokens
+internal/auth/             Google OIDC + PKCE (prompt=select_account), sessions, device flow, MCP OAuth tokens
 internal/authz/            authorize(user, project, capability), plus host relation (D34)
 internal/api/              REST handlers, envelope, error mapping
 internal/agentws/          /agent/v1/ws: enroll, hello, heartbeat, ingest, tasks, hub of live connections
