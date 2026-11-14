@@ -47,6 +47,9 @@ type HostPrograms struct {
 	// SharedNetworks is hello.programs.shared_networks (api-v1 v1.25 item 2).
 	// Nil (JSON null) when the agent did not send it (agents < 0.2.9).
 	SharedNetworks []SharedNetwork `json:"shared_networks"`
+	// EnvHash is hello.programs.env_hash (api-v1 v1.27 item 8, agent-protocol
+	// v1.14 item 1); absent = false.
+	EnvHash bool `json:"env_hash"`
 }
 
 // SharedNetwork is one runner.toml shared network (agent-protocol v1.13).

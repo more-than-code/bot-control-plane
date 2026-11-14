@@ -248,10 +248,50 @@ func (s *Server) imageMutate(w http.ResponseWriter, r *http.Request, action stri
 		return
 	}
 	if p.Session.Kind == store.KindDelegated {
+		if !s.envRefsOK(w, r, p, projectID, host, entry, img, action, body.Key) {
+			return
+		}
 		s.issueConfirmation(w, r, p, projectID, host, entry, action, body.Key, hash, digest, force, img.Networks)
 		return
 	}
 	s.performImage(w, r, p, projectID, host, entry, img, action, body.Force, digest, 0, body.Key)
+}
+
+// envRefsOK refuses a delegated deploy or rollback plan whose env has a bad
+// ${KEY} reference (api-v1 v1.27 item 7), so no plan is issued that confirm
+// would refuse. Other mergeEnv errors (decrypt, store) are left to the
+// confirm, which reports and audits them as for a console call.
+// The idempotency key was claimed: the refusal is stored under it.
+func (s *Server) envRefsOK(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, img catalog.Image, action, key string) bool {
+	if action != "deploy" && action != "rollback" {
+		return true
+	}
+	_, err := s.mergeImageEnv(r.Context(), projectID, img)
+	if refCall(err) == nil {
+		return true
+	}
+	s.auditTaskBuildErr(r.Context(), p, projectID, host, entry.Name, action, err)
+	s.imageFail(r.Context(), w, p.User.ID, key, err, nil)
+	return false
+}
+
+// confirmEnvRefsOK refuses a deploy or rollback confirm whose env has a bad
+// ${KEY} reference before the plan is used, like the other confirm-time
+// checks, so the user can fix the value and confirm the same plan again
+// (api-v1 v1.27 item 7). Nothing is stored under the idempotency key. Other
+// merge errors are left to performImage.
+func (s *Server) confirmEnvRefsOK(w http.ResponseWriter, r *http.Request, p principal, c store.CatalogConfirmation, host store.Host, entry store.CatalogEntry, img catalog.Image) bool {
+	if c.Action != "deploy" && c.Action != "rollback" {
+		return true
+	}
+	_, err := s.mergeImageEnv(r.Context(), c.ProjectID, img)
+	call := refCall(err)
+	if call == nil {
+		return true
+	}
+	s.auditTaskBuildErr(r.Context(), p, c.ProjectID, host, entry.Name, c.Action, err)
+	writeCode(w, call.Code, call.Msg)
+	return false
 }
 
 func (s *Server) finishImageShort(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action, key string, lines int) {
@@ -359,6 +399,9 @@ func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principa
 		writeCode(w, "conflict", "conflict")
 		return
 	}
+	if !s.confirmEnvRefsOK(w, r, p, c, host, entry, img) {
+		return
+	}
 	if err := s.Store.MarkConfirmationUsed(r.Context(), secretHash(r), p.User.ID, s.now()); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeCode(w, "not_found", "not found")
@@ -407,7 +450,7 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 	}
 	spec, forms, err := s.imageTask(ctx, projectID, host, entry, img, action, force, digest, lines)
 	if err != nil {
-		s.auditDecrypt(ctx, p, projectID, host, entry.Name, action, err)
+		s.auditTaskBuildErr(ctx, p, projectID, host, entry.Name, action, err)
 		s.imageFail(ctx, w, p.User.ID, key, err, forms)
 		return
 	}
@@ -660,10 +703,11 @@ func (s *Server) imageTask(ctx context.Context, projectID uuid.UUID, host store.
 	}
 	switch action {
 	case "deploy", "rollback":
-		env, secretKeys, err := s.mergeEnv(ctx, projectID, img.EnvRefs())
+		merged, err := s.mergeImageEnv(ctx, projectID, img)
 		if err != nil {
 			return nil, nil, err
 		}
+		env, secretKeys := merged.env, merged.secretKeys
 		spec, err := storedSpec(img, host)
 		if err != nil {
 			return nil, nil, err
@@ -675,7 +719,7 @@ func (s *Server) imageTask(ctx context.Context, projectID uuid.UUID, host store.
 		files, fileSecrets, err := s.resolveFiles(ctx, projectID, img)
 		other := append([]string{}, fileSecrets...)
 		other = append(other, secretValues(nil, nil, reg)...)
-		forms := mergeSecretForms(envValueForms(secretValues(env, secretKeys, nil)), redactedValueForms(other))
+		forms := mergeSecretForms(merged.forms(), redactedValueForms(other))
 		if err != nil {
 			return nil, forms, err
 		}
@@ -697,6 +741,16 @@ func (s *Server) imageTask(ctx context.Context, projectID uuid.UUID, host store.
 		if host.Programs != nil && host.Programs.Files {
 			out["secret_keys"] = secretKeys
 		}
+		// agent-protocol v1.14: env_hash only to an agent that advertised it.
+		// Without the secrets key there is no hash key; the task is then the
+		// v1.9 shape, which the agent handles as before.
+		if host.Programs != nil && host.Programs.EnvHash && s.Secrets != nil {
+			hash, err := s.Secrets.EnvHash(env)
+			if err != nil {
+				return nil, forms, err
+			}
+			out["env_hash"] = hash
+		}
 		if action == "rollback" {
 			out["digest"] = digest
 		}
@@ -711,20 +765,29 @@ func (s *Server) imageTask(ctx context.Context, projectID uuid.UUID, host store.
 // redactValues loads secret env values that opened, the matching registry
 // token when it opens, and secret file pieces. Each source is collected on
 // its own: an env or registry failure does not drop file pieces that opened.
-// Plain env-set values and inline env are not included. The task frame is
+// Plain env-set values and inline env are not included unless they
+// reference a secret key (api-v1 v1.27 item 7). The task frame is
 // not changed. A missing key returns nothing; image_logs is refused before
 // this runs when the entry references a secret env key or a secret file. A
 // decrypt failure logs once, with no value. A missing or undecryptable file
 // is skipped; every secret that opened is still returned. The same set is
 // used whether or not the frame sends secret_keys.
 func (s *Server) redactValues(ctx context.Context, projectID uuid.UUID, img catalog.Image) []secretForm {
-	var envVals []string
+	var envForms []secretForm
 	var other []string
 	failed := false
 	if s.Secrets != nil {
-		envSecrets, envFailed := s.redactEnvValues(ctx, projectID, img.EnvRefs())
-		envVals = append(envVals, envSecrets...)
-		failed = envFailed
+		// A successful merge gives exactly the deploy's secret values,
+		// including a resolved value that references a secret (v1.27 item 7).
+		// When it fails (a decrypt, a missing source, a bad reference), the
+		// best-effort walk still hides every secret that opens.
+		if merged, err := s.mergeImageEnv(ctx, projectID, img); err == nil {
+			envForms = merged.forms()
+		} else {
+			typed, generated, envFailed := s.redactEnvValues(ctx, projectID, img.EnvRefs())
+			envForms = envSecretForms(typed, generated)
+			failed = envFailed
+		}
 		reg, err := s.registryAuth(ctx, projectID, img.RegistryHost)
 		if errors.Is(err, errDecrypt) {
 			failed = true
@@ -740,16 +803,18 @@ func (s *Server) redactValues(ctx context.Context, projectID uuid.UUID, img cata
 		s.logger().Error("decrypt failed")
 	}
 	other = append(other, more...)
-	return mergeSecretForms(envValueForms(envVals), redactedValueForms(other))
+	return mergeSecretForms(envForms, redactedValueForms(other))
 }
 
 // redactEnvValues returns secret env values whose winning material opened.
 // Precedence matches mergeEnv. A later set, secret_env, or inline env
 // replaces an earlier key. A winning secret that does not decrypt is omitted.
 // A store error skips that set and keeps values already opened. Deploy still
-// uses mergeEnv, which fails closed.
-func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs) ([]string, bool) {
+// uses mergeEnv, which fails closed. Values are split into typed and
+// generated ones, whose replacement is four bullets (v1.27 item 2).
+func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs) ([]string, []string, bool) {
 	out := map[string]string{}
+	gen := map[string]bool{}
 	failed := false
 	for _, set := range refs.Sets {
 		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
@@ -770,6 +835,7 @@ func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, refs 
 				continue
 			}
 			out[m.Key] = val
+			gen[m.Key] = m.Generated
 		}
 	}
 	for key, ref := range refs.Secret {
@@ -803,6 +869,7 @@ func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, refs 
 				break
 			}
 			out[key] = val
+			gen[key] = m.Generated
 			break
 		}
 		if !found {
@@ -813,43 +880,100 @@ func (s *Server) redactEnvValues(ctx context.Context, projectID uuid.UUID, refs 
 	for key := range refs.Inline {
 		delete(out, key)
 	}
-	secrets := make([]string, 0, len(out))
-	for _, val := range out {
-		secrets = append(secrets, val)
+	var typed, generated []string
+	for key, val := range out {
+		if gen[key] {
+			generated = append(generated, val)
+		} else {
+			typed = append(typed, val)
+		}
 	}
-	return secrets, failed
+	return typed, generated, failed
 }
 
-// mergeEnv resolves env sets in order, then secret_env, then inline env.
-// The returned names are the keys whose winning value came from an env-set
-// key with is_secret, and which inline env did not override. The slice is
-// sorted and never nil. Image deploys and program Runs share it (api-v1 v1.22
-// item 3).
-func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs) (map[string]string, []string, error) {
+// envMerge is the merged env of one image task or program Run.
+type envMerge struct {
+	env map[string]string
+	// secretKeys is sorted and never nil.
+	secretKeys []string
+	// generated marks secret keys whose value is, or references, an
+	// API-generated value. Their replacement in task output is four
+	// bullets, never a preview (v1.27 item 2).
+	generated map[string]bool
+}
+
+// forms is the redaction set for the merged secret values.
+func (m envMerge) forms() []secretForm {
+	var typed, generated []string
+	for _, key := range m.secretKeys {
+		if m.generated[key] {
+			generated = append(generated, m.env[key])
+		} else {
+			typed = append(typed, m.env[key])
+		}
+	}
+	return envSecretForms(typed, generated)
+}
+
+// envSecretForms redacts typed secrets with their preview and generated
+// ones with four bullets. A form in both groups keeps the bullets.
+func envSecretForms(typed, generated []string) []secretForm {
+	return mergeSecretForms(valueForms(generated, catalog.SecretPreview("")), envValueForms(typed))
+}
+
+// mergeImageEnv is mergeEnv followed by one pass of ${KEY} references
+// (api-v1 v1.27 item 7). secretKeys and generated then also cover the keys
+// whose value references a secret or generated key. A bad reference is a
+// *catalog.RefError (see refCall). Program env stays literal: program Runs
+// call mergeEnv.
+func (s *Server) mergeImageEnv(ctx context.Context, projectID uuid.UUID, img catalog.Image) (envMerge, error) {
+	merged, err := s.mergeEnv(ctx, projectID, img.EnvRefs())
+	if err != nil {
+		return envMerge{}, err
+	}
+	secret := make(map[string]bool, len(merged.env))
+	for _, key := range merged.secretKeys {
+		secret[key] = true
+	}
+	resolved, err := catalog.ResolveEnvRefs(merged.env, secret)
+	if err != nil {
+		return envMerge{}, err
+	}
+	return newEnvMerge(resolved.Env, resolved.Spread(secret), resolved.Spread(merged.generated)), nil
+}
+
+// mergeEnv resolves env sets in order, then secret_env, then inline env,
+// with no reference resolution. secretKeys are the keys whose winning value
+// came from an env-set key with is_secret, and which inline env did not
+// override. Image deploys (through mergeImageEnv) and program Runs share it
+// (api-v1 v1.22 item 3).
+func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs) (envMerge, error) {
 	out := map[string]string{}
 	secret := map[string]bool{}
+	generated := map[string]bool{}
 	for _, set := range refs.Sets {
 		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
 		if err != nil {
-			return nil, nil, err
+			return envMerge{}, err
 		}
 		for _, m := range mats {
 			val, err := s.openEnv(projectID, set, m)
 			if err != nil {
-				return nil, nil, err
+				return envMerge{}, err
 			}
 			out[m.Key] = val
 			secret[m.Key] = m.IsSecret
+			generated[m.Key] = m.Generated
 		}
 	}
 	for key, ref := range refs.Secret {
 		set, name, ok := strings.Cut(ref, ".")
 		if !ok {
-			return nil, nil, errDecrypt
+			return envMerge{}, errDecrypt
 		}
 		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
 		if err != nil {
-			return nil, nil, err
+			return envMerge{}, err
 		}
 		found := false
 		for _, m := range mats {
@@ -858,21 +982,28 @@ func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, refs catalog
 			}
 			val, err := s.openEnv(projectID, set, m)
 			if err != nil {
-				return nil, nil, err
+				return envMerge{}, err
 			}
 			out[key] = val
 			secret[key] = m.IsSecret
+			generated[key] = m.Generated
 			found = true
 			break
 		}
 		if !found {
-			return nil, nil, errDecrypt
+			return envMerge{}, errDecrypt
 		}
 	}
 	for key, val := range refs.Inline {
 		out[key] = val
 		secret[key] = false
+		generated[key] = false
 	}
+	return newEnvMerge(out, secret, generated), nil
+}
+
+// newEnvMerge builds an envMerge from the merged env and its per-key flags.
+func newEnvMerge(env map[string]string, secret, generated map[string]bool) envMerge {
 	keys := make([]string, 0)
 	for key, isSecret := range secret {
 		if isSecret {
@@ -880,7 +1011,7 @@ func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, refs catalog
 		}
 	}
 	sort.Strings(keys)
-	return out, keys, nil
+	return envMerge{env: env, secretKeys: keys, generated: generated}
 }
 
 func secretValues(env map[string]string, keys []string, reg any) []string {
@@ -1893,8 +2024,9 @@ func (s *Server) imageDone(w http.ResponseWriter, userID uuid.UUID, key string, 
 }
 
 func (s *Server) imageFail(ctx context.Context, w http.ResponseWriter, userID uuid.UUID, key string, err error, forms []secretForm) {
-	var call *agentws.CallError
+	call := refCall(err)
 	switch {
+	case call != nil: // a bad ${KEY} reference; refCall built the answer
 	case errors.Is(err, errDecrypt):
 		s.logger().Error("decrypt failed")
 		call = &agentws.CallError{Code: "error", Msg: "internal error"}
@@ -1912,9 +2044,16 @@ func (s *Server) imageFail(ctx context.Context, w http.ResponseWriter, userID uu
 	if call.Msg == "" {
 		call.Msg = phrase(call.Code)
 	}
-	call.Msg = redactExact(call.Msg, forms)
+	// A RefError message holds key names and fixed text only, and is sent
+	// as is (see recordImageDeny); every other message is redacted.
+	ref := refCall(err) != nil
+	if !ref {
+		call.Msg = redactExact(call.Msg, forms)
+	}
 	status, body, _ := liveEnvelope(agentws.LiveResult{}, call)
-	body = redactBody(body, forms)
+	if !ref {
+		body = redactBody(body, forms)
+	}
 	s.finishImageKey(userID, key, status, body)
 	writeJSON(w, status, body)
 }
@@ -1924,8 +2063,24 @@ func (s *Server) imageDeny(w http.ResponseWriter, r *http.Request, p principal, 
 	writeCode(w, code, msg)
 }
 
-func (s *Server) auditDecrypt(ctx context.Context, p principal, projectID uuid.UUID, host store.Host, entry, action string, err error) {
+// refCall is the answer to a bad ${KEY} reference (api-v1 v1.27 item 7):
+// bad_request with the RefError message, which names keys only. It is nil
+// for any other error.
+func refCall(err error) *agentws.CallError {
+	var ref *catalog.RefError
+	if !errors.As(err, &ref) {
+		return nil
+	}
+	return &agentws.CallError{Code: "bad_request", Msg: ref.Msg}
+}
+
+// auditTaskBuildErr audits a deploy or rollback refused while the task was
+// built: a bad reference, a decrypt failure, or a missing secrets key.
+func (s *Server) auditTaskBuildErr(ctx context.Context, p principal, projectID uuid.UUID, host store.Host, entry, action string, err error) {
+	call := refCall(err)
 	switch {
+	case call != nil: // a bad ${KEY} reference; refCall built the answer
+		s.recordImageDeny(ctx, p, projectID, host, entry, action, call.Code, call.Msg, nil, false)
 	case errors.Is(err, errDecrypt):
 		s.auditImageDeny(ctx, p, projectID, host, entry, action, "error", "decrypt failed", nil)
 	case errors.Is(err, errSecretsKey):
@@ -1934,14 +2089,29 @@ func (s *Server) auditDecrypt(ctx context.Context, p principal, projectID uuid.U
 }
 
 func (s *Server) auditImageDeny(ctx context.Context, p principal, projectID uuid.UUID, host store.Host, entry, action, code, msg string, forms []secretForm) {
+	s.recordImageDeny(ctx, p, projectID, host, entry, action, code, msg, forms, true)
+}
+
+// recordImageDeny writes one deny row. With redact false the reason is
+// stored as given: only for a RefError message, which is built from
+// validated key names and fixed text. RedactCmdline would otherwise read a
+// key such as SECRET_URL followed by a word as a secret pair.
+func (s *Server) recordImageDeny(ctx context.Context, p principal, projectID uuid.UUID, host store.Host, entry, action, code, msg string, forms []secretForm, redact bool) {
 	name := catalogActionName(action)
 	if name == "" {
 		return
 	}
 	result := code
-	detail := map[string]any{"reason": redactExact(msg, forms), "entry": entry}
+	reason := msg
+	if redact {
+		reason = redactExact(msg, forms)
+	}
+	detail := map[string]any{"reason": reason, "entry": entry}
 	if host.Name != "" {
 		detail["host"] = host.Name
+	}
+	if redact {
+		detail = redactDetail(detail, forms)
 	}
 	var hostID *uuid.UUID
 	if host.ID != uuid.Nil {
@@ -1956,7 +2126,7 @@ func (s *Server) auditImageDeny(ctx context.Context, p principal, projectID uuid
 		Decision:    audit.DecisionDenied,
 		Result:      &result,
 		ErrorCode:   &result,
-		Detail:      redactDetail(detail, forms),
+		Detail:      detail,
 	})
 }
 

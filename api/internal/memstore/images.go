@@ -17,13 +17,19 @@ type envSetRec struct {
 	UpdatedBy uuid.UUID
 }
 
+// envValueRec is one stored value. A new rec has RevealPending, NeedsValue,
+// and Generated false, which is what every value write except a generated
+// PutEnvKey stores (api-v1 v1.27 item 2).
 type envValueRec struct {
-	Key        string
-	IsSecret   bool
-	Plain      string
-	Nonce      []byte
-	Ciphertext []byte
-	KeyVersion int
+	Key           string
+	IsSecret      bool
+	Plain         string
+	Nonce         []byte
+	Ciphertext    []byte
+	KeyVersion    int
+	RevealPending bool
+	NeedsValue    bool
+	Generated     bool
 }
 
 type registryRec struct {
@@ -368,7 +374,7 @@ func (m *Mem) envSetViewLocked(projectID uuid.UUID, set envSetRec) store.EnvSet 
 	sort.Slice(values, func(i, j int) bool { return values[i].Key < values[j].Key })
 	keys := make([]store.EnvKey, 0, len(values))
 	for _, v := range values {
-		item := store.EnvKey{Key: v.Key, IsSecret: v.IsSecret}
+		item := store.EnvKey{Key: v.Key, IsSecret: v.IsSecret, RevealPending: v.RevealPending, NeedsValue: v.NeedsValue, Generated: v.Generated}
 		if !v.IsSecret {
 			plain := v.Plain
 			item.Value = &plain
@@ -519,6 +525,11 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 		}
 	} else {
 		secret = values[idx].IsSecret
+		// Generate creates new keys only (v1.27 rev 3). Phase B will let it
+		// fill a needs_value placeholder; needs_value is always false today.
+		if in.Generated {
+			return store.EnvKey{}, false, store.ErrKeyExists
+		}
 		if in.Secret != nil && *in.Secret != secret {
 			return store.EnvKey{}, false, store.ErrSecretFixed
 		}
@@ -531,6 +542,8 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 		row.Nonce = append([]byte(nil), in.Nonce...)
 		row.Ciphertext = append([]byte(nil), in.Ciphertext...)
 		row.KeyVersion = in.KeyVersion
+		row.RevealPending = in.Generated
+		row.Generated = in.Generated
 	} else {
 		row.Plain = in.Plain
 	}
@@ -543,7 +556,43 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 	m.envValues[id] = values
 	// Every write re-hashes; see the Postgres PutEnvKey (v1.22 amendment 1).
 	m.rehashSetLocked(projectID, name, at)
-	return storedEnvKey(in.Key, secret, in.Plain), created, nil
+	item := storedEnvKey(in.Key, secret, in.Plain)
+	item.RevealPending = row.RevealPending
+	item.Generated = row.Generated
+	return item, created, nil
+}
+
+// RevealEnvKey clears reveal_pending under m.mu, so concurrent calls give
+// exactly one success.
+func (m *Mem) RevealEnvKey(_ context.Context, projectID uuid.UUID, name, key string) (store.EnvMaterial, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.projectAliveLocked(projectID) {
+		return store.EnvMaterial{}, store.ErrNotFound
+	}
+	id := envKey(projectID, name)
+	if _, ok := m.envSets[id]; !ok {
+		return store.EnvMaterial{}, store.ErrNotFound
+	}
+	values := m.envValues[id]
+	for i := range values {
+		if values[i].Key != key {
+			continue
+		}
+		if !values[i].RevealPending {
+			return store.EnvMaterial{}, store.ErrConflict
+		}
+		v := values[i]
+		next := append([]envValueRec(nil), values...)
+		next[i].RevealPending = false
+		m.envValues[id] = next
+		return store.EnvMaterial{
+			Key: v.Key, IsSecret: v.IsSecret,
+			Nonce: append([]byte(nil), v.Nonce...), Ciphertext: append([]byte(nil), v.Ciphertext...),
+			KeyVersion: v.KeyVersion, Generated: v.Generated,
+		}, nil
+	}
+	return store.EnvMaterial{}, store.ErrNotFound
 }
 
 func (m *Mem) DeleteEnvKey(_ context.Context, projectID uuid.UUID, name, key string, actor uuid.UUID, at time.Time) error {
@@ -734,7 +783,7 @@ func (m *Mem) ListEnvMaterial(_ context.Context, projectID uuid.UUID, name strin
 		out = append(out, store.EnvMaterial{
 			Key: v.Key, IsSecret: v.IsSecret, Plain: v.Plain,
 			Nonce: append([]byte(nil), v.Nonce...), Ciphertext: append([]byte(nil), v.Ciphertext...),
-			KeyVersion: v.KeyVersion,
+			KeyVersion: v.KeyVersion, Generated: v.Generated,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })

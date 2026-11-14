@@ -53,6 +53,7 @@ var delegatedDenyPatterns = []string{
 	"PUT /v1/projects/{id}/env-sets/{set}/keys/{key}",
 	"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}",
 	"POST /v1/projects/{id}/env-sets/{set}/secret",
+	"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal",
 }
 
 var delegatedAllowPatterns = []string{
@@ -192,6 +193,10 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 			}},
 		{"POST /v1/projects/{id}/env-sets/{set}/secret", http.MethodPost, "/v1/projects/" + project + "/env-sets/svc/secret",
 			`{"keys":["TOKEN"]}`, func(t *testing.T) string {
+				return envSnap(t, w, sc.project.ID, "svc")
+			}},
+		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal", http.MethodPost, "/v1/projects/" + project + "/env-sets/svc/keys/TOKEN/reveal",
+			"", func(t *testing.T) string {
 				return envSnap(t, w, sc.project.ID, "svc")
 			}},
 	}

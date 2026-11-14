@@ -565,11 +565,12 @@ func (s *Server) dispatchProgram(ctx context.Context, projectID uuid.UUID, host 
 	refs := entry.Spec.Program().EnvRefs()
 	var forms []secretForm
 	if refs.Any() && action == "run" {
-		env, secretKeys, err := s.mergeEnv(ctx, projectID, refs)
+		merged, err := s.mergeEnv(ctx, projectID, refs)
 		if err != nil {
 			return agentws.LiveResult{}, nil, s.programEnvErr(err)
 		}
-		forms = envValueForms(secretValues(env, secretKeys, nil))
+		env, secretKeys := merged.env, merged.secretKeys
+		forms = merged.forms()
 		if len(env) > catalog.MaxProgramEnv {
 			return agentws.LiveResult{}, forms, &agentws.CallError{Code: "bad_request", Msg: "too many env keys"}
 		}
@@ -583,11 +584,11 @@ func (s *Server) dispatchProgram(ctx context.Context, projectID uuid.UUID, host 
 			return agentws.LiveResult{}, forms, &agentws.CallError{Code: "bad_request", Msg: reasonProgramEnvTooLarge}
 		}
 	} else if refs.Any() && s.Secrets != nil {
-		vals, failed := s.redactEnvValues(ctx, projectID, refs)
+		typed, generated, failed := s.redactEnvValues(ctx, projectID, refs)
 		if failed {
 			s.logger().Error("decrypt failed")
 		}
-		forms = envValueForms(vals)
+		forms = envSecretForms(typed, generated)
 	}
 	res, err := s.Hub.Program(ctx, host, kind, spec)
 	return res, forms, err

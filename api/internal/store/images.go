@@ -64,16 +64,25 @@ func IsAutoOutcome(outcome string) bool {
 // EnvKey is one env-set key in an HTTP body. Value is null when the key is secret.
 // Preview is the v1.13 preview of a secret and null for a plain key.
 // The store leaves Preview nil. The HTTP handler fills it and never puts the secret in Value.
+// RevealPending is true from a generated write until its one reveal; NeedsValue
+// marks a placeholder that has no value yet (api-v1 v1.27 item 2).
+// Generated is true while the stored value is API-generated; it only picks
+// the preview (always four bullets) and is not part of the HTTP object.
 type EnvKey struct {
-	Key      string  `json:"key"`
-	IsSecret bool    `json:"is_secret"`
-	Value    *string `json:"value"`
-	Preview  *string `json:"preview"`
+	Key           string  `json:"key"`
+	IsSecret      bool    `json:"is_secret"`
+	Value         *string `json:"value"`
+	Preview       *string `json:"preview"`
+	RevealPending bool    `json:"reveal_pending"`
+	NeedsValue    bool    `json:"needs_value"`
+	Generated     bool    `json:"-"`
 }
 
 // EnvKeyPut is one key for PutEnvKey.
 // Secret nil stores a new key as secret and leaves an existing flag unchanged.
 // Nonce and Ciphertext seal Plain when the stored flag is secret.
+// Generated marks an API-generated value: a secret key is stored with
+// reveal_pending and generated true. Any other write stores both false.
 type EnvKeyPut struct {
 	Key        string
 	Plain      string
@@ -81,6 +90,7 @@ type EnvKeyPut struct {
 	Nonce      []byte
 	Ciphertext []byte
 	KeyVersion int
+	Generated  bool
 }
 
 // EnvSet is one project env set.
@@ -119,6 +129,7 @@ func (e *MissingEnvKeyError) Error() string { return "key " + e.Key + " not foun
 func (e *MissingEnvKeyError) Is(target error) bool { return target == ErrNotFound }
 
 // EnvMaterial is a stored env value, including ciphertext. It is not returned over HTTP.
+// Generated is the v1.27 generated flag (see EnvKey).
 type EnvMaterial struct {
 	Key        string
 	IsSecret   bool
@@ -126,6 +137,7 @@ type EnvMaterial struct {
 	Nonce      []byte
 	Ciphertext []byte
 	KeyVersion int
+	Generated  bool
 }
 
 // Registry is a registry credential without the token.
