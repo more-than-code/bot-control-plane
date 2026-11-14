@@ -12,8 +12,7 @@ import {
 	cleanRunAs,
 	isAllowedRunAs,
 	isCatalogName,
-	isIdempotencyKey,
-	isSpecHash
+	isIdempotencyKey
 } from '$lib/catalog';
 import type { CatalogGrant, CatalogGrantAction, Host, Member } from '$lib/api-types';
 import { logLinesChoice } from '$lib/log-lines';
@@ -31,11 +30,6 @@ import { backTo } from '$lib/url';
 const UNEXPECTED = 'The API returned an unexpected response.';
 
 function projectIdOf(params: { id?: string }): string {
-	if (!params.id || !isUuid(params.id)) error(404, 'Not found');
-	return params.id;
-}
-
-function hostIdOf(params: { id?: string }): string {
 	if (!params.id || !isUuid(params.id)) error(404, 'Not found');
 	return params.id;
 }
@@ -428,37 +422,5 @@ export async function catalogPermissions(event: RequestEvent) {
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
 		return fail(apiStatus(err), present(event, { scope: 'catalog' as const, permissions: permissionsState(name, read.grants, apiMessage(err), true) }));
-	}
-}
-
-export async function approveCatalog(event: RequestEvent) {
-	requireUser(event);
-	const id = hostIdOf(event.params);
-	const form = await event.request.formData();
-	const entry_id = formText(form, 'entry_id');
-	const spec_hash = formText(form, 'spec_hash');
-	if (!isUuid(entry_id)) return fail(400, present(event, { message: 'That catalog entry is not valid.' }));
-	if (!isSpecHash(spec_hash)) return fail(400, present(event, { message: 'That spec hash is not valid.' }));
-	try {
-		await apiFetch(event, `/v1/hosts/${id}/catalog-approvals`, {
-			method: 'POST',
-			body: JSON.stringify({ entry_id, spec_hash })
-		});
-		redirect(303, backTo(event.url));
-	} catch (err) {
-		return actionFailure(event, err);
-	}
-}
-
-export async function revokeCatalog(event: RequestEvent) {
-	requireUser(event);
-	const id = hostIdOf(event.params);
-	const entryId = formText(await event.request.formData(), 'entry_id');
-	if (!isUuid(entryId)) return fail(400, present(event, { message: 'That catalog entry is not valid.' }));
-	try {
-		await apiFetch(event, `/v1/hosts/${id}/catalog-approvals/${entryId}`, { method: 'DELETE' });
-		redirect(303, backTo(event.url));
-	} catch (err) {
-		return actionFailure(event, err);
 	}
 }

@@ -19,6 +19,7 @@ import {
 	fakeEvent,
 	installFetch,
 	JOIN,
+	ORG,
 	PROJECT,
 	restoreEnv,
 	TOKEN,
@@ -378,11 +379,31 @@ describe('auth routes', { concurrency: false }, () => {
 				url: `http://console.example/projects/${PROJECT.id}`,
 				session: TOKEN,
 				user: USER,
+				projects: [PROJECT],
 				params: { id: PROJECT.id },
 				form: { host_name_hint: 'pi1', expires_in_sec: '3600' }
 			}).event as never
 		);
-		assert.equal(calls[0]?.body, JSON.stringify({ host_name_hint: 'pi1', expires_in_sec: 3600 }));
+		assert.equal(calls[0]?.url.pathname, `/v1/orgs/${PROJECT.org_id}/join-tokens`);
+		assert.equal(
+			calls[0]?.body,
+			JSON.stringify({ grant: { project_id: PROJECT.id, level: 'deploy' }, host_name_hint: 'pi1', expires_in_sec: 3600 })
+		);
+
+		// A project with no org in the session cannot make a token; nothing is sent.
+		const none = installFetch(() => envelope(null, 500, 'error', 'unexpected'));
+		const refused = await projectActions.createToken(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}`,
+				session: TOKEN,
+				user: USER,
+				projects: [{ ...PROJECT, org_id: null }],
+				params: { id: PROJECT.id },
+				form: { host_name_hint: 'pi1', expires_in_sec: '3600' }
+			}).event as never
+		);
+		assert.equal(isActionFailure(refused), true);
+		assert.equal(none.length, 0);
 	});
 
 	test('delete requires the freshly loaded project name', async () => {
@@ -628,7 +649,7 @@ describe('auth routes', { concurrency: false }, () => {
 		});
 	});
 
-	test('admin tokens and hosts tabs list tokens, and create on Hosts shows a token once', async () => {
+	test('the old tokens tab lands on Hosts, the org admin Hosts tab lists org tokens, and create shows a token once', async () => {
 		useApi('https://api.test');
 		const admin = { ...PROJECT, role: 'admin' as const };
 		const row = {
@@ -658,14 +679,15 @@ describe('auth routes', { concurrency: false }, () => {
 				params: { id: PROJECT.id }
 			}).event as never
 		));
-		assert.equal(loaded.tab, 'tokens');
+		// A project admin who is not an org admin: no tokens are read (they belong to the org).
+		assert.equal(loaded.tab, 'hosts');
 		assert.equal(loaded.canAdmin, true);
-		assert.equal(loaded.tokens.length, 1);
-		assert.equal(loaded.tokens[0]?.host_name_hint, 'pi1');
-		assert.equal(calls.some((call) => call.url.pathname.endsWith('/join-tokens')), true);
+		assert.equal(loaded.canOrgAdmin, false);
+		assert.equal(loaded.tokens.length, 0);
+		assert.equal(calls.some((call) => call.url.pathname.endsWith('/join-tokens')), false);
 		assert.equal(containsToken(loaded, JOIN), false);
 
-		// The Hosts tab also lists join tokens for an admin, to see when the created one is used.
+		// An org admin's Hosts tab lists the org's join tokens, to see when the created one is used.
 		const hostsCalls = installFetch((call) => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(admin);
 			if (call.url.pathname.endsWith('/hosts')) return envelope({ items: [], next_cursor: null });
@@ -678,12 +700,14 @@ describe('auth routes', { concurrency: false }, () => {
 				session: TOKEN,
 				user: USER,
 				projects: [admin],
+				orgs: [ORG],
 				params: { id: PROJECT.id }
 			}).event as never
 		));
 		assert.equal(hostsTab.tab, 'hosts');
+		assert.equal(hostsTab.canOrgAdmin, true);
 		assert.equal(hostsTab.tokens.length, 1);
-		assert.equal(hostsCalls.some((call) => call.url.pathname.endsWith('/join-tokens')), true);
+		assert.equal(hostsCalls.some((call) => call.url.pathname === `/v1/orgs/${ORG.id}/join-tokens`), true);
 		assert.equal(containsToken(hostsTab, JOIN), false);
 
 		const command = `printf '%s' '${JOIN}' | sudo -u bot-agent bot-agent init --server 'wss://api.example/agent' --join-token-stdin`;
@@ -703,6 +727,9 @@ describe('auth routes', { concurrency: false }, () => {
 		let step = 0;
 		installFetch((call) => {
 			assert.equal(call.method, 'POST');
+			// api-v1 v1.24: an org token that grants this project deploy.
+			assert.equal(call.url.pathname, `/v1/orgs/${PROJECT.org_id}/join-tokens`);
+			assert.deepEqual(JSON.parse(String(call.body)).grant, { project_id: PROJECT.id, level: 'deploy' });
 			const body = issued[step];
 			step += 1;
 			return envelope(body);
@@ -779,13 +806,13 @@ describe('auth routes', { concurrency: false }, () => {
 		));
 		assert.equal(containsToken(again, JOIN), false);
 		const addHost = ['AddHostSection.svelte', 'JoinTokenResult.svelte']
-			.map((name) => readFileSync(new URL(`../src/routes/projects/[id]/${name}`, import.meta.url), 'utf8'))
+			.map((name) => readFileSync(new URL(`../src/lib/components/${name}`, import.meta.url), 'utf8'))
 			.join('\n');
 		assert.equal(addHost.includes('install_command'), false);
 		assert.equal(addHost.includes('Copy install command'), false);
 		assert.match(addHost, /Copy token/);
 		assert.match(addHost, /Copy enrol command/);
-		const tokensPage = readFileSync(new URL('../src/routes/projects/[id]/TokensSection.svelte', import.meta.url), 'utf8');
+		const tokensPage = readFileSync(new URL('../src/routes/orgs/[id]/TokensSection.svelte', import.meta.url), 'utf8');
 		assert.equal(tokensPage.includes('created.token'), false);
 		assert.equal(tokensPage.includes('createToken'), false);
 	});

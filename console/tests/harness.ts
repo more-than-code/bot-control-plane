@@ -1,4 +1,4 @@
-import type { Project, User } from '$lib/api-types';
+import type { Org, Project, User } from '$lib/api-types';
 import { env } from '$env/dynamic/private';
 import type { RequestEvent } from '@sveltejs/kit';
 
@@ -16,6 +16,17 @@ export const PROJECT: Project = {
 	id: '00000000-0000-4000-8000-000000000010',
 	name: 'Lab',
 	slug: 'lab',
+	role: 'owner',
+	created_at: '2026-10-13T00:00:00Z',
+	org_id: '00000000-0000-4000-8000-0000000000a0',
+	via: 'member'
+};
+
+/** The org PROJECT belongs to; the caller owns it. */
+export const ORG: Org = {
+	id: '00000000-0000-4000-8000-0000000000a0',
+	name: 'Home Lab',
+	slug: 'home-lab',
 	role: 'owner',
 	created_at: '2026-10-13T00:00:00Z'
 };
@@ -115,6 +126,7 @@ export function fakeEvent(input: {
 	params?: Record<string, string>;
 	user?: User | null;
 	projects?: Project[];
+	orgs?: Org[];
 	clientAddress?: string | (() => string);
 	requestHeaders?: Record<string, string>;
 }): { event: RequestEvent; jar: Map<string, string>; sets: CookieOp[] } {
@@ -143,6 +155,7 @@ export function fakeEvent(input: {
 		locals: {
 			user: input.user ?? null,
 			projects: input.projects ?? [],
+			orgs: input.orgs ?? [],
 			sessionUnavailable: false
 		},
 		cookies: {

@@ -1,5 +1,26 @@
 export type Role = 'owner' | 'admin' | 'viewer';
 
+/** The caller's role in an organization (api-v1 v1.24). Exactly one owner per org. */
+export type OrgRole = 'owner' | 'admin' | 'member';
+
+/** `/v1/me` `orgs` and `GET /v1/orgs/{id}`. `slug` is server-side only and never reaches an agent. */
+export type Org = {
+	id: string;
+	name: string;
+	slug: string;
+	role: OrgRole;
+	created_at: string;
+};
+
+/** `GET /v1/orgs/{id}/members`. */
+export type OrgMember = {
+	user_id: string;
+	email: string;
+	name: string;
+	role: OrgRole;
+	added_at: string;
+};
+
 export type User = {
 	id: string;
 	email: string;
@@ -13,6 +34,10 @@ export type Project = {
 	slug: string;
 	role: Role;
 	created_at: string;
+	/** The project's organization. Null only from an API before v1.24. */
+	org_id: string | null;
+	/** `org`: the caller reaches the project only as an org owner or admin, and `role` is then `admin`. */
+	via: 'member' | 'org';
 };
 
 export type Member = {
@@ -52,6 +77,12 @@ export type InviteLookup = {
 	already_member: boolean;
 };
 
+/** The project access a join token gives the host it enrols (api-v1 v1.24 item 3). */
+export type JoinGrant = {
+	project_id: string;
+	level: AccessLevel;
+};
+
 export type JoinToken = {
 	id: string;
 	host_name_hint: string | null;
@@ -61,17 +92,32 @@ export type JoinToken = {
 	used_at: string | null;
 	used_by_host_id: string | null;
 	revoked_at: string | null;
+	/** Null when the token carries no grant, or the API is older than v1.24. */
+	grant: JoinGrant | null;
 };
 
 export type HostStatus = 'online' | 'offline' | 'asleep' | 'revoked';
 
-export type HostRelation = 'owner' | 'shared';
+/** A project's access to a host (api-v1 v1.24): `metrics` reads only, `deploy` runs its catalog there. */
+export type AccessLevel = 'metrics' | 'deploy';
 
-export type ShareLevel = 'metrics' | 'deploy';
+/** One row of `Host.access` (org admins only). */
+export type HostAccessSummary = {
+	project_id: string;
+	project_name: string;
+	level: AccessLevel;
+};
+
+/** `GET /v1/hosts/{id}/access`. */
+export type HostAccess = HostAccessSummary & {
+	granted_by: string | null;
+	granted_at: string | null;
+};
 
 export type Host = {
 	id: string;
-	project_id: string;
+	/** The host's organization. Null only from an API before v1.24. */
+	org_id: string | null;
 	name: string;
 	node_type: string;
 	os: string;
@@ -82,10 +128,10 @@ export type Host = {
 	last_seen_at: string | null;
 	enrolled_at: string;
 	revoked_at: string | null;
-	/** Owner when the caller is in the owning project. Shared otherwise. */
-	relation: HostRelation;
-	/** Null when `relation` is owner. */
-	share_level: ShareLevel | null;
+	/** The level of the project in whose list the host appears. Null in org-scoped views. */
+	access_level: AccessLevel | null;
+	/** Every project's access to the host. Org owners and admins only; null for everyone else. */
+	access: HostAccessSummary[] | null;
 	/** Null when the agent reports no program policy. */
 	programs: HostPrograms | null;
 };
@@ -135,7 +181,7 @@ export type HostPrograms = {
 	health_policy: boolean;
 	/** True when the agent takes env sets and secret env on programs (api-v1 v1.22). Missing on older hellos is false. */
 	secrets: boolean;
-	/** The host's `projects` allowlist (api-v1 v1.23). Owner-project members only; null when unknown or not shown. */
+	/** The host's `projects` allowlist (api-v1 v1.23). Org owners and admins only (v1.24); null when unknown or not shown. */
 	projects: string[] | null;
 	/** Whether this project's slug is in that allowlist. Null when the agent did not send the list. */
 	project_listed: boolean | null;
@@ -353,37 +399,6 @@ export type CatalogPreview = {
 	args: string[];
 	env: Record<string, string>;
 	command_display: string;
-};
-
-export type ApprovalStatus = 'pending' | 'approved';
-
-export type Approval = {
-	entry_id: string;
-	entry_name: string;
-	project_id: string;
-	project_name: string;
-	host_id: string;
-	spec_hash: string;
-	command_display: string;
-	exec: string;
-	args: string[];
-	env: Record<string, string>;
-	/** References only, never resolved values (api-v1 v1.22). Null when the API did not report them (older API). */
-	env_sets: string[] | null;
-	secret_env: Record<string, string> | null;
-	/**
-	 * Plain (non-secret) values of the set keys the entry uses, per set, which the host owner approves
-	 * (api-v1 v1.22 amendment 1). Secret keys never appear here. Null when the API did not report them.
-	 */
-	env_set_values: Record<string, Record<string, string>> | null;
-	dir: string;
-	run_as: string;
-	shell: boolean;
-	status: ApprovalStatus;
-	requested_by: string;
-	requested_at: string;
-	approved_by: string | null;
-	approved_at: string | null;
 };
 
 export type ProgramStatus = {

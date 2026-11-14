@@ -5,27 +5,31 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { METRIC_REFRESH_MS } from '$lib/host-view';
-	import CatalogApprovals from './CatalogApprovals.svelte';
+	import HostAccessEditor from '$lib/components/HostAccessEditor.svelte';
+	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import { buttonVariants } from '$lib/components/ui/button';
+	import { page } from '$app/state';
+	import { actionUrlFrom } from '$lib/url';
+	import { accessFailureOf } from '$lib/host-access';
 	import OverviewTab from './OverviewTab.svelte';
 	import ProcessesTab from './ProcessesTab.svelte';
 
 	let { data, form } = $props();
 
+	// A member of the host's org goes back to its Hosts tab; a project collaborator outside the org to Projects.
 	const crumbs = $derived(
-		data.host
+		data.host && data.org
 			? [
-					{ label: 'Projects', href: '/projects' },
-					{
-						label: data.projectName ?? 'Project',
-						href: `/projects/${data.host.project_id}`
-					},
+					// Only org owners and admins have the Hosts tab; a member goes to the org's Projects.
+					{ label: data.org.name, href: data.canManageAccess ? `/orgs/${data.org.id}?tab=hosts` : `/orgs/${data.org.id}` },
 					{ label: data.host.name }
 				]
 			: [
 					{ label: 'Projects', href: '/projects' },
-					{ label: 'Host' }
+					{ label: data.host ? data.host.name : 'Host' }
 				]
 	);
+	const accessFailure = $derived(accessFailureOf(form));
 
 	const tabs = $derived([
 		{ key: 'overview', label: 'Overview', href: `?tab=overview&range=${data.range}` },
@@ -62,12 +66,18 @@
 	<title>{data.host ? data.host.name : 'Host'} · Deploybot</title>
 </svelte:head>
 
-<PageHeader title={data.host ? data.host.name : 'Host'} breadcrumbs={crumbs} />
+<PageHeader title={data.host ? data.host.name : 'Host'} breadcrumbs={crumbs}>
+	{#snippet actions()}
+		{#if data.host && data.canManageAccess}
+			<a class={buttonVariants({ variant: 'outline' })} href="#access"><ShieldCheck class="size-4" />Manage access</a>
+		{/if}
+	{/snippet}
+</PageHeader>
 {#if !data.host}
 	<Notice kind="error">{data.message ?? 'This host is not available.'}</Notice>
 {:else}
-	{#if data.message || form?.message}
-		<Notice kind="error">{form?.message ?? data.message}</Notice>
+	{#if data.message || (form?.message && !accessFailure)}
+		<Notice kind="error">{(accessFailure ? null : form?.message) ?? data.message}</Notice>
 	{/if}
 	<Tabs label="Host sections" current={data.tab} items={tabs} />
 
@@ -81,12 +91,25 @@
 			serviceLinks={data.serviceLinks}
 		/>
 	{/if}
-	{#if data.canApproveCatalog}
-		<CatalogApprovals
-			approvals={data.approvals ?? []}
-			omitted={data.approvalsOmitted ?? 0}
-			truncated={data.approvalsTruncated ?? false}
-			message={data.approvalsMessage ?? null}
-		/>
+	{#if data.canManageAccess}
+		<section id="access" class="mt-8">
+			<h2 class="mb-3 text-lg font-semibold tracking-tight">Access</h2>
+			{#if data.accessMessage}
+				<Notice kind="error">{data.accessMessage}</Notice>
+			{/if}
+			{#if data.accessLoaded}
+			<HostAccessEditor
+				hostId={data.host.id}
+				hostName={data.host.name}
+				rows={data.access ?? []}
+				projects={data.accessProjects ?? []}
+				programs={data.host.programs}
+				setAction={actionUrlFrom(page.url, 'setAccess')}
+				removeAction={actionUrlFrom(page.url, 'removeAccess')}
+				message={accessFailure?.message ?? null}
+				conflictProjectId={accessFailure?.accessConflict?.projectId ?? null}
+			/>
+			{/if}
+		</section>
 	{/if}
 {/if}

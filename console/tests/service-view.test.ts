@@ -104,7 +104,7 @@ test('there is no Show select and no discovered listeners link', () => {
 	assert.equal(html.includes('No catalog entries.'), true);
 });
 
-test('the host select lists owned and deploy-shared hosts and submits one catalog.host', () => {
+test('the host select lists hosts with deploy access and submits one catalog.host', () => {
 	const source = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
 	assert.equal(source.includes('<select'), false);
 	assert.match(source, /id="catalog-host"/);
@@ -115,8 +115,8 @@ test('the host select lists owned and deploy-shared hosts and submits one catalo
 
 	const hosts = [
 		copyHost(),
-		copyHost({ id: SHARED_ID, name: 'hk', relation: 'shared', share_level: 'deploy', project_id: '00000000-0000-4000-8000-0000000000ff' }),
-		copyHost({ id: VIEW_ID, name: 'peek', relation: 'shared', share_level: 'metrics', project_id: '00000000-0000-4000-8000-0000000000ff' })
+		copyHost({ id: SHARED_ID, name: 'hk', access_level: 'deploy' }),
+		copyHost({ id: VIEW_ID, name: 'peek', access_level: 'metrics' })
 	];
 	const base = `http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=api&catalog.sort=name&catalog.page=2&catalog.logs=api`;
 	const html = renderServices(`${base}&catalog.host=${HOST_ID}`, [row(PRESENT, null, 'up', 'api')], hosts);

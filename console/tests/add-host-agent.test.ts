@@ -20,12 +20,13 @@ const TOKEN: JoinToken = {
 	expires_at: '2026-10-27T10:00:00Z',
 	used_at: null,
 	used_by_host_id: null,
-	revoked_at: null
+	revoked_at: null,
+	grant: null
 };
 
 const HOST: Host = {
 	id: HOST_ID,
-	project_id: PROJECT.id,
+	org_id: PROJECT.id,
 	name: 'pi5',
 	node_type: 'pi',
 	os: 'linux',
@@ -36,8 +37,8 @@ const HOST: Host = {
 	last_seen_at: '2026-10-26T10:01:00Z',
 	enrolled_at: '2026-10-26T10:01:00Z',
 	revoked_at: null,
-	relation: 'owner',
-	share_level: null,
+	access_level: 'deploy',
+	access: null,
 	programs: null
 };
 
@@ -291,7 +292,8 @@ test('the Hosts tab load depends on project:enrol before any early return', asyn
 	for (const [query, expected] of [
 		['?tab=hosts', ['project:enrol']],
 		['', ['project:enrol']],
-		['?tab=tokens', []],
+		// Join tokens moved to the org; the old tab lands on Hosts.
+		['?tab=tokens', ['project:enrol']],
 		['?tab=catalog', []]
 	] as const) {
 		const { event } = fakeEvent({

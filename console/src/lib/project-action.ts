@@ -17,7 +17,7 @@ import { nextFormDialog, type DialogState } from '$lib/dialog-open';
 import type { ImageDraft, KnownSet } from '$lib/image-spec';
 import type { ImageDigestResult, ImageTagsResult } from '$lib/image-tags';
 
-export type ProjectScope = 'hosts' | 'catalog' | 'members' | 'tokens' | 'settings';
+export type ProjectScope = 'hosts' | 'catalog' | 'members' | 'settings';
 
 /** The dialog form an action result belongs to. Its message shows in that dialog, not on the page. */
 export type ActionField = 'createToken' | 'addMember';

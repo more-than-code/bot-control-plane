@@ -260,7 +260,7 @@ describe('About page', () => {
 			'Secrets encrypted at rest (env sets, files and registry logins)',
 			'Programs run as systemd units and survive reboot',
 			'Container logs capped at 10 MB × 3',
-			'One-time join tokens for adding hosts (admins)'
+			'One-time join tokens for adding hosts (org admins)'
 		]) {
 			assert.ok(features.includes(fact), fact);
 		}

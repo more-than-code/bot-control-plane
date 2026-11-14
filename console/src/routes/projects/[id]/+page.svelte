@@ -6,15 +6,15 @@
 	import { servicesRenameView, type ProjectActionData, type ProjectScope } from '$lib/project-action';
 	import { toastHealthSaved, toastImageSaved } from '$lib/success-toast';
 	import { actionUrlFrom } from '$lib/url';
+	import { accessFailureOf } from '$lib/host-access';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
 	import CatalogImageDialog from './CatalogImageDialog.svelte';
-	import AddHostSection from './AddHostSection.svelte';
+	import AddHostSection from '$lib/components/AddHostSection.svelte';
 	import CatalogSection from './CatalogSection.svelte';
 	import HostsSection from './HostsSection.svelte';
 	import { page } from '$app/state';
 	import MembersSection from './MembersSection.svelte';
 	import SettingsSection from './SettingsSection.svelte';
-	import TokensSection from './TokensSection.svelte';
 
 	let { data, form } = $props();
 
@@ -23,6 +23,7 @@
 	// A dialog form's message (createToken, addMember) shows in its dialog, not on the page.
 	const sectionMessage = $derived(action?.scope === scope && !action.field ? (action.message ?? null) : null);
 	const createTokenMessage = $derived(action?.field === 'createToken' ? (action.message ?? null) : null);
+	const accessFailure = $derived(accessFailureOf(form));
 	const addMemberMessage = $derived(action?.field === 'addMember' ? (action.message ?? null) : null);
 	const rename = $derived(servicesRenameView(action));
 	const healthEditor = $derived(servicesHealthView(action));
@@ -46,9 +47,6 @@
 					{ key: 'catalog', label: 'Catalog & services', href: `/projects/${data.project.id}?tab=catalog`, preload: 'off' as const },
 					{ key: 'members', label: 'Members', href: `/projects/${data.project.id}?tab=members` },
 					...(data.canAdmin
-						? [{ key: 'tokens', label: 'Join tokens', href: `/projects/${data.project.id}?tab=tokens` }]
-						: []),
-					...(data.canAdmin
 						? [{ key: 'settings', label: 'Settings', href: `/projects/${data.project.id}?tab=settings` }]
 						: [])
 				]
@@ -66,8 +64,10 @@
 {:else}
 	<PageHeader
 		title={data.project.name}
-		subtitle="{data.project.slug} · your role {data.project.role}"
-		breadcrumbs={[{ label: 'Projects', href: '/projects' }, { label: data.project.name }]}
+		subtitle="{data.project.slug} · your role {data.project.role}{data.project.via === 'org' ? ' (organization admin)' : ''}"
+		breadcrumbs={data.orgName && data.project.org_id
+			? [{ label: data.orgName, href: `/orgs/${data.project.org_id}` }, { label: data.project.name }]
+			: [{ label: 'Projects', href: '/projects' }, { label: data.project.name }]}
 	>
 		{#snippet actions()}
 			{#if scope === 'catalog' && data.canOwner}
@@ -102,10 +102,14 @@
 			omitted={data.hostsOmitted}
 			truncated={data.hostsTruncated}
 			canAdmin={data.canAdmin}
-			message={sectionMessage ?? data.hostsMessage}
+			canOrgAdmin={data.canOrgAdmin}
+			projectId={data.project.id}
+			orgId={data.project.org_id}
+			message={accessFailure ? null : (sectionMessage ?? data.hostsMessage)}
 			hostsMessage={data.hostsMessage}
+			{accessFailure}
 		>
-			{#if data.canAdmin}
+			{#if data.canOrgAdmin}
 				<AddHostSection
 					tokens={data.tokens}
 					hosts={data.hosts}
@@ -113,6 +117,7 @@
 					slug={data.project.slug}
 					open={data.hosts.length === 0 && !data.hostsMessage}
 					message={createTokenMessage}
+					tokensMessage={data.tokensMessage ?? null}
 				/>
 			{/if}
 		</HostsSection>
@@ -174,14 +179,6 @@
 			inviteUrl={action?.scope === 'members' ? (action.inviteUrl ?? null) : null}
 			inviteRole={action?.scope === 'members' ? (action.inviteRole ?? null) : null}
 			inviteMessage={action?.scope === 'members' ? (action.inviteMessage ?? null) : null}
-		/>
-	{:else if scope === 'tokens'}
-		<TokensSection
-			tokens={data.tokens}
-			omitted={data.tokensOmitted}
-			truncated={data.tokensTruncated}
-			canAdmin={data.canAdmin}
-			message={sectionMessage ?? data.tokensMessage}
 		/>
 	{:else if scope === 'settings'}
 		<SettingsSection

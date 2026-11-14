@@ -132,8 +132,8 @@ export const HOST_UNREACHABLE = 'That host is not available for this project.';
 export const NOTHING_ON_HOST = 'Nothing in the catalog runs on this host.';
 export const NO_ENTRIES = 'No catalog entries.';
 
-/** The hosts the host filter offers: owned hosts and deploy shares. */
-export function hostChoices<H extends Pick<Host, 'relation' | 'share_level'>>(hosts: readonly H[]): H[] {
+/** The hosts the host filter offers: hosts this project has `deploy` access to. */
+export function hostChoices<H extends Pick<Host, 'access_level'>>(hosts: readonly H[]): H[] {
 	return hosts.filter((host) => serviceHostReachable(host));
 }
 

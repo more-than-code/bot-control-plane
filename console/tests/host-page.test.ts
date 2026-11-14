@@ -10,9 +10,9 @@ import { METRIC_SPECS, type MetricChart } from '../src/lib/host-view.ts';
 import { actionUrlFrom } from '../src/lib/url.ts';
 import { RANGES, type RangeKey } from '../src/lib/ranges.ts';
 import { parseHealthChecks, parseProbe, parseProcessSample } from '../src/lib/server/shape.ts';
-import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER, type FetchCall } from './harness.ts';
+import { envelope, fakeEvent, installFetch, ORG, PROJECT, restoreEnv, TOKEN, useApi, USER, type FetchCall } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
-import type { Project } from '../src/lib/api-types.ts';
+import type { Org, Project } from '../src/lib/api-types.ts';
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
 const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
@@ -20,7 +20,7 @@ const CHECK_ID = '00000000-0000-4000-8000-0000000000cc';
 
 const HOST = {
 	id: HOST_ID,
-	project_id: PROJECT.id,
+	org_id: PROJECT.org_id,
 	name: 'pi1',
 	node_type: 'pi',
 	os: 'linux',
@@ -31,8 +31,8 @@ const HOST = {
 	last_seen_at: '2026-10-14T00:00:00Z',
 	enrolled_at: '2026-10-13T00:00:00Z',
 	revoked_at: null,
-	relation: 'owner',
-	share_level: null
+	access_level: 'deploy',
+	access: null
 };
 
 const SERIES_NAME: Record<string, string> = {
@@ -69,7 +69,7 @@ function pageData<T>(value: T): Exclude<T, void | undefined | null> {
 	return value as Exclude<T, void | undefined | null>;
 }
 
-async function loadHost(url: string, handler: (call: FetchCall) => Response, projects?: Project[]) {
+async function loadHost(url: string, handler: (call: FetchCall) => Response, projects?: Project[], orgs?: Org[]) {
 	const calls = installFetch(handler);
 	const data = pageData(
 		await hostLoad(
@@ -78,6 +78,7 @@ async function loadHost(url: string, handler: (call: FetchCall) => Response, pro
 				session: TOKEN,
 				user: USER,
 				projects,
+				orgs,
 				params: { id: HOST_ID }
 			}).event as never
 		)
@@ -97,17 +98,19 @@ describe('host page', { concurrency: false }, () => {
 		restoreEnv();
 	});
 
-	test('each tab calls only its API routes, and breadcrumbs use the project name', async () => {
+	test('each tab calls only its API routes, and breadcrumbs use the org name', async () => {
 		const overview = await loadHost(`http://console.example/hosts/${HOST_ID}?tab=overview&range=6h`, (call) => {
 			if (call.url.pathname === `/v1/hosts/${HOST_ID}`) return envelope(HOST);
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope({ ...PROJECT, name: 'Lab' });
 			if (call.url.pathname === `/v1/hosts/${HOST_ID}/metrics`) {
 				const m = call.url.searchParams.get('m') ?? '';
 				return envelope(metricBody(m, SERIES_NAME[m] ?? 'usage_percent'));
 			}
 			return envelope(null, 500, 'error', 'unexpected');
-		});
-		assert.equal(overview.data.projectName, 'Lab');
+		}, undefined, [{ ...ORG, role: 'member' }]);
+		// The org comes from the session; a member (not an admin) reads no access rows.
+		assert.equal(overview.data.org?.name, ORG.name);
+		assert.equal(overview.data.canManageAccess, false);
+		assert.equal(overview.calls.some((call) => call.url.pathname.endsWith('/access')), false);
 		assert.equal(overview.data.host?.name, 'pi1');
 		assert.equal(overview.data.tab, 'overview');
 		assert.equal(overview.data.message, null);
@@ -125,8 +128,10 @@ describe('host page', { concurrency: false }, () => {
 		assert.equal(overview.calls.some((call) => call.url.pathname.endsWith('/services')), false);
 		assert.equal(overview.calls.some((call) => call.url.pathname.endsWith('/processes')), false);
 
+		// tab=services finds the first session project whose host list has the host at deploy.
 		const serviceCalls = installFetch((call) => {
 			if (call.url.pathname === `/v1/hosts/${HOST_ID}`) return envelope(HOST);
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [HOST], next_cursor: null });
 			return envelope(null, 500, 'error', 'unexpected');
 		});
 		await assert.rejects(
@@ -149,7 +154,10 @@ describe('host page', { concurrency: false }, () => {
 		assert.equal(serviceCalls.some((call) => call.url.pathname.endsWith('/metrics')), false);
 		assert.equal(serviceCalls.some((call) => call.url.pathname.endsWith('/processes')), false);
 		assert.equal(serviceCalls.some((call) => call.url.pathname === `/v1/services/${SERVICE_ID}`), false);
-		assert.equal(serviceCalls.some((call) => call.url.pathname.includes('/projects/')), false);
+		assert.deepEqual(
+			serviceCalls.filter((call) => call.url.pathname.includes('/projects/')).map((call) => call.url.pathname),
+			[`/v1/projects/${PROJECT.id}/hosts`]
+		);
 
 		const processes = await loadHost(
 			`http://console.example/hosts/${HOST_ID}?tab=processes&sort=memory&q=node`,
@@ -280,7 +288,7 @@ describe('host page', { concurrency: false }, () => {
 		const services = readFileSync(new URL('../src/routes/projects/[id]/CatalogCopyRow.svelte', import.meta.url), 'utf8');
 		const processes = readFileSync(new URL('../src/routes/hosts/[id]/ProcessesTab.svelte', import.meta.url), 'utf8');
 		assert.match(hostPage, /PageHeader|Breadcrumbs|aria-label="Breadcrumb"/);
-		assert.match(hostPage, /data\.projectName/);
+		assert.match(hostPage, /data\.org\.name/);
 		assert.match(projectPage, /PageHeader|Breadcrumbs/);
 		assert.match(projectPage, /data\.project\.name/);
 		assert.match(services, /serviceDomId\(copy\.id\)/);
@@ -345,6 +353,7 @@ describe('host page', { concurrency: false }, () => {
 		assert.equal(probe.scope, 'catalog');
 		const moved = installFetch((call) => {
 			if (call.url.pathname === `/v1/hosts/${HOST_ID}`) return envelope(HOST);
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [HOST], next_cursor: null });
 			return envelope(null, 500, 'error', 'unexpected');
 		});
 		await assert.rejects(
@@ -488,7 +497,6 @@ describe('host page', { concurrency: false }, () => {
 			props: {
 				data: {
 					host: HOST,
-					projectName: 'Lab',
 					range: '1h',
 					processSort: 'cpu',
 					tab: 'processes',

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ORG_ERROR_ID } from '$lib/org-view';
 	import { page } from '$app/state';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
@@ -12,15 +13,21 @@
 		tokens,
 		omitted,
 		truncated,
-		canAdmin,
-		message
+		message,
+		projectNames = {}
 	}: {
 		tokens: JoinToken[];
 		omitted: number;
 		truncated: boolean;
-		canAdmin: boolean;
 		message: string | null;
+		/** Org project names by id, for the Grant column. */
+		projectNames?: Record<string, string>;
 	} = $props();
+
+	function grantText(token: JoinToken): string {
+		if (!token.grant) return 'none';
+		return `${projectNames[token.grant.project_id] ?? 'a project'} (${token.grant.level})`;
+	}
 
 	function stateOf(token: JoinToken): string {
 		if (token.revoked_at) return 'revoked';
@@ -30,18 +37,21 @@
 
 	const columns = $derived<Column<JoinToken>[]>([
 		{ key: 'hint', label: 'Hint' },
+		{ key: 'grant', label: 'Grant' },
 		{ key: 'state', label: 'State' },
 		{ key: 'created', label: 'Created' },
 		{ key: 'expires', label: 'Expires' },
-		...(canAdmin ? [{ key: 'revoke', label: 'Revoke', srLabel: true }] : [])
+		{ key: 'revoke', label: 'Revoke', srLabel: true }
 	]);
 </script>
 
 {#if message}
-	<Notice kind="error">{message}</Notice>
+	<div id={ORG_ERROR_ID} tabindex="-1" class="mb-4 max-w-full min-w-0 break-words rounded-md focus-visible:ring-3 focus-visible:ring-ring">
+		<Notice kind="error">{message}</Notice>
+	</div>
 {/if}
 <p class="text-muted-foreground mb-4 text-sm">
-	Create join tokens from <a class="text-primary underline underline-offset-4" href="?tab=hosts#new-host">Hosts → Add a host</a>.
+	Create join tokens from <a class="text-primary underline underline-offset-4" href="?tab=hosts#new-host">Hosts → Add a host</a>, or from a project's Hosts tab.
 </p>
 {#if omitted > 0}
 	<p class="text-muted-foreground mb-2 text-sm">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
@@ -54,12 +64,15 @@
 	{#snippet row(token)}
 		<tr>
 			<td class="p-2 align-middle">{token.host_name_hint ?? 'n/a'}</td>
+			<td class="p-2 align-middle">{grantText(token)}</td>
 			<td class="p-2 align-middle">{stateOf(token)}</td>
 			<td class="p-2 align-middle"><LocalTime iso={token.created_at} /></td>
 			<td class="p-2 align-middle"><LocalTime iso={token.expires_at} /></td>
-			{#if canAdmin && !token.revoked_at}
+			{#if !token.revoked_at}
 				<td class="p-2 align-middle">
 					<ConfirmAction
+						closeOnFailure
+						failureFocusId={ORG_ERROR_ID}
 						id="revoke-token-{token.id}"
 						action={actionUrlFrom(page.url, 'revokeToken')}
 						label="Revoke"
@@ -69,7 +82,7 @@
 						rowLabel="Revoke {token.host_name_hint ?? token.id}"
 					/>
 				</td>
-			{:else if canAdmin}
+			{:else}
 				<td class="p-2 align-middle"></td>
 			{/if}
 		</tr>

@@ -1,8 +1,6 @@
 import type { CatalogEntry, CatalogPreview, Host } from '$lib/api-types';
 import type { SortDir } from '$lib/table';
 
-export const APPROVAL_WAIT = "waiting for the host owner's approval";
-
 export const GRANT_ACTIONS = ['run', 'stop', 'restart', 'logs'] as const;
 
 /** Image entries add deploy. Program grants stay on GRANT_ACTIONS. */
@@ -112,14 +110,10 @@ export function isIdempotencyKey(value: string): boolean {
 	return IDEMPOTENCY_KEY.test(value);
 }
 
-export function isSpecHash(value: string): boolean {
-	return SPEC_HASH.test(value);
-}
 
-/** Owner, or a host shared into this project at deploy. Metrics shares are not catalog hosts. */
-export function isCatalogHost(host: Pick<Host, 'relation' | 'share_level'>): boolean {
-	if (host.relation === 'owner') return true;
-	return host.relation === 'shared' && host.share_level === 'deploy';
+/** A host this project has `deploy` access to (api-v1 v1.24 item 4). Metrics access is not a catalog host. */
+export function isCatalogHost(host: Pick<Host, 'access_level'>): boolean {
+	return host.access_level === 'deploy';
 }
 
 /** Why this host cannot run the entry. Null means the host can be chosen. */
@@ -206,7 +200,7 @@ export function imageHealthPolicyBlockReason(host: Pick<Host, 'programs'>, hasPo
 }
 
 /** Union of run-as accounts on eligible hosts. Shell entries only use hosts that allow a shell. */
-export function runAsChoices(hosts: readonly Pick<Host, 'relation' | 'share_level' | 'programs'>[], shell: boolean): string[] {
+export function runAsChoices(hosts: readonly Pick<Host, 'access_level' | 'programs'>[], shell: boolean): string[] {
 	const names = new Set<string>();
 	for (const host of hosts) {
 		if (!isCatalogHost(host) || host.programs == null || !host.programs.enabled) continue;
@@ -217,7 +211,7 @@ export function runAsChoices(hosts: readonly Pick<Host, 'relation' | 'share_leve
 }
 
 export function isAllowedRunAs(
-	hosts: readonly Pick<Host, 'relation' | 'share_level' | 'programs'>[],
+	hosts: readonly Pick<Host, 'access_level' | 'programs'>[],
 	runAs: string,
 	shell: boolean
 ): boolean {

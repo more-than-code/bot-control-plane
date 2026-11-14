@@ -15,7 +15,8 @@
 	}: {
 		/** From the createToken action result only. The token is shown here once. */
 		created: CreatedJoin;
-		slug: string;
+		/** The granted project's slug, or null when the token names no project. */
+		slug: string | null;
 		enrolment: EnrolStatus | null;
 		/** A note that came with the created token, such as a server URL that could not be shown. */
 		message?: string | null;

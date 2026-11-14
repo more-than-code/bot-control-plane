@@ -2,7 +2,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import Fingerprint from '@lucide/svelte/icons/fingerprint';
-	import type { Host, ProbeView, ProjectServiceRow, ServiceRuntime } from '$lib/api-types';
+	import type { ProbeView, ProjectServiceRow, ServiceRuntime } from '$lib/api-types';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import { COPY_FAILED_NOTE, COPY_FAILURE_MS, COPIED_NOTE, copyText, shownDigestFailure } from '$lib/copy-text';
 	import { canEditHealthChecks } from '$lib/health-checks';
@@ -35,7 +35,6 @@
 	let {
 		copy,
 		projectId,
-		hosts,
 		canAdmin,
 		controls,
 		runtime,
@@ -61,7 +60,6 @@
 		/** One running copy of the entry above it: an owned service row of this project. */
 		copy: ProjectServiceRow;
 		projectId: string;
-		hosts: Host[];
 		canAdmin: boolean;
 		/** Null: no actions (no grant on the entry). 'checking': its container state is still being read. */
 		controls: ServiceControls | 'checking' | null;
@@ -98,8 +96,7 @@
 		canEditHealthChecks({
 			canAdmin,
 			projectId,
-			serviceProjectId: copy.project_id,
-			hostOwnerProjectId: hosts.find((item) => item.id === copy.host_id)?.project_id ?? null
+			serviceProjectId: copy.project_id
 		})
 	);
 	const typed = $derived(renameServiceId === copy.id && typedName != null ? typedName : renameStartValue(copy));

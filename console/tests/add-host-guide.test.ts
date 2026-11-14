@@ -6,8 +6,8 @@ import { parseCreatedJoin } from '../src/lib/server/shape.ts';
 import CommandBlock from '../src/lib/components/CommandBlock.svelte';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
 import HostsSection from '../src/routes/projects/[id]/HostsSection.svelte';
-import JoinTokenResult from '../src/routes/projects/[id]/JoinTokenResult.svelte';
-import TokensSection from '../src/routes/projects/[id]/TokensSection.svelte';
+import JoinTokenResult from '../src/lib/components/JoinTokenResult.svelte';
+import TokensSection from '../src/routes/orgs/[id]/TokensSection.svelte';
 import type { CreatedJoin, Host } from '../src/lib/api-types.ts';
 import { JOIN, PROJECT, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
@@ -42,7 +42,7 @@ function anchors(html: string): string[] {
 
 const HOST: Host = {
 	id: '00000000-0000-4000-8000-000000000080',
-	project_id: PROJECT.id,
+	org_id: PROJECT.org_id,
 	name: 'pi5',
 	node_type: 'pi',
 	os: 'linux',
@@ -53,8 +53,8 @@ const HOST: Host = {
 	last_seen_at: '2026-10-26T10:01:00Z',
 	enrolled_at: '2026-10-26T10:01:00Z',
 	revoked_at: null,
-	relation: 'owner',
-	share_level: null,
+	access_level: 'deploy',
+	access: null,
 	programs: null
 };
 
@@ -74,15 +74,14 @@ function renderHosts(
 		tab: 'hosts' as const,
 		canAdmin,
 		canOwner: false,
+		canOrgAdmin: canAdmin,
+		orgName: 'Home Lab',
 		hosts: hasHosts ? [HOST] : [],
 		hostsOmitted: 0,
 		hostsTruncated: false,
 		hostsMessage,
 		members: [],
-		tokens: [],
-		tokensOmitted: 0,
-		tokensTruncated: false,
-		tokensMessage: null
+		tokens: []
 	};
 	const form = created || message ? { scope: 'hosts', created: created ?? undefined, message: message ?? undefined } : null;
 	return render(ProjectPage, { props: { data: data as never, form: form as never } }).body;
@@ -120,7 +119,7 @@ test('a created token is only in the token display and the Copy token value', ()
 	assert.equal(remote.includes("--server 'ws://evil.example/x' --runner"), true);
 	assert.equal(remote.includes('--insecure-dev'), false);
 
-	const source = readFileSync(new URL('../src/routes/projects/[id]/JoinTokenResult.svelte', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../src/lib/components/JoinTokenResult.svelte', import.meta.url), 'utf8');
 	const copies = [...source.matchAll(/<CopyButton\b[\s\S]*?\/>/g)].map((match) => match[0]);
 	assert.deepEqual(copies.map((tag) => tag.match(/value=\{[^}]*\}/)?.[0]), ['value={prompt}', 'value={created.token}'], 'only the prompt and the token are copied');
 
@@ -160,7 +159,10 @@ test('the add-a-host guide shows the slug and both links, and starts open with n
 	assert.equal(detailsOpen(open), true);
 	const guide = open.match(/<details\b[\s\S]*?<\/details>/)?.[0] ?? '';
 	assert.equal(guide.match(/<li\b/g)?.length, 6);
-	assert.match(open, /<\/summary>\s*<p>Create a join token to get instructions for your AI agent\.[^<]*<\/p>\s*<p>Run the commands below on the host you are adding \(for example over ssh -t\)\.<\/p>\s*<ol\b/);
+	assert.match(
+		open.replace(/<!--[\s\S]*?-->/g, ''),
+		/<\/summary>\s*<p>Create a join token to get instructions for your AI agent\.[^<]*<\/p>\s*<p>The host joins your organization, and this project gets deploy access to it\.[^<]*<\/p>\s*<p>Run the commands below on the host you are adding \(for example over ssh -t\)\.<\/p>\s*<ol\b/
+	);
 	assert.match(open, /sudo \.\/install\.sh check --runner --project lab --image (?:'|&#39;)&lt;pattern(?:>|&gt;)(?:'|&#39;) --enable/);
 	assert.match(open, /sudo \.\/install\.sh install --runner --project lab --image (?:'|&#39;)&lt;pattern(?:>|&gt;)(?:'|&#39;) --enable/);
 	assert.match(open, /Create a join token with the button below\. Run the enrol command from the install output's <code>next:<\/code> line, with the server URL shown with the token\./);
@@ -181,19 +183,30 @@ test('the add-a-host guide shows the slug and both links, and starts open with n
 	assert.equal(closed.includes('--project lab'), true);
 });
 
-test('an empty host list links an admin to the Add a host card and tells a viewer to ask', () => {
+const SECTION = { omitted: 0, truncated: false, projectId: PROJECT.id, orgId: PROJECT.org_id };
+
+test('an empty host list links an org admin to the Add a host card and tells everyone else to ask an org admin', () => {
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=hosts`);
 	const admin = render(HostsSection, {
-		props: { hosts: [], omitted: 0, truncated: false, canAdmin: true, message: null, hostsMessage: null }
+		props: { ...SECTION, hosts: [], canAdmin: true, canOrgAdmin: true, message: null, hostsMessage: null }
 	}).body.replace(/<!--[\s\S]*?-->/g, '');
-	assert.match(admin, /No hosts enrolled\. <a\b[^>]*class="text-primary underline underline-offset-4"[^>]*href="#new-host"[^>]*>Add a host<\/a>/);
+	assert.match(admin, /No hosts yet\. <a\b[^>]*class="text-primary underline underline-offset-4"[^>]*href="#new-host"[^>]*>Add a host<\/a>/);
 	assert.equal(admin.includes('hover:underline'), false);
-	assert.equal(admin.includes('Ask a project admin'), false);
+	assert.equal(admin.includes('Ask an org admin'), false);
+
+	// A project admin who is not an org admin cannot add hosts any more (api-v1 v1.24).
+	const projectAdmin = render(HostsSection, {
+		props: { ...SECTION, hosts: [], canAdmin: true, canOrgAdmin: false, message: null, hostsMessage: null }
+	}).body.replace(/<!--[\s\S]*?-->/g, '');
+	// The project admin's line is persistent above the table, not only in the empty state.
+	assert.match(projectAdmin, /<p class="text-muted-foreground mb-4 text-sm">Ask an org admin to add a host\.<\/p>/);
+	assert.match(projectAdmin, /No hosts yet\./);
+	assert.equal(projectAdmin.includes('href="#new-host"'), false);
 
 	const viewer = render(HostsSection, {
-		props: { hosts: [], omitted: 0, truncated: false, canAdmin: false, message: null, hostsMessage: null }
+		props: { ...SECTION, hosts: [], canAdmin: false, canOrgAdmin: false, message: null, hostsMessage: null }
 	}).body.replace(/<!--[\s\S]*?-->/g, '');
-	assert.match(viewer, /No hosts enrolled\. Ask a project admin to add one\./);
+	assert.match(viewer, /No hosts yet\. Ask an org admin to add a host\./);
 	assert.equal(viewer.includes('Add a host'), false);
 	assert.equal(viewer.includes('tab=tokens'), false);
 });
@@ -211,11 +224,11 @@ test('the Hosts tab shows the Add a host card to an admin only, and the tokens t
 	assert.equal(viewer.includes('Create a join token'), false);
 	assert.equal(viewer.includes('create-join-token'), false);
 	assert.equal(viewer.includes('Copy instructions for your AI agent'), false);
-	assert.match(viewer.replace(/<!--[\s\S]*?-->/g, ''), /No hosts enrolled\. Ask a project admin to add one\./);
+	assert.match(viewer.replace(/<!--[\s\S]*?-->/g, ''), /No hosts yet\. Ask an org admin to add a host\./);
 
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=tokens`);
-	const tokens = render(TokensSection, { props: { tokens: [], omitted: 0, truncated: false, canAdmin: true, message: null } }).body;
-	assert.match(tokens, /Create join tokens from <a\b[^>]*href="\?tab=hosts#new-host"[^>]*>Hosts → Add a host<\/a>\./);
+	setPageUrl(`http://console.example/orgs/${PROJECT.org_id}?tab=tokens`);
+	const tokens = render(TokensSection, { props: { tokens: [], omitted: 0, truncated: false, message: null } }).body;
+	assert.match(tokens, /Create join tokens from <a\b[^>]*href="\?tab=hosts#new-host"[^>]*>Hosts → Add a host<\/a>, or from a project's Hosts tab\./);
 	assert.equal(tokens.includes('Create a join token'), false);
 	assert.equal(tokens.includes('<form'), false);
 	assert.equal(tokens.includes('Add a host</summary>'), false);
@@ -250,10 +263,10 @@ test('a failed host list keeps the guide closed and omits the empty-host prompt'
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=hosts`);
 	for (const canAdmin of [true, false]) {
 		const body = render(HostsSection, {
-			props: { hosts: [], omitted: 0, truncated: false, canAdmin, message: 'Could not load hosts.', hostsMessage: 'Could not load hosts.' }
+			props: { ...SECTION, hosts: [], canAdmin, canOrgAdmin: canAdmin, message: 'Could not load hosts.', hostsMessage: 'Could not load hosts.' }
 		}).body;
 		assert.match(body, /Could not load hosts\./);
 		assert.equal(body.includes('Add a host'), false);
-		assert.equal(body.includes('Ask a project admin'), false);
+		assert.equal(body.includes('Ask an org admin'), false);
 	}
 });

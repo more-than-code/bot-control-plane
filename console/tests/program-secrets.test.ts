@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
-import type { Approval, Host, HostPrograms } from '../src/lib/api-types.ts';
+import type { Host, HostPrograms } from '../src/lib/api-types.ts';
 import {
 	PROGRAM_SECRET_RESTART_NOTE,
 	PROGRAM_SECRET_START_NOTE,
@@ -15,9 +15,8 @@ import {
 } from '../src/lib/catalog.ts';
 import { hostPolicyLine } from '../src/lib/host-view.ts';
 import { cleanEnvSources, envSourcesFromForm } from '../src/lib/image-spec.ts';
-import { parseApproval, parseHost, parseHostPrograms, parseProgramSpec } from '../src/lib/server/shape.ts';
+import { parseHost, parseHostPrograms, parseProgramSpec } from '../src/lib/server/shape.ts';
 import { notRunningPairs, restartNote, serviceControls, startNote, stateTip, type ServiceEntryRef } from '../src/lib/service-actions.ts';
-import CatalogApprovals from '../src/routes/hosts/[id]/CatalogApprovals.svelte';
 import CatalogIdleRow from '../src/routes/projects/[id]/CatalogIdleRow.svelte';
 import OverviewTab from '../src/routes/hosts/[id]/OverviewTab.svelte';
 import CatalogEntryDialog from '../src/routes/projects/[id]/CatalogEntryDialog.svelte';
@@ -29,7 +28,6 @@ import { setPageUrl } from './stubs/app-state.ts';
 import { copyRow, programCatalogEntry, renderCopies } from './copies.ts';
 
 const HOST_ID = '22222222-2222-4222-8222-222222222222';
-const HASH = 'a'.repeat(64);
 
 function decode(value: string): string {
 	return value.replaceAll('&amp;', '&').replaceAll('&#39;', "'").replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>');
@@ -56,7 +54,7 @@ function policy(overrides: Partial<HostPrograms> = {}): HostPrograms {
 function host(programs: HostPrograms | null = policy(), overrides: Partial<Host> = {}): Host {
 	return {
 		id: HOST_ID,
-		project_id: PROJECT.id,
+		org_id: PROJECT.id,
 		name: 'pi1',
 		node_type: 'pi',
 		os: 'linux',
@@ -67,8 +65,8 @@ function host(programs: HostPrograms | null = policy(), overrides: Partial<Host>
 		last_seen_at: '2026-11-13T00:00:00Z',
 		enrolled_at: '2026-11-01T00:00:00Z',
 		revoked_at: null,
-		relation: 'owner',
-		share_level: null,
+		access_level: 'deploy',
+		access: null,
 		programs,
 		...overrides
 	};
@@ -102,28 +100,21 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		assert.deepEqual(parseHostPrograms({ ...RAW_PROGRAMS, projects: ['a', 'b', 'a'] })?.projects, ['a', 'b']);
 	});
 
-	test('parseHost keeps the allowlist only for the owning project', () => {
+	test('parseHost keeps the allowlist as the API sends it: a list for org admins, null for everyone else', () => {
 		const raw = { ...host(), programs: { ...RAW_PROGRAMS, projects: ['home-lab', 'other'], project_listed: true } };
 		assert.deepEqual(parseHost(raw)?.programs?.projects, ['home-lab', 'other']);
-		const shared = parseHost({ ...raw, relation: 'shared', share_level: 'deploy' });
-		assert.equal(shared?.programs?.projects, null);
-		assert.equal(shared?.programs?.project_listed, true);
+		const member = parseHost({ ...raw, programs: { ...raw.programs, projects: null } });
+		assert.equal(member?.programs?.projects, null);
+		assert.equal(member?.programs?.project_listed, true);
 	});
 
-	test('ProgramSpec and Approval read env set references; an older API has none', () => {
+	test('ProgramSpec reads env set references; an older API has none', () => {
 		const base = { dir: '/srv/tra', exec: '/usr/bin/gh', args: [], shell: false, run_as: 'joe', env: {}, port: null, restart: 'on-failure' };
 		assert.deepEqual(parseProgramSpec(base)?.env_sets, []);
 		assert.deepEqual(parseProgramSpec(base)?.secret_env, {});
 		const spec = parseProgramSpec({ ...base, env_sets: ['gh'], secret_env: { GH_TOKEN: 'gh.GH_TOKEN' } });
 		assert.deepEqual([spec?.env_sets, spec?.secret_env], [['gh'], { GH_TOKEN: 'gh.GH_TOKEN' }]);
 		assert.equal(parseProgramSpec({ ...base, secret_env: { GH_TOKEN: 'no-dot' } }), null);
-		const approval = parseApproval({ ...approvalRow(), env_sets: ['gh'], secret_env: { GH_TOKEN: 'gh.GH_TOKEN' } });
-		assert.deepEqual(approval?.secret_env, { GH_TOKEN: 'gh.GH_TOKEN' });
-		const { env_sets: _sets, secret_env: _secret, env_set_values: _values, ...older } = approvalRow();
-		const unreported = parseApproval(older);
-		assert.deepEqual([unreported?.env_sets, unreported?.secret_env, unreported?.env_set_values], [null, null, null]);
-		assert.equal(parseApproval({ ...older, env_sets: null, secret_env: null })?.env_sets, null);
-		assert.equal(parseApproval({ ...approvalRow(), env_sets: 'gh' }), null);
 		// Unknown means the console cannot say the entry has no secrets.
 		assert.equal(programUsesSecrets({ env_sets: null, secret_env: null }), true);
 	});
@@ -381,90 +372,20 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		assert.equal(source.includes("'service'"), false);
 	});
 
-	test('an approval from an older API reads "not reported", not "none"', () => {
-		const { env_sets: _sets, secret_env: _secret, env_set_values: _values, ...older } = approvalRow();
-		const parsed = parseApproval(older);
-		assert.ok(parsed);
-		const html = render(CatalogApprovals, { props: { approvals: [parsed], omitted: 0, truncated: false, message: null } }).body;
-		assert.equal(html.split('not reported').length - 1, 2);
-	});
-
-	test('env_set_values: plain values per set parse, missing is not reported, malformed rejects the row', () => {
-		const parsed = parseApproval(approvalRow());
-		assert.deepEqual(parsed?.env_set_values, { gh: { GH_HOST: 'github.com' }, db: {} });
-		const { env_set_values: _values, ...missing } = approvalRow();
-		assert.equal(parseApproval(missing)?.env_set_values, null);
-		assert.equal(parseApproval({ ...missing, env_set_values: null })?.env_set_values, null);
-		for (const bad of [
-			['gh'],
-			{ 'Bad Set': {} },
-			{ gh: { lower: 'x' } },
-			{ gh: { GH_HOST: 'a\nb' } },
-			{ gh: { GH_HOST: 'x'.repeat(4097) } },
-			{ gh: { GH_HOST: 7 } },
-			Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`s${i}`, {}])),
-			{ gh: Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`K${i}`, 'v'])) }
-		]) {
-			assert.equal(parseApproval({ ...approvalRow(), env_set_values: bad }), null, JSON.stringify(bad).slice(0, 60));
-		}
-	});
-
-	test('the approval view lists the plain values under each set, and "values not reported" without them', () => {
-		const shown = decode(render(CatalogApprovals, { props: { approvals: [parseApproval(approvalRow()) as Approval], omitted: 0, truncated: false, message: null } }).body);
-		assert.equal(shown.includes('gh\n  GH_HOST=github.com\ndb\n  no plain values'), true);
-		const { env_set_values: _values, ...missing } = approvalRow();
-		const older = decode(render(CatalogApprovals, { props: { approvals: [parseApproval(missing) as Approval], omitted: 0, truncated: false, message: null } }).body);
-		assert.equal(older.includes('gh\n  values not reported\ndb\n  values not reported'), true);
-		// A set a secret_env reference reads a plain key from, but not in env_sets, is listed after them.
-		const extra = parseApproval({ ...approvalRow(), env_sets: ['db'], env_set_values: { db: {}, gh: { GH_HOST: 'github.com' } } }) as Approval;
-		const extraHtml = decode(render(CatalogApprovals, { props: { approvals: [extra], omitted: 0, truncated: false, message: null } }).body);
-		assert.equal(extraHtml.includes('db\n  no plain values\ngh\n  GH_HOST=github.com'), true);
-		// Values are text: markup in a value is escaped, never rendered.
-		const markup = parseApproval({ ...approvalRow(), env_set_values: { gh: { GH_HOST: '<b>x</b>' }, db: {} } }) as Approval;
-		const markupHtml = render(CatalogApprovals, { props: { approvals: [markup], omitted: 0, truncated: false, message: null } }).body;
-		assert.equal(markupHtml.includes('<b>x</b>'), false);
-		assert.equal(markupHtml.includes('&lt;b>x&lt;/b>') || markupHtml.includes('&lt;b&gt;x&lt;/b&gt;'), true);
-	});
-
-	test('a resolved value in an unexpected approval field never reaches the parsed row or the page', () => {
-		const sentinel = 'sentinel-value-7f3a';
-		const parsed = parseApproval({
-			...approvalRow(),
-			resolved_env: { GH_TOKEN: sentinel },
-			secret_values: [sentinel],
-			env_set_secret_values: { gh: { GH_TOKEN: sentinel } }
-		});
-		assert.ok(parsed);
-		assert.equal(JSON.stringify(parsed).includes(sentinel), false);
-		const html = render(CatalogApprovals, { props: { approvals: [parsed], omitted: 0, truncated: false, message: null } }).body;
-		assert.equal(html.includes(sentinel), false);
-		assert.equal(decode(html).includes('GH_TOKEN ← gh.GH_TOKEN'), true);
-		assert.equal(decode(html).includes('GH_HOST=github.com'), true);
-	});
-
-	test('the approval view shows secret env references, never a secret value', () => {
-		const html = decode(
-			render(CatalogApprovals, {
-				props: { approvals: [{ ...approvalRow(), env: { PORT: '3031' } } as Approval], omitted: 0, truncated: false, message: null }
-			}).body
-		);
-		assert.equal(html.includes('GH_TOKEN ← gh.GH_TOKEN'), true);
-		assert.equal(html.includes('gh\n  GH_HOST=github.com'), true);
-		assert.equal(html.includes('PORT=3031'), true);
-		assert.equal(html.includes('ghp_'), false);
-	});
-
-	test('Host policy line: owner-project members only, with the allowlist', () => {
-		assert.equal(hostPolicyLine(host(policy({ projects: ['home-lab', 'acme'] }))), 'Programs on, Images on, Projects: home-lab, acme');
-		assert.equal(hostPolicyLine(host(policy({ images: false, projects: [] }))), 'Programs on, Images off, Projects: none');
-		assert.equal(hostPolicyLine(host(null)), 'Programs off, Images off, Projects: not reported');
-		assert.equal(hostPolicyLine(host(policy(), { relation: 'shared', share_level: 'deploy' })), null);
+	test('Host policy line: shown when the allowlist is present or for an org admin, never otherwise', () => {
+		const admin = { access: [] };
+		// The list alone (an org admin view without `access`) shows the line too.
+		assert.equal(hostPolicyLine(host(policy({ projects: ['home-lab'] }), { access: null })), 'Programs on, Images on, Projects: home-lab');
+		assert.equal(hostPolicyLine(host(policy({ projects: ['home-lab', 'acme'] }), admin)), 'Programs on, Images on, Projects: home-lab, acme');
+		assert.equal(hostPolicyLine(host(policy({ images: false, projects: [] }), admin)), 'Programs on, Images off, Projects: none');
+		assert.equal(hostPolicyLine(host(null, admin)), 'Programs not reported, Images not reported, Projects: not reported');
+		assert.equal(hostPolicyLine(host(policy(), { access: null })), null);
 		setPageUrl(`http://console.example/hosts/${HOST_ID}?tab=overview`);
 		const props = { range: '1h' as const, metrics: [], snapshot: null };
-		const owner = render(OverviewTab, { props: { ...props, host: host(policy({ projects: ['home-lab'] })) } }).body;
+		const owner = render(OverviewTab, { props: { ...props, host: host(policy({ projects: ['home-lab'] }), admin) } }).body;
 		assert.equal(owner.includes('Host policy'), true);
 		assert.equal(owner.includes('Projects: home-lab'), true);
-		const shared = render(OverviewTab, { props: { ...props, host: host(policy(), { relation: 'shared', share_level: 'deploy' }) } }).body;
+		const shared = render(OverviewTab, { props: { ...props, host: host(policy(), { access: null }) } }).body;
 		assert.equal(shared.includes('Host policy'), false);
 	});
 
@@ -474,28 +395,3 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 	});
 });
 
-function approvalRow() {
-	return {
-		entry_id: '33333333-3333-4333-8333-333333333333',
-		entry_name: 'tra',
-		project_id: PROJECT.id,
-		project_name: 'Home lab',
-		host_id: HOST_ID,
-		spec_hash: HASH,
-		command_display: 'gh api user',
-		exec: '/usr/bin/gh',
-		args: ['api', 'user'],
-		env: {},
-		env_sets: ['gh', 'db'],
-		secret_env: { GH_TOKEN: 'gh.GH_TOKEN' },
-		env_set_values: { gh: { GH_HOST: 'github.com' }, db: {} },
-		dir: '/srv/tra',
-		run_as: 'joe',
-		shell: false,
-		status: 'pending',
-		requested_by: USER.id,
-		requested_at: '2026-11-13T00:00:00Z',
-		approved_by: null,
-		approved_at: null
-	};
-}

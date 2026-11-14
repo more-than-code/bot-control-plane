@@ -97,7 +97,7 @@
 	<Card.Root>
 		<Card.Header>
 			<Card.Title>Delete</Card.Title>
-			<Card.Description>Deleting revokes this project's host credentials.</Card.Description>
+			<Card.Description>Hosts stay in the organization.</Card.Description>
 		</Card.Header>
 		<Card.Content>
 			<ConfirmAction
@@ -105,7 +105,7 @@
 				action={actionUrlFrom(page.url, 'deleteProject')}
 				label="Delete project"
 				confirmLabel="Delete project"
-				message="Delete {project.name}? This revokes the project's host credentials."
+				message="Delete {project.name}? Its services are marked gone and its access to hosts is removed. Hosts stay in the organization."
 				typeToConfirm={{ name: 'confirm', expected: project.name, label: `Type ${project.name} to confirm` }}
 			/>
 		</Card.Content>

@@ -91,7 +91,7 @@ function programs(healthPolicy: boolean): HostPrograms {
 function host(id: string, name: string, healthPolicy: boolean): Host {
 	return {
 		id,
-		project_id: PROJECT.id,
+		org_id: PROJECT.id,
 		name,
 		node_type: 'pi',
 		os: 'linux',
@@ -102,8 +102,8 @@ function host(id: string, name: string, healthPolicy: boolean): Host {
 		last_seen_at: '2026-10-14T00:00:00Z',
 		enrolled_at: '2026-10-13T00:00:00Z',
 		revoked_at: null,
-		relation: 'owner',
-		share_level: null,
+		access_level: 'deploy',
+		access: null,
 		programs: programs(healthPolicy)
 	};
 }

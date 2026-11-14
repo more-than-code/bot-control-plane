@@ -21,6 +21,7 @@ import {
 	envelope,
 	fakeEvent,
 	installFetch,
+	ORG,
 	PROJECT,
 	restoreEnv,
 	TOKEN,
@@ -39,7 +40,7 @@ const SECOND_ID = '00000000-0000-4000-8000-000000000098';
 
 const HOST: Host = {
 	id: HOST_ID,
-	project_id: PROJECT.id,
+	org_id: PROJECT.id,
 	name: 'pi1',
 	node_type: 'pi',
 	os: 'linux',
@@ -50,8 +51,8 @@ const HOST: Host = {
 	last_seen_at: '2026-10-14T00:00:00Z',
 	enrolled_at: '2026-10-13T00:00:00Z',
 	revoked_at: null,
-	relation: 'owner',
-	share_level: null,
+	access_level: 'deploy',
+	access: null,
 	programs: null
 };
 
@@ -101,7 +102,6 @@ function shell(call: FetchCall, services: (call: FetchCall) => Response): Respon
 	if (call.url.pathname === `/v1/projects/${id}/catalog`) return envelope({ items: [API_ENTRY], next_cursor: null });
 	if (call.url.pathname === `/v1/projects/${id}/hosts`) return envelope({ items: [HOST], next_cursor: null });
 	if (call.url.pathname === `/v1/projects/${id}/members`) return envelope({ items: [], next_cursor: null });
-	if (call.url.pathname === `/v1/projects/${id}/join-tokens`) return envelope({ items: [], next_cursor: null });
 	if (call.url.pathname === `/v1/projects/${id}`) return envelope(PROJECT);
 	if (call.url.pathname.startsWith('/v1/services/')) return envelope({ health_checks: [] });
 	return envelope(null, 500, 'error', 'unexpected');
@@ -136,13 +136,16 @@ test('shape keeps v1.2 names and fails a closed project-services envelope', () =
 	assert.equal(parseService(baseService({ owner_user: 'u'.repeat(81) }))?.owner_user, `${'u'.repeat(79)}\u2026`);
 	assert.equal(parseService(baseService({ display_name: 'a'.repeat(64) }))?.display_name, 'a'.repeat(64));
 	assert.equal(parseService(baseService({ display_name: 'a'.repeat(65) }))?.display_name, `${'a'.repeat(63)}\u2026`);
-	assert.equal(parseHost(HOST)?.relation, 'owner');
-	assert.equal(parseHost(HOST)?.share_level, null);
-	assert.equal(parseHost({ ...HOST, relation: 'shared', share_level: 'deploy' })?.share_level, 'deploy');
-	assert.equal(parseHost({ ...HOST, relation: 'shared', share_level: null }), null);
-	assert.equal(parseHost({ ...HOST, relation: 'owner', share_level: 'metrics' }), null);
-	const { relation: _relation, share_level: _level, ...legacyHost } = HOST;
-	assert.equal(parseHost(legacyHost), null);
+	assert.equal(parseHost(HOST)?.access_level, 'deploy');
+	assert.equal(parseHost({ ...HOST, access_level: 'metrics' })?.access_level, 'metrics');
+	assert.equal(parseHost({ ...HOST, access_level: null })?.access_level, null);
+	assert.equal(parseHost({ ...HOST, access_level: 'owner' }), null);
+	// Without access_level (an API before v1.24) the deprecated relation mirrors still say the level.
+	const { access_level: _level, ...legacyHost } = HOST;
+	assert.equal(parseHost({ ...legacyHost, relation: 'owner', share_level: null })?.access_level, 'deploy');
+	assert.equal(parseHost({ ...legacyHost, access_level: 'metrics' })?.access_level, 'metrics');
+	assert.equal(parseHost({ ...legacyHost, relation: 'shared', share_level: null }), null);
+	assert.equal(parseHost(legacyHost)?.access_level, null);
 
 	const page = parseServicePage({
 		items: [projectItem()],
@@ -176,8 +179,9 @@ describe('project services', { concurrency: false }, () => {
 	});
 
 	function loadAt(url: string, projects = [PROJECT]) {
+		// The caller owns PROJECT's org, so the Hosts tab reads the org's join tokens.
 		return projectLoad(
-			fakeEvent({ url, session: TOKEN, user: USER, projects, params: { id: PROJECT.id } }).event as never
+			fakeEvent({ url, session: TOKEN, user: USER, projects, orgs: [ORG], params: { id: PROJECT.id } }).event as never
 		);
 	}
 
@@ -198,12 +202,11 @@ describe('project services', { concurrency: false }, () => {
 			return envelope({ items: [], next_cursor: null });
 		};
 		const expected: Record<string, string[]> = {
-			// An admin's Hosts tab also lists join tokens for the Add a host card.
-			hosts: ['hosts', 'join-tokens'],
+			// An org admin's Hosts tab also lists the org's join tokens for the Add a host card.
+			hosts: ['hosts', 'org:join-tokens'],
 			// Catalog & services: the entries, their running copies, the hosts they run on, and members for Permissions.
 			catalog: ['catalog', 'hosts', 'members', 'services'],
 			members: ['invites', 'members'],
-			tokens: ['join-tokens'],
 			settings: ['env-sets', 'files', 'registries']
 		};
 		const overlap: Record<string, number> = {};
@@ -215,7 +218,7 @@ describe('project services', { concurrency: false }, () => {
 			const sections = calls
 				.map((call) => call.url.pathname)
 				.filter((path) => path !== `/v1/projects/${id}`)
-				.map((path) => path.slice(`/v1/projects/${id}/`.length))
+				.map((path) => (path === `/v1/orgs/${ORG.id}/join-tokens` ? 'org:join-tokens' : path.slice(`/v1/projects/${id}/`.length)))
 				.sort();
 			assert.deepEqual(sections, want, tab);
 			overlap[tab] = maxInFlight;
@@ -277,7 +280,7 @@ describe('project services', { concurrency: false }, () => {
 		installFetch((call) => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) {
 				return envelope({
-					items: [HOST, { ...HOST, id: metricsId, name: 'metrics-box', relation: 'shared', share_level: 'metrics' }],
+					items: [HOST, { ...HOST, id: metricsId, name: 'metrics-box', access_level: 'metrics' }],
 					next_cursor: null
 				});
 			}
@@ -630,9 +633,10 @@ describe('project services', { concurrency: false }, () => {
 		assert.equal(containsToken(probe), false);
 	});
 
-	test('host tab=services redirects for an owner member, a share member, or neither', async () => {
+	test('host tab=services redirects to the first session project with deploy access, or stays', async () => {
 		const ownerCalls = installFetch((call) => {
 			if (call.url.pathname === `/v1/hosts/${HOST_ID}`) return envelope(HOST);
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [HOST], next_cursor: null });
 			return envelope(null, 500, 'error', 'unexpected');
 		});
 		await assert.rejects(
@@ -652,9 +656,9 @@ describe('project services', { concurrency: false }, () => {
 				err.status === 303 &&
 				err.location === `/projects/${PROJECT.id}?tab=catalog&catalog.host=${HOST_ID}`
 		);
-		assert.equal(
-			ownerCalls.some((call) => call.url.pathname.includes('/projects/')),
-			false
+		assert.deepEqual(
+			ownerCalls.filter((call) => call.url.pathname.includes('/projects/')).map((call) => call.url.pathname),
+			[`/v1/projects/${PROJECT.id}/hosts`]
 		);
 
 		const THIRD_ID = '00000000-0000-4000-8000-000000000097';
@@ -1042,7 +1046,7 @@ function serviceRow(projectName: string, overrides: Partial<ProjectServiceRow> =
 
 const hostRow = (projectId: string): Host => ({
 	...HOST,
-	project_id: projectId,
+	org_id: projectId,
 	status: 'online'
 });
 
@@ -1267,7 +1271,7 @@ test('the rename dialog posts display_name only when that row may be renamed', (
 	assert.equal(unknownHost.includes('name="display_name"'), false);
 });
 
-test('the host filter lists owned hosts and deploy shares', () => {
+test('the host filter lists hosts this project has deploy access to', () => {
 	const deployId = '00000000-0000-4000-8000-0000000000ee';
 	const metricsId = '00000000-0000-4000-8000-0000000000dd';
 	setUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=widget&catalog.sort=name&catalog.dir=desc&catalog.page=2`);
@@ -1275,8 +1279,8 @@ test('the host filter lists owned hosts and deploy shares', () => {
 		renderServices([serviceRow('Lab')], {
 			hosts: [
 				hostRow(PROJECT.id),
-				{ ...hostRow(OTHER_ID), id: deployId, name: 'deploy-box', relation: 'shared', share_level: 'deploy' },
-				{ ...hostRow(OTHER_ID), id: metricsId, name: 'metrics-box', relation: 'shared', share_level: 'metrics' }
+				{ ...hostRow(OTHER_ID), id: deployId, name: 'deploy-box', access_level: 'deploy' },
+				{ ...hostRow(OTHER_ID), id: metricsId, name: 'metrics-box', access_level: 'metrics' }
 			]
 		})
 	);
@@ -1286,10 +1290,10 @@ test('the host filter lists owned hosts and deploy shares', () => {
 	assert.equal(html.includes('metrics-box'), false);
 	assert.equal(html.includes(metricsId), false);
 	assert.equal(serviceHostReachable(hostRow(PROJECT.id)), true);
-	assert.equal(serviceHostReachable({ relation: 'shared', share_level: 'deploy' }), true);
-	assert.equal(serviceHostReachable({ relation: 'shared', share_level: 'metrics' }), false);
-	const deployBox = { ...hostRow(OTHER_ID), id: deployId, name: 'deploy-box', relation: 'shared' as const, share_level: 'deploy' as const };
-	const metricsBox = { ...hostRow(OTHER_ID), id: metricsId, name: 'metrics-box', relation: 'shared' as const, share_level: 'metrics' as const };
+	assert.equal(serviceHostReachable({ access_level: 'deploy' }), true);
+	assert.equal(serviceHostReachable({ access_level: 'metrics' }), false);
+	const deployBox = { ...hostRow(OTHER_ID), id: deployId, name: 'deploy-box', access_level: 'deploy' as const };
+	const metricsBox = { ...hostRow(OTHER_ID), id: metricsId, name: 'metrics-box', access_level: 'metrics' as const };
 	const choices = hostChoices([hostRow(PROJECT.id), deployBox, metricsBox]);
 	assert.deepEqual(choices.map((host) => host.name), ['pi1', 'deploy-box']);
 	assert.deepEqual(chosenHost(deployId, choices), { hostId: deployId, notice: null });

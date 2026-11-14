@@ -20,6 +20,7 @@
 	} = $props();
 
 	const icons: Record<string, Component> = {
+		Projects: FolderKanban,
 		Hosts: Server,
 		'Catalog & services': Library,
 		Processes: Cpu,

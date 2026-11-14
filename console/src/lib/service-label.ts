@@ -63,19 +63,9 @@ export function serviceLogsHref(projectId: string, hostId: string, entry: string
 }
 
 /**
- * Show rename when this project's admin+ can edit the row.
- * Owner admin+ of the host's owning project can edit every row.
- * A sharing project's admin+ can edit only that project's own services.
- * When the host is not in the loaded list, admin+ of this project still sees the control.
+ * Show rename when this project's admin+ can edit the row: a project with deploy access edits only its own
+ * services (api-v1 v1.24 item 2). An org admin is admin on every project of the org, so the same rule holds.
  */
-export function canRenameService(input: {
-	canAdmin: boolean;
-	projectId: string;
-	serviceProjectId: string | null;
-	hostOwnerProjectId: string | null;
-}): boolean {
-	if (!input.canAdmin) return false;
-	if (input.hostOwnerProjectId == null) return true;
-	if (input.hostOwnerProjectId === input.projectId) return true;
-	return input.serviceProjectId === input.projectId;
+export function canRenameService(input: { canAdmin: boolean; projectId: string; serviceProjectId: string | null }): boolean {
+	return input.canAdmin && input.serviceProjectId === input.projectId;
 }

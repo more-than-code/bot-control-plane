@@ -44,7 +44,9 @@ test('the layout load passes the avatar URL only when it is https', async () => 
 
 test('the header shows the avatar left of the name, with an initial fallback', () => {
 	const layout = readFileSync(new URL('../src/routes/+layout.svelte', import.meta.url), 'utf8');
-	const trigger = layout.match(/<DropdownMenu\.Trigger[\s\S]*?<\/DropdownMenu\.Trigger>/)?.[0] ?? '';
+	// The account menu's trigger (the org switcher is another dropdown in the header).
+	const trigger =
+		[...layout.matchAll(/<DropdownMenu\.Trigger[\s\S]*?<\/DropdownMenu\.Trigger>/g)].map((match) => match[0]).find((text) => text.includes('data.user.name')) ?? '';
 	const img = trigger.indexOf('<img');
 	const initial = trigger.indexOf('avatarInitial(data.user.name)');
 	const name = trigger.indexOf("{data.user.name || 'Account'}");

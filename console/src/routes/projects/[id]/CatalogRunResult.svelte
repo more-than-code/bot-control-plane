@@ -4,7 +4,6 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { ImageStatus, ProgramStatus } from '$lib/api-types';
-	import { APPROVAL_WAIT } from '$lib/catalog';
 	import { shortDigest } from '$lib/image-spec';
 	import type { CatalogRunState } from '$lib/project-action';
 
@@ -44,7 +43,7 @@
 <div class="grid gap-3">
 	{#if result.message}
 		<div bind:this={focusEl} tabindex="-1" class="max-w-full min-w-0 focus-visible:ring-3 focus-visible:ring-ring break-words">
-			<Notice kind={result.message === APPROVAL_WAIT ? 'info' : 'error'}>{result.message}</Notice>
+			<Notice kind="error">{result.message}</Notice>
 		</div>
 	{/if}
 	{#if result.status && !('active_state' in result.status) && result.status.state === 'unknown'}

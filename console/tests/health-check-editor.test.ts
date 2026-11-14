@@ -40,7 +40,7 @@ const OTHER_ID = '00000000-0000-4000-8000-000000000099';
 
 const HOST: Host = {
 	id: HOST_ID,
-	project_id: PROJECT.id,
+	org_id: PROJECT.id,
 	name: 'pi1',
 	node_type: 'pi',
 	os: 'linux',
@@ -51,8 +51,8 @@ const HOST: Host = {
 	last_seen_at: '2026-10-14T00:00:00Z',
 	enrolled_at: '2026-10-13T00:00:00Z',
 	revoked_at: null,
-	relation: 'owner',
-	share_level: null,
+	access_level: 'deploy',
+	access: null,
 	programs: null
 };
 
@@ -379,16 +379,15 @@ describe('saved health-check notice', () => {
 });
 
 describe('health check permission', () => {
-	test('a viewer cannot edit and an admin can, including only its own service on a share', () => {
-		const base = { projectId: PROJECT.id, serviceProjectId: PROJECT.id, hostOwnerProjectId: PROJECT.id };
+	test('a viewer cannot edit and an admin can, only for its own project services', () => {
+		const base = { projectId: PROJECT.id, serviceProjectId: PROJECT.id };
 		assert.equal(canEditHealthChecks({ ...base, canAdmin: false }), false);
 		assert.equal(canEditHealthChecks({ ...base, canAdmin: true }), true);
 		assert.equal(
 			canEditHealthChecks({
 				canAdmin: true,
 				projectId: PROJECT.id,
-				serviceProjectId: OTHER_ID,
-				hostOwnerProjectId: OTHER_ID
+				serviceProjectId: OTHER_ID
 			}),
 			false
 		);
@@ -396,8 +395,7 @@ describe('health check permission', () => {
 			canEditHealthChecks({
 				canAdmin: true,
 				projectId: PROJECT.id,
-				serviceProjectId: PROJECT.id,
-				hostOwnerProjectId: OTHER_ID
+				serviceProjectId: PROJECT.id
 			}),
 			true
 		);
@@ -434,12 +432,12 @@ describe('health check permission', () => {
 		const foreign = renderServices(
 			{},
 			serviceRow({ project_id: OTHER_ID, project_name: 'Other' }),
-			[{ ...HOST, project_id: OTHER_ID }]
+			[{ ...HOST, org_id: OTHER_ID }]
 		);
 		assert.equal(foreign.includes('aria-label="Health checks '), false);
 		assert.equal(foreign.includes(`id="service-${SERVICE_ID}"`), false);
 		// This project's own copy on that shared host keeps it.
-		const own = renderServices({}, serviceRow(), [{ ...HOST, project_id: OTHER_ID }]);
+		const own = renderServices({}, serviceRow(), [{ ...HOST, org_id: OTHER_ID }]);
 		assert.match(own, /aria-label="More actions for Widget on pi1"/);
 	});
 });

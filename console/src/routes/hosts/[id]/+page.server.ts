@@ -1,17 +1,18 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
-import type { Host, ProcessSample } from '$lib/api-types';
+import type { Host, HostAccess, ProcessSample, Project } from '$lib/api-types';
 import type { HostPage, MetricChart, ProcessSort, ServiceLink } from '$lib/host-view';
 import { hostQuery, METRIC_SPECS } from '$lib/host-view';
 import { rangeWindow, type RangeKey } from '$lib/ranges';
 import { processServiceHref, serviceLabel } from '$lib/service-label';
-import { approveCatalog, revokeCatalog } from '$lib/server/catalog-actions';
-import { actionFailure, apiFetch, loadFailure } from '$lib/server/api';
+import { removeAccessAction, setAccessAction } from '$lib/server/access-actions';
+import { actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
-import { roleAtLeast } from '$lib/server/roles';
+import { isOrgAdmin } from '$lib/server/roles';
+import { isCatalogHost } from '$lib/catalog';
 import {
-	parseApprovalList,
 	parseHost,
+	parseHostAccess,
 	parseListPayload,
 	parseMetricPayload,
 	parseProcessSample,
@@ -29,18 +30,20 @@ function hostId(params: { id?: string }): string {
 	return params.id;
 }
 
-const noApprovals = {
-	canApproveCatalog: false,
-	approvals: [],
-	approvalsOmitted: 0,
-	approvalsTruncated: false,
-	approvalsMessage: null as string | null
+const noAccess = {
+	canManageAccess: false,
+	accessLoaded: false,
+	access: [] as HostAccess[],
+	accessProjects: [] as Project[],
+	accessMessage: null as string | null
 };
+
+type AccessData = Pick<HostPage, 'org' | 'canManageAccess' | 'accessLoaded' | 'access' | 'accessProjects' | 'accessMessage'>;
 
 function blank(tab: HostPage['tab'], range: RangeKey, processSort: ProcessSort, message: string): HostPage {
 	return {
 		host: null,
-		projectName: null,
+		org: null,
 		tab,
 		range,
 		processSort,
@@ -49,18 +52,8 @@ function blank(tab: HostPage['tab'], range: RangeKey, processSort: ProcessSort, 
 		metrics: [],
 		processes: null,
 		processesMessage: null,
-		...noApprovals
+		...noAccess
 	};
-}
-
-async function loadProjectName(event: RequestEvent, projectId: string): Promise<string | null> {
-	try {
-		const project = parseProject(await apiFetch(event, `/v1/projects/${projectId}`));
-		return project?.name ?? null;
-	} catch (err) {
-		if (isRedirect(err) || isHttpError(err)) throw err;
-		return null;
-	}
 }
 
 async function loadMetric(event: RequestEvent, id: string, spec: (typeof METRIC_SPECS)[number], window: { from: string; to: string }): Promise<MetricChart> {
@@ -75,16 +68,12 @@ async function loadMetric(event: RequestEvent, id: string, spec: (typeof METRIC_
 	}
 }
 
-async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, processSort: ProcessSort): Promise<HostPage> {
+async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, processSort: ProcessSort, accessLoad: Promise<AccessData>): Promise<HostPage> {
 	event.depends('host:metrics');
 	const window = rangeWindow(range, Date.now());
-	const [projectName, metrics] = await Promise.all([
-		loadProjectName(event, host.project_id),
-		Promise.all(METRIC_SPECS.map((spec) => loadMetric(event, host.id, spec, window)))
-	]);
+	const [metrics, access] = await Promise.all([Promise.all(METRIC_SPECS.map((spec) => loadMetric(event, host.id, spec, window))), accessLoad]);
 	return {
 		host,
-		projectName,
 		tab: 'overview',
 		range,
 		processSort,
@@ -93,28 +82,28 @@ async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, proce
 		metrics,
 		processes: null,
 		processesMessage: null,
-		...noApprovals
+		...access
 	};
 }
 
-/** One host-list page per project. Further pages are not followed. */
-const SHARE_SCAN_PROJECTS = 20;
+/** At most this many session projects are scanned for the host, one host-list page each. Further pages are not followed. */
+const HOST_SCAN_PROJECTS = 20;
 
 /**
- * Owning project when the caller is a member of `host.project_id`.
- * Otherwise the first of at most 20 session projects whose first host page lists the host.
+ * The first of at most 20 session projects whose first host page lists the host with deploy access (a project
+ * that can see its services there). Projects in the host's org are checked first.
  */
 async function projectForServices(event: LoadEvent, host: Host): Promise<string | null> {
-	const projects = event.locals.projects;
-	if (projects.some((project) => project.id === host.project_id)) return host.project_id;
-	for (const project of projects.slice(0, SHARE_SCAN_PROJECTS)) {
+	const inOrg = event.locals.projects.filter((project) => host.org_id != null && project.org_id === host.org_id);
+	const others = event.locals.projects.filter((project) => !inOrg.includes(project));
+	for (const project of [...inOrg, ...others].slice(0, HOST_SCAN_PROJECTS)) {
 		try {
 			const payload = await apiFetch(event, `/v1/projects/${project.id}/hosts?limit=200`);
 			const parsed = parseListPayload(payload);
 			if (!parsed) continue;
 			for (const raw of parsed.raw) {
 				const item = parseHost(raw);
-				if (item?.id === host.id) return project.id;
+				if (item?.id === host.id && isCatalogHost(item)) return project.id;
 			}
 		} catch (err) {
 			if (isRedirect(err) || isHttpError(err)) throw err;
@@ -157,15 +146,10 @@ async function readProcesses(event: RequestEvent, id: string, sort: ProcessSort)
 	}
 }
 
-async function loadProcesses(event: RequestEvent, host: Host, range: RangeKey, processSort: ProcessSort): Promise<HostPage> {
-	const [projectName, processes, serviceLinks] = await Promise.all([
-		loadProjectName(event, host.project_id),
-		readProcesses(event, host.id, processSort),
-		readServiceLinks(event, host.id)
-	]);
+async function loadProcesses(event: RequestEvent, host: Host, range: RangeKey, processSort: ProcessSort, accessLoad: Promise<AccessData>): Promise<HostPage> {
+	const [processes, serviceLinks, access] = await Promise.all([readProcesses(event, host.id, processSort), readServiceLinks(event, host.id), accessLoad]);
 	return {
 		host,
-		projectName,
 		tab: 'processes',
 		range,
 		processSort,
@@ -174,31 +158,39 @@ async function loadProcesses(event: RequestEvent, host: Host, range: RangeKey, p
 		metrics: [],
 		processes: processes.sample,
 		processesMessage: processes.message,
-		...noApprovals
+		...access
 	};
 }
 
-function canApprove(event: RequestEvent, host: Host): boolean {
-	const role = event.locals.projects.find((project) => project.id === host.project_id)?.role ?? null;
-	return roleAtLeast(role, 'admin');
-}
-
-/** One list call. A failure stays on this section and does not replace the page message. */
-async function loadApprovals(event: RequestEvent, host: Host): Promise<Pick<HostPage, 'canApproveCatalog' | 'approvals' | 'approvalsOmitted' | 'approvalsTruncated' | 'approvalsMessage'>> {
-	if (!canApprove(event, host)) return noApprovals;
+/**
+ * The host's org (for the breadcrumb) and, for org owners and admins, the Access section: the host's access
+ * rows and the org's projects, read together. A failure stays in the section and does not replace the page.
+ */
+async function loadAccess(event: RequestEvent, host: Host): Promise<AccessData> {
+	const org = event.locals.orgs.find((item) => item.id === host.org_id) ?? null;
+	const orgView = org ? { id: org.id, name: org.name, role: org.role } : null;
+	if (!org || !isOrgAdmin(event.locals.orgs, host.org_id)) return { org: orgView, ...noAccess };
 	try {
-		const parsed = parseApprovalList(await apiFetch(event, `/v1/hosts/${host.id}/catalog-approvals`));
-		if (!parsed) return { ...noApprovals, canApproveCatalog: true, approvalsMessage: 'The API returned an unexpected response.' };
+		const [rows, projects] = await Promise.all([
+			apiList(event, `/v1/hosts/${host.id}/access`, parseHostAccess),
+			apiList(event, `/v1/orgs/${org.id}/projects`, parseProject)
+		]);
+		const notes = [
+			rows.omitted > 0 ? `${rows.omitted} access ${rows.omitted === 1 ? 'row' : 'rows'} could not be read.` : null,
+			projects.omitted > 0 ? `${projects.omitted} ${projects.omitted === 1 ? 'project' : 'projects'} could not be read.` : null
+		].filter((note) => note != null);
 		return {
-			canApproveCatalog: true,
-			approvals: parsed.items,
-			approvalsOmitted: parsed.omitted,
-			approvalsTruncated: parsed.truncated,
-			approvalsMessage: null
+			org: orgView,
+			canManageAccess: true,
+			accessLoaded: true,
+			access: rows.items,
+			accessProjects: projects.items,
+			accessMessage: notes.length > 0 ? notes.join(' ') : null
 		};
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
-		return { ...noApprovals, canApproveCatalog: true, approvalsMessage: loadFailure(err).message };
+		// The table and the grant form need both reads; without them only the message shows.
+		return { org: orgView, ...noAccess, canManageAccess: true, accessMessage: loadFailure(err).message };
 	}
 }
 
@@ -213,9 +205,10 @@ export const load: PageServerLoad = async (event) => {
 			const project = await projectForServices(event, host);
 			if (project) redirect(303, `/projects/${project}?tab=catalog&catalog.host=${host.id}`);
 		}
-		const approvals = await loadApprovals(event, host);
-		if (query.tab === 'processes') return present(event, { ...(await loadProcesses(event, host, query.range, query.processSort)), ...approvals });
-		return present(event, { ...(await loadOverview(event, host, query.range, query.processSort)), ...approvals });
+		// The access reads run alongside the tab's own reads.
+		const access = loadAccess(event, host);
+		if (query.tab === 'processes') return present(event, await loadProcesses(event, host, query.range, query.processSort, access));
+		return present(event, await loadOverview(event, host, query.range, query.processSort, access));
 	} catch (err) {
 		const failure = loadFailure(err);
 		return present(event, blank(query.tab, query.range, query.processSort, failure.message));
@@ -223,8 +216,8 @@ export const load: PageServerLoad = async (event) => {
 };
 
 export const actions: Actions = {
-	approveCatalog,
-	revokeCatalog,
+	setAccess: setAccessAction('access'),
+	removeAccess: removeAccessAction('access'),
 	snapshot: async (event) => {
 		requireUser(event);
 		const id = hostId(event.params);
