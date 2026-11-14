@@ -99,7 +99,7 @@ func (s *Server) catalogAct(w http.ResponseWriter, r *http.Request, p principal,
 			return
 		}
 		if p.Session.Kind == store.KindDelegated {
-			s.issueConfirmation(w, r, p, projectID, host, entry, action, key, hash, "", nil)
+			s.issueConfirmation(w, r, p, projectID, host, entry, action, key, hash, "", nil, nil)
 			return
 		}
 	}
@@ -474,7 +474,7 @@ func (s *Server) claimOrReplay(w http.ResponseWriter, r *http.Request, userID uu
 	return true
 }
 
-func (s *Server) issueConfirmation(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action, key string, hash []byte, imageDigest string, imageForce *bool) {
+func (s *Server) issueConfirmation(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action, key string, hash []byte, imageDigest string, imageForce *bool, imageNetworks []string) {
 	plain, tokenHash, err := secret.NewToken()
 	if err != nil {
 		s.failClaimed(w, r, p.User.ID, key, err)
@@ -506,7 +506,7 @@ func (s *Server) issueConfirmation(w http.ResponseWriter, r *http.Request, p pri
 		if action == "rollback" && imageDigest != "" {
 			shown = imageDigest
 		}
-		plan = imagePlan(action, entry.Name, shown, host.Name)
+		plan = imagePlan(action, entry.Name, shown, host.Name, imageNetworks)
 	}
 	payload := map[string]any{
 		"confirmation_id": plain,
@@ -720,12 +720,18 @@ func programPlan(action, entry, display, runAs, host string) string {
 	return fmt.Sprintf("will %s program %s (%s, as %s) on %s", action, entry, display, runAs, host)
 }
 
-func imagePlan(action, entry, shown, host string) string {
+// imagePlan is the delegated confirm sentence. A deploy or rollback of an
+// entry with networks adds the shared networks it joins (api-v1 v1.25 item 5).
+func imagePlan(action, entry, shown, host string, networks []string) string {
 	switch action {
 	case "remove":
 		return fmt.Sprintf("will remove %s on %s", entry, host)
 	case "deploy", "rollback":
-		return fmt.Sprintf("will deploy %s (%s) on %s", entry, shown, host)
+		plan := fmt.Sprintf("will deploy %s (%s) on %s", entry, shown, host)
+		if len(networks) > 0 {
+			plan += "; also joins shared network(s): " + listPhrase(networks)
+		}
+		return plan
 	default:
 		return fmt.Sprintf("will %s %s on %s", action, entry, host)
 	}

@@ -365,8 +365,33 @@ func projectsView(h store.Host, viewer uuid.UUID, slug string, orgAdmin bool) st
 	} else if cp.Projects != nil {
 		cp.Projects = append([]string{}, cp.Projects...)
 	}
+	cp.SharedNetworks = sharedNetworksView(cp.SharedNetworks, viewer, slug, orgAdmin)
 	h.Programs = &cp
 	return h
+}
+
+// sharedNetworksView applies api-v1 v1.25 item 2: an org admin (session,
+// not delegated) sees every network with its members; anyone else sees
+// only the networks that list the project in view, without members. With
+// no project in view that is an empty list. null (an agent before 0.2.9)
+// stays null.
+func sharedNetworksView(nets []store.SharedNetwork, viewer uuid.UUID, slug string, orgAdmin bool) []store.SharedNetwork {
+	if nets == nil {
+		return nil
+	}
+	if orgAdmin {
+		return store.CloneSharedNetworks(nets)
+	}
+	out := []store.SharedNetwork{}
+	if viewer == uuid.Nil {
+		return out
+	}
+	for _, n := range nets {
+		if slices.Contains(n.Projects, slug) {
+			out = append(out, store.SharedNetwork{Name: n.Name, Subnet: n.Subnet})
+		}
+	}
+	return out
 }
 
 func (s *Server) handleHostRevoke(w http.ResponseWriter, r *http.Request) {

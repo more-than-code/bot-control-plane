@@ -48,9 +48,10 @@ const maxHealthPlanRunes = 10886
 //	env, 64 keys, both sides a quoted 4096-byte value     2101954
 //	command and entrypoint, 32 args, both sides           2097559
 //	files, volumes, secret_env, image, ports, and the rest  78955
+//	shared networks, 4 names of 32 on both sides (v1.25)      290
 //	head, field separators, and the closing note              145
-//	total                                                4278613
-const maxCatalogPlanRunes = 4278613
+//	total                                                4278903
+const maxCatalogPlanRunes = 4278903
 
 // summaryField replaces controls, format characters, and line or paragraph
 // separators with U+FFFD, then caps the result at summaryFieldRunes.
@@ -173,6 +174,12 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 				ProjectName string `json:"project_name"`
 				Level       string `json:"level"`
 			} `json:"access"`
+			Programs *struct {
+				SharedNetworks []struct {
+					Name   string `json:"name"`
+					Subnet string `json:"subnet"`
+				} `json:"shared_networks"`
+			} `json:"programs"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil {
@@ -200,6 +207,14 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 			line += " (" + summaryField(h.AccessLevel) + ")"
 		case h.Relation == "shared":
 			line += " (shared: " + summaryField(h.ShareLevel) + ")"
+		}
+		// api-v1 v1.25 item 6: the shared networks the API showed this caller.
+		if h.Programs != nil && len(h.Programs.SharedNetworks) > 0 {
+			nets := make([]string, 0, len(h.Programs.SharedNetworks))
+			for _, n := range h.Programs.SharedNetworks {
+				nets = append(nets, summaryField(n.Name)+" "+summaryField(n.Subnet))
+			}
+			line += " (shared networks: " + strings.Join(nets, ", ") + ")"
 		}
 		parts = append(parts, line)
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"strings"
 	"time"
@@ -343,12 +344,84 @@ func parsePrograms(raw json.RawMessage) (*store.HostPrograms, bool) {
 			return nil, false
 		}
 	}
+	if !validSharedNetworks(p.SharedNetworks) {
+		return nil, false
+	}
+	// api-v1 v1.25 amendment A2: a network's "projects": null is no members.
+	for i := range p.SharedNetworks {
+		if p.SharedNetworks[i].Projects == nil {
+			p.SharedNetworks[i].Projects = []string{}
+		}
+	}
 	return &p, true
 }
 
-// maxHelloProjects is the agent-protocol v1.12 item 5 cap. helloSlugRe is
-// the runner.toml projects grammar (agent-protocol v1.4).
-const maxHelloProjects = 32
+// rfc1918 is the private IPv4 space a shared network subnet must lie in.
+var rfc1918 = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+}
+
+// validSharedNetworks checks hello.programs.shared_networks (api-v1 v1.25
+// item 2): caps, unique valid names, a canonical RFC 1918 subnet with a
+// prefix from 16 to 28, and unique valid member slugs. nil (key absent)
+// is valid. It does not change nets.
+func validSharedNetworks(nets []store.SharedNetwork) bool {
+	if len(nets) > maxHelloNetworks {
+		return false
+	}
+	names := map[string]struct{}{}
+	for _, n := range nets {
+		if !catalog.ValidNetworkName(n.Name) || !validSharedSubnet(n.Subnet) {
+			return false
+		}
+		if _, dup := names[n.Name]; dup {
+			return false
+		}
+		names[n.Name] = struct{}{}
+		if len(n.Projects) > maxHelloMembers {
+			return false
+		}
+		slugs := map[string]struct{}{}
+		for _, slug := range n.Projects {
+			if !helloSlugRe.MatchString(slug) {
+				return false
+			}
+			if _, dup := slugs[slug]; dup {
+				return false
+			}
+			slugs[slug] = struct{}{}
+		}
+	}
+	return true
+}
+
+func validSharedSubnet(cidr string) bool {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix || prefix.String() != cidr {
+		return false
+	}
+	if prefix.Bits() < 16 || prefix.Bits() > 28 {
+		return false
+	}
+	for _, private := range rfc1918 {
+		if private.Contains(prefix.Addr()) {
+			return true
+		}
+	}
+	return false
+}
+
+// Hello caps: maxHelloProjects is agent-protocol v1.12 item 5;
+// maxHelloNetworks (shared networks) and maxHelloMembers (member slugs per
+// network) are agent-protocol v1.13 item 1. helloSlugRe is the runner.toml
+// projects grammar (agent-protocol v1.4).
+const (
+	maxHelloProjects = 32
+	maxHelloNetworks = 8
+	maxHelloMembers  = 32
+)
 
 var helloSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 

@@ -25,7 +25,7 @@ const rollbackEntrySchema = `{
 func registerRollbackEntry(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "rollback_entry",
-		Description: "Roll a catalog image entry back to a digest on a host. Requires the deploy permission. The host must run containers. digest is sha256: followed by 64 lowercase hex digits. The action is real and is audited. Nothing runs until a second confirm call with the returned confirmation id, after the user agrees. This call does not contact the host.",
+		Description: "Roll a catalog image entry back to a digest on a host. Requires the deploy permission. The host must run containers. digest is sha256: followed by 64 lowercase hex digits. The action is real and is audited. Nothing runs until a second confirm call with the returned confirmation id, after the user agrees. The API refuses when the entry joins a shared network the host does not open to the project, or the host's agent is older than 0.2.9. This call does not contact the host.",
 		Annotations: mutatingAnnotations(false),
 		InputSchema: json.RawMessage(rollbackEntrySchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {

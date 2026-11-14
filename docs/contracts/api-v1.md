@@ -673,7 +673,7 @@ ImageSpec    gains "files":[{"file":string,"target":string}]   // default []
 3. **Audit:** `replace` and `create` keep `env_set.replace` (`set`, `keys`). `merge` writes `env_set.merge` with `set`, `keys` (the pasted names) and `created` (the names new to the set). Never values. A delegated (MCP) call is refused `forbidden` before the body is read, and audited `env_set.replace` (denied, `via` mcp) for every mode.
 4. **Rollback note:** a v1.18 API refuses the unknown `mode` field (`bad_request "invalid json"`), so the console that sends `mode` ships after this API and rolls back first.
 
-> v1.20 (env generate) is on hold and not part of this copy; see the umbrella contract.
+> v1.27 (env generate, renumbered from v1.20) is on hold and not part of this copy; see the umbrella contract.
 
 ## v1.21 last deployed time on catalog entries (2026-10-30, approved spec `docs/spec-catalog-last-deployed.md` rev 1; no migration required, an index may be added)
 
@@ -722,7 +722,7 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
      - `project_id` is the backfilled former owner, or for a new host the token's grant project when the grant is `deploy`, otherwise the org's oldest live project. It is returned only to org admins and members of that project; everyone else gets `null`;
      - `relation` is `"owner"` when `access_level` is `"deploy"`, `"shared"` when it is `"metrics"`, and empty (with `share_level` null) when `access_level` is null;
      - `share_level` equals `access_level`.
-     They are removed in v1.25.
+     They are removed in v1.26 (renumbered; v1.25 is shared networks).
    - `HostPrograms.projects`, the host's allowlist of project slugs (v1.23 item 1), is returned only to org admins and owners. Every other caller gets `projects: null`. Each project view keeps its own `project_listed`. This replaces v1.23's "members of the host's owning project": a project with access never sees the other projects' slugs.
    - `HostAccess{project_id,project_name,level,granted_by,granted_at}`. `granted_by` is a user id, or `null` for the former owner's row backfilled by the migration (a grant applied by a join token at enrolment records the token's creator); `granted_at` is always set.
 2. **Permissions** (replaces the v1.1 matrix; roles are org roles or the caller's role in a project that has access):
@@ -808,3 +808,30 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
 ## v1.24.1 image entries round-trip (2026-11-14, approved spec `docs/spec-release-v0231.md` rev 1 §2.7; no migration)
 
 1. **The other kind's wait field may be sent as 0 (amends v1.8 item 11).** An image entry stores both `healthy_after_sec` and `timeout_sec`, and GET returns both, with the field that does not apply to the entry's kind set to `0`. On create and replace (`POST`/`PUT …/catalog[/{name}]`), a `service` may now carry `"timeout_sec":0` and a `job` may carry `"healthy_after_sec":0`; the value is ignored and stored as `0`, as before. Any other value of the other kind's field is still `bad_request` with the same message (`invalid timeout_sec`, `invalid healthy_after_sec`). The kind's own field keeps its range and default. `spec_hash` is unchanged for every entry. So GET then PUT of an unedited image entry succeeds. `healthcheck.timeout_sec` is a different field and is unaffected.
+
+## v1.25 shared networks (2026-11-14, approved spec `docs/spec-cross-project-network.md` rev 2; additive, gated; no migration)
+
+1. **ImageSpec `networks: [name]`.**
+   - Optional; 1–4 unique names matching `^[a-z0-9][a-z0-9-]{0,31}$`.
+   - `null` and `[]` are stored as absent. A bad name, a duplicate or more than 4 is `bad_request` `invalid networks`.
+   - Present only when set. It enters `spec_hash` only when present, so existing entries keep their hash.
+   - A job may carry it too.
+2. **`HostPrograms.shared_networks: [{"name","subnet","projects":[slug]}] | null`.**
+   - It is `null` when the agent did not send it (agents < 0.2.9).
+   - **Visibility:**
+     - an org owner or admin in a session (not delegated) sees the full list;
+     - every other caller who can see the host, delegated sessions included, sees only the networks whose `projects` lists the project in view, and `projects` is omitted.
+     - with no single project in view (`GET /v1/hosts/{id}` for a caller with access through several projects or none, or a delegated `GET /v1/orgs/{id}/hosts`), that view is `[]`. `null` only ever means the agent did not send the key.
+   - **Parsing the hello:** at most 8 networks, at most 32 slugs per network, valid names, slugs and CIDRs. A malformed value stores the programs as disabled, as for every other `programs` key. A network's `"projects": null` is read as `[]`.
+3. **Deploy and rollback gates** (`POST …/catalog/{name}/deploy`, `…/rollback`, and the delegated confirm of those plans), when the entry's spec has `networks`. They run after the files, healthcheck, logging and health-policy gates, and before the rollback digest and secret-key checks.
+   - Host `programs.shared_networks` is `null`: `bad_request` "this host's agent does not support shared networks; upgrade it to 0.2.9".
+   - A name is not defined on the host, or does not list the entry's project: `bad_request` "shared network <name> is not open to this project on this host".
+   - Run, stop and restart of an existing container are not gated.
+4. **Task payload:** `spec.networks` is sent only when non-empty. Hosts that did not advertise `shared_networks` never receive it, because the gate above refuses first.
+5. **Plan text:**
+   - catalog create and update plans list `shared networks: <names>`, or `shared networks: <before> → none`;
+   - deploy and rollback plans add `also joins shared network(s): <names>`.
+6. **MCP:**
+   - `create_catalog_entry` and `update_catalog_entry` accept `networks`, and `list_catalog` shows it;
+   - the `list_hosts` summary names the shared networks and subnets the caller may see.
+
