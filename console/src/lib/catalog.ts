@@ -110,9 +110,6 @@ export function isIdempotencyKey(value: string): boolean {
 	return IDEMPOTENCY_KEY.test(value);
 }
 
-export function isSpecHash(value: string): boolean {
-	return SPEC_HASH.test(value);
-}
 
 /** A host this project has `deploy` access to (api-v1 v1.24 item 4). Metrics access is not a catalog host. */
 export function isCatalogHost(host: Pick<Host, 'access_level'>): boolean {

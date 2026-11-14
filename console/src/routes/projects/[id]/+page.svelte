@@ -117,6 +117,7 @@
 					slug={data.project.slug}
 					open={data.hosts.length === 0 && !data.hostsMessage}
 					message={createTokenMessage}
+					tokensMessage={data.tokensMessage ?? null}
 				/>
 			{/if}
 		</HostsSection>

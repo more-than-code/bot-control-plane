@@ -378,7 +378,7 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		assert.equal(hostPolicyLine(host(policy({ projects: ['home-lab'] }), { access: null })), 'Programs on, Images on, Projects: home-lab');
 		assert.equal(hostPolicyLine(host(policy({ projects: ['home-lab', 'acme'] }), admin)), 'Programs on, Images on, Projects: home-lab, acme');
 		assert.equal(hostPolicyLine(host(policy({ images: false, projects: [] }), admin)), 'Programs on, Images off, Projects: none');
-		assert.equal(hostPolicyLine(host(null, admin)), 'Programs off, Images off, Projects: not reported');
+		assert.equal(hostPolicyLine(host(null, admin)), 'Programs not reported, Images not reported, Projects: not reported');
 		assert.equal(hostPolicyLine(host(policy(), { access: null })), null);
 		setPageUrl(`http://console.example/hosts/${HOST_ID}?tab=overview`);
 		const props = { range: '1h' as const, metrics: [], snapshot: null };

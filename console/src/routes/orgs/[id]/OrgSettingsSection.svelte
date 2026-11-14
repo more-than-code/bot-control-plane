@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ORG_ERROR_ID } from '$lib/org-view';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
@@ -14,7 +15,9 @@
 </script>
 
 {#if message}
-	<Notice kind="error">{message}</Notice>
+	<div id={ORG_ERROR_ID} tabindex="-1" class="mb-4 max-w-full min-w-0 break-words rounded-md focus-visible:ring-3 focus-visible:ring-ring">
+		<Notice kind="error">{message}</Notice>
+	</div>
 {/if}
 <Card.Root class="mb-4">
 	<Card.Header>
@@ -40,6 +43,8 @@
 		</Card.Header>
 		<Card.Content>
 			<ConfirmAction
+				closeOnFailure
+				failureFocusId={ORG_ERROR_ID}
 				id="delete-org"
 				action={actionUrlFrom(page.url, 'deleteOrg')}
 				label="Delete organization"

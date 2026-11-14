@@ -42,7 +42,7 @@ function anchors(html: string): string[] {
 
 const HOST: Host = {
 	id: '00000000-0000-4000-8000-000000000080',
-	org_id: PROJECT.id,
+	org_id: PROJECT.org_id,
 	name: 'pi5',
 	node_type: 'pi',
 	os: 'linux',
@@ -198,7 +198,9 @@ test('an empty host list links an org admin to the Add a host card and tells eve
 	const projectAdmin = render(HostsSection, {
 		props: { ...SECTION, hosts: [], canAdmin: true, canOrgAdmin: false, message: null, hostsMessage: null }
 	}).body.replace(/<!--[\s\S]*?-->/g, '');
-	assert.match(projectAdmin, /No hosts yet\. Ask an org admin to add a host\./);
+	// The project admin's line is persistent above the table, not only in the empty state.
+	assert.match(projectAdmin, /<p class="text-muted-foreground mb-4 text-sm">Ask an org admin to add a host\.<\/p>/);
+	assert.match(projectAdmin, /No hosts yet\./);
 	assert.equal(projectAdmin.includes('href="#new-host"'), false);
 
 	const viewer = render(HostsSection, {
@@ -225,7 +227,7 @@ test('the Hosts tab shows the Add a host card to an admin only, and the tokens t
 	assert.match(viewer.replace(/<!--[\s\S]*?-->/g, ''), /No hosts yet\. Ask an org admin to add a host\./);
 
 	setPageUrl(`http://console.example/orgs/${PROJECT.org_id}?tab=tokens`);
-	const tokens = render(TokensSection, { props: { tokens: [], omitted: 0, truncated: false, canAdmin: true, message: null } }).body;
+	const tokens = render(TokensSection, { props: { tokens: [], omitted: 0, truncated: false, message: null } }).body;
 	assert.match(tokens, /Create join tokens from <a\b[^>]*href="\?tab=hosts#new-host"[^>]*>Hosts → Add a host<\/a>, or from a project's Hosts tab\./);
 	assert.equal(tokens.includes('Create a join token'), false);
 	assert.equal(tokens.includes('<form'), false);

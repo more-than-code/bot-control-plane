@@ -3,6 +3,9 @@ import type { CreatedJoin, OrgRole } from './api-types';
 /** Org page tabs (spec-organizations §4.3). Hosts, Join tokens and Settings are for org owners and admins. */
 export type OrgScope = 'projects' | 'hosts' | 'members' | 'tokens' | 'settings';
 
+/** The focusable wrapper around an org section's error Notice: a failed confirm closes and focuses it. */
+export const ORG_ERROR_ID = 'org-section-error';
+
 /** Unknown or not-allowed tab values fall back to Projects. */
 export function orgTabOf(value: string | null, canAdmin: boolean): OrgScope {
 	if (value === 'members') return 'members';

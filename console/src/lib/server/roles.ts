@@ -3,6 +3,12 @@ import type { Org, OrgRole, Role } from '../api-types';
 const RANK: Record<Role, number> = { viewer: 1, admin: 2, owner: 3 };
 const ORG_RANK: Record<OrgRole, number> = { member: 1, admin: 2, owner: 3 };
 
+const ORG_ROLES = new Set<OrgRole>(['owner', 'admin', 'member']);
+
+export function isOrgRole(value: unknown): value is OrgRole {
+	return typeof value === 'string' && ORG_ROLES.has(value as OrgRole);
+}
+
 export function isRole(value: unknown): value is Role {
 	return value === 'owner' || value === 'admin' || value === 'viewer';
 }
@@ -15,6 +21,12 @@ export function roleAtLeast(role: Role | null | undefined, minimum: Role): boole
 /** Hide a control unless every source agrees the caller has it. */
 export function uiRole(localsRole: Role | null, payloadRole: Role | null): Role | null {
 	if (localsRole && payloadRole) return RANK[localsRole] <= RANK[payloadRole] ? localsRole : payloadRole;
+	return payloadRole ?? localsRole;
+}
+
+/** Hide an org control unless the session and the org read agree: the lower of the two roles. */
+export function uiOrgRole(localsRole: OrgRole | null, payloadRole: OrgRole | null): OrgRole | null {
+	if (localsRole && payloadRole) return ORG_RANK[localsRole] <= ORG_RANK[payloadRole] ? localsRole : payloadRole;
 	return payloadRole ?? localsRole;
 }
 

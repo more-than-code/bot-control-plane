@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { ORG_ERROR_ID } from '$lib/org-view';
 	import type { Snippet } from 'svelte';
-	import KeyRound from '@lucide/svelte/icons/key-round';
+	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import { page } from '$app/state';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
@@ -53,7 +54,9 @@
 </script>
 
 {#if message}
-	<Notice kind="error">{message}</Notice>
+	<div id={ORG_ERROR_ID} tabindex="-1" class="mb-4 max-w-full min-w-0 break-words rounded-md focus-visible:ring-3 focus-visible:ring-ring">
+		<Notice kind="error">{message}</Notice>
+	</div>
 {/if}
 {@render children?.()}
 {#if omitted > 0}
@@ -73,7 +76,9 @@
 	searchLabel="Search host or project"
 >
 	{#snippet emptyExtra()}
-		{' '}<a class="text-primary underline underline-offset-4" href="#new-host">Add a host</a>
+		{#if !message}
+			{' '}<a class="text-primary underline underline-offset-4" href="#new-host">Add a host</a>
+		{/if}
 	{/snippet}
 	{#snippet row(host)}
 		<tr>
@@ -87,10 +92,10 @@
 					<Dialog.Root
 						bind:open={() => openHostId === host.id, (next) => (openHostId = next ? host.id : openHostId === host.id ? null : openHostId)}
 					>
-						<RowAction label="Manage access {host.name}" icon={KeyRound}>
+						<RowAction label="Manage access {host.name}" icon={ShieldCheck}>
 							{#snippet trigger(props)}
 								<Dialog.Trigger {...props}>
-									<KeyRound class="size-4" />
+									<ShieldCheck class="size-4" />
 								</Dialog.Trigger>
 							{/snippet}
 						</RowAction>
@@ -113,15 +118,19 @@
 							/>
 						</Dialog.Content>
 					</Dialog.Root>
-					<ConfirmAction
-						id="revoke-host-{host.id}"
-						action={actionUrlFrom(page.url, 'revokeCredential')}
-						label="Revoke credential"
-						confirmLabel="Revoke credential"
-						message="Revoke the credential for {host.name}? The agent connection closes for every project that uses it."
-						hidden={[{ name: 'host_id', value: host.id }]}
-						rowLabel="Revoke credential {host.name}"
-					/>
+					{#if host.status !== 'revoked'}
+						<ConfirmAction
+							closeOnFailure
+							failureFocusId={ORG_ERROR_ID}
+							id="revoke-host-{host.id}"
+							action={actionUrlFrom(page.url, 'revokeCredential')}
+							label="Revoke credential"
+							confirmLabel="Revoke credential"
+							message="Revoke the credential for {host.name}? The agent connection closes for every project that uses it."
+							hidden={[{ name: 'host_id', value: host.id }]}
+							rowLabel="Revoke credential {host.name}"
+						/>
+					{/if}
 				</div>
 			</td>
 		</tr>

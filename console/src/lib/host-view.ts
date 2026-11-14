@@ -1,4 +1,5 @@
 import type { Host, HostAccess, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
+import { isCatalogHost } from './catalog';
 import { parseRange, type RangeKey } from './ranges';
 import type { Column } from './table';
 
@@ -121,6 +122,8 @@ export type HostPage = {
 	org: { id: string; name: string; role: OrgRole } | null;
 	/** Org owner or admin: the Access section (api-v1 v1.24 item 2). Hidden for everyone else. */
 	canManageAccess: boolean;
+	/** Both access reads answered; otherwise the section shows only its message. */
+	accessLoaded: boolean;
 	access: HostAccess[];
 	/** The org's projects the access form may grant (it needs their slugs for the runner.toml note). */
 	accessProjects: Project[];
@@ -167,7 +170,7 @@ export function hasProcessSample(sample: ProcessSample | null): sample is Proces
 
 /** Hosts the Catalog & services host filter offers: hosts this project has `deploy` access to. */
 export function serviceHostReachable(host: Pick<Host, 'access_level'>): boolean {
-	return host.access_level === 'deploy';
+	return isCatalogHost(host);
 }
 
 /** Label shown in the Service column. Empty when the process has no service. */
@@ -236,7 +239,9 @@ export function alignSeries(series: ReadonlyArray<{ points: readonly MetricPoint
 export function hostPolicyLine(host: Pick<Host, 'access' | 'programs'>): string | null {
 	if (host.programs?.projects == null && host.access == null) return null;
 	const programs = host.programs;
-	const onOff = (value: boolean) => (value ? 'on' : 'off');
 	const projects = programs?.projects == null ? 'not reported' : programs.projects.length === 0 ? 'none' : programs.projects.join(', ');
-	return `Programs ${onOff(programs?.enabled === true)}, Images ${onOff(programs?.images === true)}, Projects: ${projects}`;
+	// No policy from the agent at all: nothing is known about programs or images either.
+	if (programs == null) return `Programs not reported, Images not reported, Projects: ${projects}`;
+	const onOff = (value: boolean) => (value ? 'on' : 'off');
+	return `Programs ${onOff(programs.enabled)}, Images ${onOff(programs.images)}, Projects: ${projects}`;
 }

@@ -26,7 +26,11 @@
 
 <PageHeader title="Projects" headingId="projects-heading">
 	{#snippet actions()}
-		<NewProject action={actionUrlFrom(page.url, 'create')} failed={Boolean(form?.message)} message={form?.message ?? null} orgs={data.orgs} />
+		{#if data.askOrgAdmin}
+			<p class="text-muted-foreground text-sm">Ask an org admin to create a project.</p>
+		{:else}
+			<NewProject action={actionUrlFrom(page.url, 'create')} failed={Boolean(form?.message)} message={form?.message ?? null} orgs={data.orgs} />
+		{/if}
 	{/snippet}
 </PageHeader>
 {#if data.message}

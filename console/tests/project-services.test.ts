@@ -102,7 +102,6 @@ function shell(call: FetchCall, services: (call: FetchCall) => Response): Respon
 	if (call.url.pathname === `/v1/projects/${id}/catalog`) return envelope({ items: [API_ENTRY], next_cursor: null });
 	if (call.url.pathname === `/v1/projects/${id}/hosts`) return envelope({ items: [HOST], next_cursor: null });
 	if (call.url.pathname === `/v1/projects/${id}/members`) return envelope({ items: [], next_cursor: null });
-	if (call.url.pathname === `/v1/projects/${id}/join-tokens`) return envelope({ items: [], next_cursor: null });
 	if (call.url.pathname === `/v1/projects/${id}`) return envelope(PROJECT);
 	if (call.url.pathname.startsWith('/v1/services/')) return envelope({ health_checks: [] });
 	return envelope(null, 500, 'error', 'unexpected');

@@ -244,7 +244,7 @@
 
 	const permissionEntry = $derived(permissions ? (entries.find((item) => item.name === permissions.name) ?? null) : null);
 
-	// Host filter (`catalog.host`): owned hosts and deploy shares. Anything else is ignored with a notice.
+	// Host filter (`catalog.host`): hosts with deploy access. Anything else is ignored with a notice.
 	const serviceHosts = $derived(hostChoices(hosts));
 	const hostFilter = $derived(chosenHost(page.url.searchParams.get(HOST_PARAM), serviceHosts));
 	const selectedHost = $derived(hostFilter.hostId);

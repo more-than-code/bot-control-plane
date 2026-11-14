@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ORG_ERROR_ID } from '$lib/org-view';
 	import DataTable from '$lib/components/DataTable.svelte';
 	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
@@ -9,13 +10,16 @@
 		projects,
 		omitted,
 		truncated,
-		message
+		message,
+		canAdmin = false
 	}: {
 		/** The org's projects the caller can reach: every one for an org admin, their own for a member. */
 		projects: Project[];
 		omitted: number;
 		truncated: boolean;
 		message: string | null;
+		/** Org owner or admin: may create projects here. */
+		canAdmin?: boolean;
 	} = $props();
 
 	const columns: Column<Project>[] = [
@@ -27,7 +31,9 @@
 </script>
 
 {#if message}
-	<Notice kind="error">{message}</Notice>
+	<div id={ORG_ERROR_ID} tabindex="-1" class="mb-4 max-w-full min-w-0 break-words rounded-md focus-visible:ring-3 focus-visible:ring-ring">
+		<Notice kind="error">{message}</Notice>
+	</div>
 {/if}
 {#if omitted > 0}
 	<p class="text-muted-foreground mb-2 text-sm">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
@@ -37,6 +43,11 @@
 {/if}
 <h2 id="org-projects-heading" class="sr-only">Projects</h2>
 <DataTable rows={projects} {columns} id="projects" labelledBy="org-projects-heading" empty="No projects yet." rowKey={(project) => project.id}>
+	{#snippet emptyExtra()}
+		{#if !message}
+			{' '}{canAdmin ? 'Create one with New project.' : 'You see the projects you belong to.'}
+		{/if}
+	{/snippet}
 	{#snippet row(project)}
 		<tr>
 			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/projects/{project.id}">{project.name}</a></td>

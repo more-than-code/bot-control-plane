@@ -84,6 +84,9 @@
 	</div>
 {/if}
 {@render children?.()}
+{#if canAdmin && !canOrgAdmin && !hostsMessage}
+	<p class="text-muted-foreground mb-4 text-sm">Ask an org admin to add a host.</p>
+{/if}
 {#if omitted > 0}
 	<p class="text-muted-foreground mb-2 text-sm">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
 {/if}
@@ -96,7 +99,7 @@
 		{#if !hostsMessage}
 			{#if canOrgAdmin}
 				{' '}<a class="text-primary underline underline-offset-4" href="#new-host">Add a host</a>
-			{:else}
+			{:else if !canAdmin}
 				{' '}Ask an org admin to add a host.
 			{/if}
 		{/if}
@@ -134,7 +137,7 @@
 								failureFocusId={leaveFailureId}
 							/>
 						{/if}
-						{#if canOrgAdmin && (orgId == null || host.org_id === orgId)}
+						{#if canOrgAdmin && host.org_id === orgId && host.status !== 'revoked'}
 							<ConfirmAction
 								id="revoke-host-{host.id}"
 								action={actionUrlFrom(page.url, 'revokeCredential')}

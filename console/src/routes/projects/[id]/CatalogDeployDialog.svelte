@@ -112,7 +112,7 @@
 		{#snippet after()}<DrawerResize type="deploy" />{/snippet}
 		<Sheet.Header class="pr-12 pb-0">
 			<Sheet.Title class="break-all">{entry.spec.kind === 'job' ? 'Run' : 'Deploy'} {entry.name}</Sheet.Title>
-			<Sheet.Description>Choose a host in this project, or a host shared with it at deploy.</Sheet.Description>
+			<Sheet.Description>Choose a host this project can deploy to.</Sheet.Description>
 		</Sheet.Header>
 		<CatalogDeployForm
 			{entry}

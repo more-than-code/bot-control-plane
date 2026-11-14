@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ORG_ERROR_ID } from '$lib/org-view';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import UserCog from '@lucide/svelte/icons/user-cog';
@@ -50,10 +51,13 @@
 	const successors = $derived(members.filter((member) => member.role !== 'owner'));
 	let ownerId = $state('');
 	const ownerLabel = $derived(successors.find((member) => member.user_id === ownerId)?.email ?? '');
+	const ownerName = $derived(successors.find((member) => member.user_id === ownerId)?.name || ownerLabel);
 </script>
 
 {#if message}
-	<Notice kind="error">{message}</Notice>
+	<div id={ORG_ERROR_ID} tabindex="-1" class="mb-4 max-w-full min-w-0 break-words rounded-md focus-visible:ring-3 focus-visible:ring-ring">
+		<Notice kind="error">{message}</Notice>
+	</div>
 {/if}
 <p class="text-muted-foreground mb-4 text-sm">
 	Owners and admins manage the organization's hosts, join tokens and host access, and act as admin on every project in it.
@@ -100,6 +104,8 @@
 						{/if}
 						{#if canAdmin || self}
 							<ConfirmAction
+								closeOnFailure
+								failureFocusId={ORG_ERROR_ID}
 								id="remove-org-member-{member.user_id}"
 								action={actionUrlFrom(page.url, 'removeMember')}
 								label="Remove"
@@ -169,13 +175,13 @@
 			<Card.Description>The new owner must already be a member of the organization.</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			<form method="POST" action={actionUrlFrom(page.url, 'transfer')} class="grid gap-3" use:enhance>
+			<div class="grid gap-3">
 				{#if successors.length === 0}
 					<p class="text-muted-foreground text-sm">Add another member before transferring ownership.</p>
 				{:else}
 					<div class="grid gap-1.5">
 						<Label for="org-new-owner">New owner</Label>
-						<Select.Root type="single" name="user_id" bind:value={ownerId} required>
+						<Select.Root type="single" bind:value={ownerId} required>
 							<Select.Trigger id="org-new-owner" class="w-full">
 								<Select.Value placeholder="Choose a member">{ownerLabel}</Select.Value>
 							</Select.Trigger>
@@ -187,10 +193,20 @@
 						</Select.Root>
 					</div>
 					<div>
-						<Button type="submit">Transfer ownership</Button>
+						<ConfirmAction
+							id="transfer-org"
+							action={actionUrlFrom(page.url, 'transfer')}
+							label="Transfer ownership"
+							confirmLabel="Transfer ownership"
+							message="Make {ownerName} the owner? You become an admin."
+							hidden={[{ name: 'user_id', value: ownerId }]}
+							disabled={ownerId === ''}
+							closeOnFailure
+							failureFocusId={ORG_ERROR_ID}
+						/>
 					</div>
 				{/if}
-			</form>
+			</div>
 		</Card.Content>
 	</Card.Root>
 {/if}

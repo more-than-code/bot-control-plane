@@ -5,7 +5,7 @@ import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { isOrgAdmin } from '$lib/server/roles';
 import { parseProject } from '$lib/server/shape';
-import { cleanName, isUuid } from '$lib/server/validate';
+import { cleanName } from '$lib/server/validate';
 import type { Actions, PageServerLoad } from './$types';
 
 /** Orgs where the caller may create a project (owner or admin), for the New project dialog. */
@@ -17,12 +17,14 @@ export const load: PageServerLoad = async (event) => {
 	requireUser(event);
 	const orgs = creatableOrgs(event.locals);
 	const orgNames = Object.fromEntries(event.locals.orgs.map((org) => [org.id, org.name]));
+	// In an org but admin of none: no New project, only who to ask.
+	const askOrgAdmin = orgs.length === 0 && event.locals.orgs.length > 0;
 	try {
 		const list = await apiList(event, '/v1/projects', parseProject);
-		return present(event, { projects: list.items, omitted: list.omitted, truncated: list.truncated, message: null, orgs, orgNames });
+		return present(event, { projects: list.items, omitted: list.omitted, truncated: list.truncated, message: null, orgs, orgNames, askOrgAdmin });
 	} catch (err) {
 		const failure = loadFailure(err);
-		return present(event, { projects: [], omitted: 0, truncated: false, message: failure.message, orgs, orgNames });
+		return present(event, { projects: [], omitted: 0, truncated: false, message: failure.message, orgs, orgNames, askOrgAdmin });
 	}
 };
 
@@ -33,8 +35,9 @@ export const actions: Actions = {
 		const name = cleanName(formText(form, 'name'));
 		const orgId = formText(form, 'org_id');
 		if (!name) return fail(400, present(event, { message: 'Enter a project name (1–80 characters).' }));
-		if (orgId !== '' && !isUuid(orgId)) return fail(400, present(event, { message: 'Choose an organization.' }));
-		if (orgId === '' && creatableOrgs(event.locals).length > 1) return fail(400, present(event, { message: 'Choose an organization.' }));
+		const creatable = creatableOrgs(event.locals);
+		if (orgId !== '' && !creatable.some((org) => org.id === orgId)) return fail(400, present(event, { message: 'Choose an organization.' }));
+		if (orgId === '' && creatable.length > 1) return fail(400, present(event, { message: 'Choose an organization.' }));
 		// api-v1 v1.24: a project is created in an org. Without one, POST /v1/projects uses the caller's only org.
 		const path = orgId ? `/v1/orgs/${orgId}/projects` : '/v1/projects';
 		try {

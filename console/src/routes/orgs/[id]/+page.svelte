@@ -73,6 +73,7 @@
 			omitted={data.projects.omitted}
 			truncated={data.projects.truncated}
 			message={sectionMessage ?? data.projects.message}
+			canAdmin={data.canAdmin}
 		/>
 	{:else if scope === 'hosts'}
 		<OrgHostsSection
@@ -90,6 +91,7 @@
 				slug={action?.field === 'createToken' ? (action.createdSlug ?? null) : null}
 				open={data.hosts.items.length === 0 && !data.hosts.message}
 				message={fieldMessage('createToken')}
+				tokensMessage={data.tokens.message}
 				pollKey="org:enrol"
 				grantProjects={accessProjects}
 				description="The host joins this organization. You can give one project access with the token."
@@ -111,7 +113,6 @@
 			tokens={data.tokens.items}
 			omitted={data.tokens.omitted}
 			truncated={data.tokens.truncated}
-			canAdmin={data.canAdmin}
 			message={sectionMessage ?? data.tokens.message}
 			{projectNames}
 		/>

@@ -11,11 +11,6 @@ export const ACCESS_LEVEL_TEXT: Record<AccessLevel, string> = {
 export const ACCESS_HELP =
 	'Projects use a host through the organization. Org owners and admins grant each project metrics or deploy access here.';
 
-/** The second gate (api-v1 v1.24, spec D-4): the host's root-owned runner.toml must list the project too. */
-export function runnerNote(slug: string): string {
-	return `This host also needs ${slug} in its runner.toml projects.`;
-}
-
 /** Org projects that do not have access to the host yet, by name. */
 export function grantableProjects(projects: readonly AccessProject[], rows: readonly Pick<HostAccessSummary, 'project_id'>[]): AccessProject[] {
 	const granted = new Set(rows.map((row) => row.project_id));

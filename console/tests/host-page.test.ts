@@ -497,7 +497,6 @@ describe('host page', { concurrency: false }, () => {
 			props: {
 				data: {
 					host: HOST,
-					projectName: 'Lab',
 					range: '1h',
 					processSort: 'cpu',
 					tab: 'processes',

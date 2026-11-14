@@ -944,6 +944,7 @@ function hostPageData(canManageAccess: boolean) {
 		processes: null,
 		processesMessage: null,
 		canManageAccess,
+		accessLoaded: canManageAccess,
 		access: canManageAccess
 			? [{ project_id: PROJECT.id, project_name: 'Lab', level: 'deploy', granted_by: USER.id, granted_at: '2026-11-14T00:00:00Z' }]
 			: [],

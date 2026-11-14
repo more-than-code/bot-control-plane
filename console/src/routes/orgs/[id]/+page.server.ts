@@ -1,14 +1,14 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Host, JoinToken, OrgMember, Project } from '$lib/api-types';
 import { cleanOrgMemberRole, orgTabOf, type OrgScope } from '$lib/org-view';
-import { removeAccessAction, setAccessAction, cleanAccessLevel } from '$lib/server/access-actions';
-import { actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
+import { buildJoinTokenBody, cleanAccessLevel, removeAccessAction, revokeCredentialAction, setAccessAction, type JoinGrantBody } from '$lib/server/access-actions';
+import { actionFailure, apiFetch, apiList, emptyList, loadFailure, loadList } from '$lib/server/api';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
-import { orgRoleAtLeast, orgRoleOf } from '$lib/server/roles';
+import { orgRoleAtLeast, orgRoleOf, uiOrgRole } from '$lib/server/roles';
 import { parseCreatedJoin, parseHost, parseJoinToken, parseOrg, parseOrgMember, parseProject } from '$lib/server/shape';
-import { cleanEmail, cleanExpiry, cleanHint, cleanName, isUuid } from '$lib/server/validate';
+import { cleanEmail, cleanName, isUuid } from '$lib/server/validate';
 import { backTo } from '$lib/url';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
@@ -19,21 +19,6 @@ function orgIdOf(params: { id?: string }): string {
 
 function invalid(event: RequestEvent, scope: OrgScope, message: string, field?: 'createToken' | 'addMember' | 'createProject') {
 	return fail(400, present(event, field ? { scope, message, field } : { scope, message }));
-}
-
-type ListLoad<T> = { items: T[]; omitted: number; truncated: boolean; message: string | null };
-
-function emptyList<T>(): ListLoad<T> {
-	return { items: [], omitted: 0, truncated: false, message: null };
-}
-
-/** One section's list. A failure becomes the section's message; a redirect or HTTP error still throws. */
-async function loadList<T>(event: RequestEvent, path: string, parse: (value: unknown) => T | null): Promise<ListLoad<T>> {
-	try {
-		return { ...(await apiList(event, path, parse)), message: null };
-	} catch (err) {
-		return { ...emptyList<T>(), message: loadFailure(err).message };
-	}
 }
 
 const empty = {
@@ -61,8 +46,7 @@ export const load: PageServerLoad = async (event) => {
 	}
 	if (!org) return present(event, { ...empty, userId, message: 'The API returned an unexpected response.' });
 	// Show a control only when the session and the org read agree on the role.
-	const sessionRole = orgRoleOf(event.locals.orgs, org.id);
-	const role = sessionRole && !orgRoleAtLeast(org.role, sessionRole) ? org.role : (sessionRole ?? org.role);
+	const role = uiOrgRole(orgRoleOf(event.locals.orgs, org.id), org.role);
 	const canAdmin = orgRoleAtLeast(role, 'admin');
 	const canOwner = role === 'owner';
 	const tab = orgTabOf(event.url.searchParams.get('tab'), canAdmin);
@@ -88,11 +72,10 @@ async function projectSlug(event: RequestEvent, orgId: string, projectId: string
 	}
 }
 
-type JoinTokenBody = { host_name_hint?: string; expires_in_sec?: number; grant?: { project_id: string; level: 'metrics' | 'deploy' } };
-
 export const actions: Actions = {
 	setAccess: setAccessAction('hosts'),
 	removeAccess: removeAccessAction('hosts'),
+	revokeCredential: revokeCredentialAction('hosts'),
 
 	createProject: async (event) => {
 		requireUser(event);
@@ -112,21 +95,17 @@ export const actions: Actions = {
 		requireUser(event);
 		const id = orgIdOf(event.params);
 		const form = await event.request.formData();
-		const hintText = formText(form, 'host_name_hint');
-		const hint = hintText.trim() ? cleanHint(hintText) : null;
-		if (hintText.trim() && !hint) return invalid(event, 'hosts', 'Host name hint must be 1–80 characters.', 'createToken');
-		const expiry = cleanExpiry(formText(form, 'expires_in_sec'));
-		if (!expiry.ok) return invalid(event, 'hosts', 'Expiry must be between 300 and 604800 seconds, or blank.', 'createToken');
 		const grantProject = formText(form, 'grant_project_id');
-		const body: JoinTokenBody = {};
+		let grant: JoinGrantBody | null = null;
 		if (grantProject !== '') {
 			const level = cleanAccessLevel(formText(form, 'grant_level'));
 			if (!isUuid(grantProject)) return invalid(event, 'hosts', 'Choose a project.', 'createToken');
 			if (!level) return invalid(event, 'hosts', 'Choose metrics or deploy.', 'createToken');
-			body.grant = { project_id: grantProject, level };
+			grant = { project_id: grantProject, level };
 		}
-		if (hint) body.host_name_hint = hint;
-		if (expiry.seconds != null) body.expires_in_sec = expiry.seconds;
+		const built = buildJoinTokenBody(form, grant);
+		if (!built.ok) return invalid(event, 'hosts', built.message, 'createToken');
+		const body = built.body;
 		try {
 			const created = parseCreatedJoin(await apiFetch(event, `/v1/orgs/${id}/join-tokens`, { method: 'POST', body: JSON.stringify(body) }));
 			if (!created) return fail(502, present(event, { scope: 'hosts' as const, field: 'createToken' as const, message: 'The API returned an unexpected response.' }));
@@ -154,19 +133,6 @@ export const actions: Actions = {
 			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'tokens');
-		}
-	},
-
-	revokeCredential: async (event) => {
-		requireUser(event);
-		orgIdOf(event.params);
-		const hostId = formText(await event.request.formData(), 'host_id');
-		if (!isUuid(hostId)) return invalid(event, 'hosts', 'That host is not valid.');
-		try {
-			await apiFetch(event, `/v1/hosts/${hostId}/credential`, { method: 'DELETE' });
-			redirect(303, backTo(event.url));
-		} catch (err) {
-			return actionFailure(event, err, 'hosts');
 		}
 	},
 

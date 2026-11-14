@@ -6,6 +6,8 @@
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { METRIC_REFRESH_MS } from '$lib/host-view';
 	import HostAccessEditor from '$lib/components/HostAccessEditor.svelte';
+	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import { buttonVariants } from '$lib/components/ui/button';
 	import { page } from '$app/state';
 	import { actionUrlFrom } from '$lib/url';
 	import { accessFailureOf } from '$lib/host-access';
@@ -18,7 +20,8 @@
 	const crumbs = $derived(
 		data.host && data.org
 			? [
-					{ label: data.org.name, href: `/orgs/${data.org.id}?tab=hosts` },
+					// Only org owners and admins have the Hosts tab; a member goes to the org's Projects.
+					{ label: data.org.name, href: data.canManageAccess ? `/orgs/${data.org.id}?tab=hosts` : `/orgs/${data.org.id}` },
 					{ label: data.host.name }
 				]
 			: [
@@ -63,7 +66,13 @@
 	<title>{data.host ? data.host.name : 'Host'} · Deploybot</title>
 </svelte:head>
 
-<PageHeader title={data.host ? data.host.name : 'Host'} breadcrumbs={crumbs} />
+<PageHeader title={data.host ? data.host.name : 'Host'} breadcrumbs={crumbs}>
+	{#snippet actions()}
+		{#if data.host && data.canManageAccess}
+			<a class={buttonVariants({ variant: 'outline' })} href="#access"><ShieldCheck class="size-4" />Manage access</a>
+		{/if}
+	{/snippet}
+</PageHeader>
 {#if !data.host}
 	<Notice kind="error">{data.message ?? 'This host is not available.'}</Notice>
 {:else}
@@ -88,6 +97,7 @@
 			{#if data.accessMessage}
 				<Notice kind="error">{data.accessMessage}</Notice>
 			{/if}
+			{#if data.accessLoaded}
 			<HostAccessEditor
 				hostId={data.host.id}
 				hostName={data.host.name}
@@ -99,6 +109,7 @@
 				message={accessFailure?.message ?? null}
 				conflictProjectId={accessFailure?.accessConflict?.projectId ?? null}
 			/>
+			{/if}
 		</section>
 	{/if}
 {/if}

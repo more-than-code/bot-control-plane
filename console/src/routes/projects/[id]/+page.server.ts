@@ -29,7 +29,7 @@ import {
 	type ServiceEntryRef
 } from '$lib/service-actions';
 import type { ActionField, CatalogPermissionsState, ProjectScope } from '$lib/project-action';
-import { ApiError, actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
+import { ApiError, actionFailure, apiFetch, emptyList, loadFailure, loadList } from '$lib/server/api';
 import {
 	catalogCreate,
 	catalogDelete,
@@ -68,7 +68,7 @@ import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { isOrgAdmin, roleAtLeast, uiRole } from '$lib/server/roles';
-import { removeAccessAction } from '$lib/server/access-actions';
+import { buildJoinTokenBody, removeAccessAction, revokeCredentialAction } from '$lib/server/access-actions';
 import {
 	isRecord,
 	parseCatalogGrants,
@@ -87,11 +87,9 @@ import {
 	parseService,
 	parseServicePage
 } from '$lib/server/shape';
-import { cleanDisplayName, cleanEmail, cleanExpiry, cleanHint, cleanName, cleanRole, isUuid } from '$lib/server/validate';
+import { cleanDisplayName, cleanEmail, cleanName, cleanRole, isUuid } from '$lib/server/validate';
 import { backTo, servicesTabTarget } from '$lib/url';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
-
-type JoinTokenBody = { host_name_hint?: string; expires_in_sec?: number; grant: { project_id: string; level: 'deploy' } };
 
 function projectId(params: { id?: string }): string {
 	if (!params.id || !isUuid(params.id)) error(404, 'Not found');
@@ -104,10 +102,10 @@ function invalid(event: RequestEvent, scope: ProjectScope, message: string, fiel
 
 function tabOf(value: string | null, canAdmin: boolean): ProjectScope {
 	if (value === 'settings') return canAdmin ? 'settings' : 'hosts';
-	// Join tokens moved to the organization (api-v1 v1.24); an old `?tab=tokens` link lands on Hosts.
 	if (value === 'members') return 'members';
 	// `services` is the old Services tab, now part of Catalog & services.
 	if (value === 'catalog' || value === 'services') return 'catalog';
+	// Anything else lands on Hosts, including an old `?tab=tokens` link: join tokens moved to the org (api-v1 v1.24).
 	return 'hosts';
 }
 
@@ -321,6 +319,7 @@ const empty = {
 	canOrgAdmin: false,
 	orgName: null as string | null,
 	tokens: [] as JoinToken[],
+	tokensMessage: null as string | null,
 	invites: [] as Invite[],
 	invitesOmitted: 0,
 	invitesTruncated: false,
@@ -402,6 +401,7 @@ export const load: PageServerLoad = async (event) => {
 	const membersTruncated = memberList.truncated;
 	const membersMessage = memberList.message;
 	const tokens = tokenList.items;
+	const tokensMessage = tokenList.message;
 	const invites = inviteList.items;
 	const invitesOmitted = inviteList.omitted;
 	const invitesTruncated = inviteList.truncated;
@@ -439,6 +439,7 @@ export const load: PageServerLoad = async (event) => {
 			membersTruncated,
 			membersMessage,
 			tokens,
+			tokensMessage,
 			invites,
 			invitesOmitted,
 			invitesTruncated,
@@ -459,21 +460,6 @@ export const load: PageServerLoad = async (event) => {
 		serviceStates
 	};
 };
-
-type ListLoad<T> = { items: T[]; omitted: number; truncated: boolean; message: string | null };
-
-function emptyList<T>(): ListLoad<T> {
-	return { items: [], omitted: 0, truncated: false, message: null };
-}
-
-/** One section's list. A failure becomes the section's message; a redirect or HTTP error still throws. */
-async function loadList<T>(event: RequestEvent, path: string, parse: (value: unknown) => T | null): Promise<ListLoad<T>> {
-	try {
-		return { ...(await apiList(event, path, parse)), message: null };
-	} catch (err) {
-		return { ...emptyList<T>(), message: loadFailure(err).message };
-	}
-}
 
 /** The catalog list and, when an owner asked for it, one entry's permissions, fetched together. */
 async function loadCatalog(event: RequestEvent, id: string, canOwner: boolean) {
@@ -689,20 +675,9 @@ export const actions: Actions = {
 		return present(event, { scope: 'hosts', confirmHostId: hostId });
 	},
 
-	revokeCredential: async (event) => {
-		requireUser(event);
-		const id = projectId(event.params);
-		const hostId = formText(await event.request.formData(), 'host_id');
-		if (!isUuid(hostId)) return invalid(event, 'hosts', 'That host is not valid.');
-		try {
-			await apiFetch(event, `/v1/hosts/${hostId}/credential`, { method: 'DELETE' });
-			redirect(303, backTo(event.url));
-		} catch (err) {
-			return actionFailure(event, err, 'hosts');
-		}
-	},
+	revokeCredential: revokeCredentialAction('hosts'),
 
-	leaveAccess: removeAccessAction('hosts'),
+	leaveAccess: removeAccessAction('hosts', { pinToPage: true }),
 
 	addMember: async (event) => {
 		requireUser(event);
@@ -818,15 +793,9 @@ export const actions: Actions = {
 		// The token belongs to the project's org and grants this project deploy (api-v1 v1.24 item 3).
 		const orgId = event.locals.projects.find((item) => item.id === id)?.org_id ?? null;
 		if (!orgId) return invalid(event, 'hosts', 'This project has no organization. Ask an org admin to add a host.', 'createToken');
-		const form = await event.request.formData();
-		const hintText = formText(form, 'host_name_hint');
-		const hint = hintText.trim() ? cleanHint(hintText) : null;
-		if (hintText.trim() && !hint) return invalid(event, 'hosts', 'Host name hint must be 1–80 characters.', 'createToken');
-		const expiry = cleanExpiry(formText(form, 'expires_in_sec'));
-		if (!expiry.ok) return invalid(event, 'hosts', 'Expiry must be between 300 and 604800 seconds, or blank.', 'createToken');
-		const body: JoinTokenBody = { grant: { project_id: id, level: 'deploy' } };
-		if (hint) body.host_name_hint = hint;
-		if (expiry.seconds != null) body.expires_in_sec = expiry.seconds;
+		const built = buildJoinTokenBody(await event.request.formData(), { project_id: id, level: 'deploy' });
+		if (!built.ok) return invalid(event, 'hosts', built.message, 'createToken');
+		const body = built.body;
 		try {
 			const created = parseCreatedJoin(
 				await apiFetch(event, `/v1/orgs/${orgId}/join-tokens`, {

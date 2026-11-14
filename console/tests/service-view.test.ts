@@ -104,7 +104,7 @@ test('there is no Show select and no discovered listeners link', () => {
 	assert.equal(html.includes('No catalog entries.'), true);
 });
 
-test('the host select lists owned and deploy-shared hosts and submits one catalog.host', () => {
+test('the host select lists hosts with deploy access and submits one catalog.host', () => {
 	const source = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
 	assert.equal(source.includes('<select'), false);
 	assert.match(source, /id="catalog-host"/);

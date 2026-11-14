@@ -74,7 +74,7 @@
 			{:else if orgs.length > 1}
 				<Label class="grid gap-1.5" for="project-org">
 					Organization
-					<Select.Root type="single" name="org_id" bind:value={orgId}>
+					<Select.Root type="single" name="org_id" bind:value={orgId} required>
 						<Select.Trigger id="project-org" class="w-full">{orgName ?? 'Choose an organization'}</Select.Trigger>
 						<Select.Content>
 							{#each orgs as org (org.id)}

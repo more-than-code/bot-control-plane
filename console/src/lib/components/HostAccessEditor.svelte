@@ -12,7 +12,6 @@
 		ACCESS_LEVEL_TEXT,
 		grantableProjects,
 		missingFromAllowlist,
-		runnerNote,
 		type AccessProject
 	} from '$lib/host-access';
 	import type { Column } from '$lib/table';
@@ -70,6 +69,11 @@
 	const headingId = $derived(`${tableId}-heading`);
 </script>
 
+<!-- The second gate (api-v1 v1.24, spec D-4): the host's root-owned runner.toml must list the project too. -->
+{#snippet runnerNote(slug: string)}
+	This host also needs <code>{slug}</code> in its runner.toml <code>projects</code>.
+{/snippet}
+
 <div class="grid gap-3">
 	<p class="text-muted-foreground text-sm">{ACCESS_HELP}</p>
 	{#if message && !conflict}
@@ -119,7 +123,7 @@
 						<RowAction type="submit" label="Change level {item.project_name}" icon={KeyRound} />
 					</form>
 					{#if missingFromAllowlist(programs, item.level, slug)}
-						<p class="text-muted-foreground mt-1 text-sm">{runnerNote(slug ?? '')}</p>
+						<p class="text-muted-foreground mt-1 text-sm">{@render runnerNote(slug ?? '')}</p>
 					{/if}
 				</td>
 				{#if showGranted}
@@ -174,10 +178,10 @@
 			</Label>
 			<p class="text-muted-foreground text-sm">{ACCESS_LEVEL_TEXT[grantLevel]}</p>
 			{#if grantSlug && grantLevel === 'deploy'}
-				<p class="text-sm">{runnerNote(grantSlug)}</p>
+				<p class="text-sm">{@render runnerNote(grantSlug)}</p>
 			{/if}
 			<div>
-				<Button type="submit" disabled={grantProject === ''}>Grant access</Button>
+				<Button type="submit" disabled={!choices.some((project) => project.id === grantProject)}>Grant access</Button>
 			</div>
 		</form>
 	{:else if projects.length > 0}

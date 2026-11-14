@@ -201,6 +201,22 @@ export async function apiList<T>(
 	return { items, omitted, truncated };
 }
 
+/** One page section's list: the items, or the section's message when the read failed. */
+export type ListLoad<T> = { items: T[]; omitted: number; truncated: boolean; message: string | null };
+
+export function emptyList<T>(): ListLoad<T> {
+	return { items: [], omitted: 0, truncated: false, message: null };
+}
+
+/** One section's list. A failure becomes the section's message; a redirect or HTTP error still throws. */
+export async function loadList<T>(event: RequestEvent, path: string, parse: (value: unknown) => T | null): Promise<ListLoad<T>> {
+	try {
+		return { ...(await apiList(event, path, parse)), message: null };
+	} catch (err) {
+		return { ...emptyList<T>(), message: loadFailure(err).message };
+	}
+}
+
 /** `field` names the form the failure belongs to, so its dialog shows the message instead of the page. */
 export function actionFailure(event: RequestEvent, err: unknown, scope?: string, field?: string) {
 	if (isRedirect(err) || isHttpError(err)) throw err;

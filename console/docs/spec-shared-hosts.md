@@ -1,5 +1,7 @@
 # Spec: shared hosts (one owning project, explicit shares, services per project)
 
+> **Superseded by spec-organizations (api-v1 v1.24):** hosts belong to an organization and projects get metrics or deploy access through it. Kept for history.
+
 **Date:** 2026-10-14
 **Status:** Approved by Joe 2026-10-14 (Tier 3)
 **Design:** amends [design-bot-agent-deploy.md](design-bot-agent-deploy.md) D21 ("a host belongs to exactly one project") and §2 permissions.

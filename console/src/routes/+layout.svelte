@@ -84,9 +84,10 @@
 									'max-w-48 min-w-0 font-normal',
 									currentOrg ? 'bg-muted text-foreground' : 'text-muted-foreground'
 								)}
-								aria-label="Switch organization"
 							>
 								<Building2 class="size-4" />
+								<!-- The accessible name starts with the visible text's purpose and contains it (WCAG 2.5.3). -->
+								<span class="sr-only">Switch organization:</span>
 								<span class="min-w-0 truncate">{currentOrg?.name ?? 'Organizations'}</span>
 								<ChevronDown class="size-4" />
 							</DropdownMenu.Trigger>

@@ -35,6 +35,7 @@
 		slug,
 		open,
 		message = null,
+		tokensMessage = null,
 		action = null,
 		pollKey = 'project:enrol',
 		grantProjects = null,
@@ -50,6 +51,8 @@
 		open: boolean;
 		/** The createToken action's message: a failure, or a note with the created token. */
 		message?: string | null;
+		/** The join-token list could not be read: enrolment status cannot follow the token. */
+		tokensMessage?: string | null;
 		/** The createToken action URL. Defaults to `createToken` on this page. */
 		action?: string | null;
 		/** The load dependency the enrolment poll invalidates. */
@@ -128,12 +131,18 @@
 	}
 
 	function onOpenChangeComplete(next: boolean) {
-		if (!next) dispatch({ type: 'closed' });
+		if (next) return;
+		dispatch({ type: 'closed' });
+		// The next token starts with no project chosen.
+		grantProject = '';
 	}
 </script>
 
 <div id="new-host">
 	<AddHostGuide {slug} {open} />
+	{#if tokensMessage}
+		<Notice kind="error">Join tokens could not be read: {tokensMessage}</Notice>
+	{/if}
 	<div class="mb-4">
 		<Dialog.Root bind:open={() => dialog.open, setOpen} {onOpenChangeComplete}>
 			<Dialog.Trigger id={TRIGGER_ID} class={buttonVariants()}>

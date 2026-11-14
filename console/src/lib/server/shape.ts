@@ -74,7 +74,7 @@ import {
 } from '../image-spec';
 import { DIGEST_PATTERN, TAG_PATTERN } from '../image-tags';
 import { stripAnsi } from '../ansi';
-import { isRole } from './roles';
+import { isOrgRole, isRole } from './roles';
 import { acceptedInstallServer, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
 const CONTROL = /[\u0000-\u001F\u007F]/;
@@ -164,12 +164,6 @@ export function parseProject(value: unknown): Project | null {
 	return { id, name, slug, role: value.role, created_at, org_id, via };
 }
 
-const ORG_ROLES = new Set<OrgRole>(['owner', 'admin', 'member']);
-
-export function isOrgRole(value: unknown): value is OrgRole {
-	return typeof value === 'string' && ORG_ROLES.has(value as OrgRole);
-}
-
 /** The agent slug grammar (api-v1 v1.24 item 1). */
 const ORG_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -201,8 +195,8 @@ export function parseMe(payload: unknown): { user: User; projects: Project[]; or
 	if (!isRecord(payload)) return null;
 	const user = parseUser(payload.user);
 	if (!user || !Array.isArray(payload.projects)) return null;
-	if (payload.orgs != null && !Array.isArray(payload.orgs)) return null;
 	const projects = payload.projects.map(parseProject).filter((project): project is Project => project != null);
+	// A missing or malformed `orgs` (an API before v1.24) is no orgs, not a lost session.
 	const rawOrgs: unknown[] = Array.isArray(payload.orgs) ? payload.orgs : [];
 	const orgs = rawOrgs.map(parseOrg).filter((org): org is Org => org != null);
 	return { user, projects, orgs };

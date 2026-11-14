@@ -1,10 +1,10 @@
 // Organizations in the console (umbrella docs/spec-organizations.md rev 1 §4.3, approved by Joe 2026-11-14; api-v1 v1.24).
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
-import { accessSummary, grantableProjects, missingFromAllowlist, runnerNote } from '../src/lib/host-access.ts';
+import { accessSummary, grantableProjects, missingFromAllowlist } from '../src/lib/host-access.ts';
 import { orgTabOf } from '../src/lib/org-view.ts';
 import { isOrgAdmin, orgRoleOf } from '../src/lib/server/roles.ts';
 import { parseHostAccess, parseJoinToken, parseMe, parseOrg, parseOrgMember, parseProject } from '../src/lib/server/shape.ts';
@@ -41,7 +41,7 @@ describe('org parsing', () => {
 		assert.deepEqual(me?.orgs.map((org) => org.id), [ORG.id]);
 		// An API before v1.24 sends no orgs.
 		assert.deepEqual(parseMe({ user: USER, projects: [good] })?.orgs, []);
-		assert.equal(parseMe({ user: USER, projects: [good], orgs: 'x' }), null);
+		assert.deepEqual(parseMe({ user: USER, projects: [good], orgs: 'x' })?.orgs, []);
 	});
 
 	test('a project carries org_id and via; a bad value drops it', () => {
@@ -95,7 +95,6 @@ describe('host access view', () => {
 			{ id: OTHER_PROJECT, name: 'Defect Drainer', slug: 'defect-drainer' }
 		];
 		assert.deepEqual(grantableProjects(projects, [{ project_id: PROJECT.id }]).map((project) => project.slug), ['defect-drainer']);
-		assert.equal(runnerNote('defect-drainer'), 'This host also needs defect-drainer in its runner.toml projects.');
 		assert.equal(missingFromAllowlist({ projects: ['lab'] }, 'deploy', 'defect-drainer'), true);
 		assert.equal(missingFromAllowlist({ projects: ['lab'] }, 'metrics', 'defect-drainer'), false);
 		assert.equal(missingFromAllowlist({ projects: null }, 'deploy', 'defect-drainer'), false);
@@ -225,12 +224,22 @@ describe('org routes', { concurrency: false }, () => {
 		assert.equal(calls[0]?.url.search, '');
 	});
 
-	test('delete org needs the typed name; a new project is created in the chosen org', async () => {
+	test('delete org needs the typed name, then sends DELETE and goes to /projects', async () => {
 		const calls = installFetch((call) => (call.method === 'DELETE' ? envelope(null) : envelope(RAW_ORG)));
 		const wrong = await orgActions.deleteOrg(orgEvent(`http://console.example/orgs/${ORG.id}?tab=settings`, { confirm: 'nope' }));
 		assert.equal(isActionFailure(wrong), true);
 		assert.equal(calls.some((call) => call.method === 'DELETE'), false);
 
+		const deleted = installFetch((call) => (call.method === 'DELETE' ? envelope(null) : envelope(RAW_ORG)));
+		await assert.rejects(
+			async () => orgActions.deleteOrg(orgEvent(`http://console.example/orgs/${ORG.id}?tab=settings`, { confirm: ORG.name })),
+			(err: unknown) => isRedirect(err) && err.status === 303 && err.location === '/projects'
+		);
+		assert.deepEqual(deleted.map((call) => call.method), ['GET', 'DELETE']);
+		assert.equal(deleted[1]?.url.pathname, `/v1/orgs/${ORG.id}`);
+	});
+
+	test('a new project is created in the chosen org; no choice or a non-creatable org is refused', async () => {
 		const created = installFetch(() => envelope({ ...PROJECT }));
 		await assert.rejects(
 			async () =>
@@ -259,6 +268,20 @@ describe('org routes', { concurrency: false }, () => {
 			}).event as never
 		);
 		assert.equal(isActionFailure(unchosen), true);
+
+		// An org the caller does not administer, or not a UUID (item 8): refused before any call.
+		for (const org_id of [OTHER_PROJECT, 'not-a-uuid']) {
+			const refused = await projectsActions.create(
+				fakeEvent({
+					url: 'http://console.example/projects?/create',
+					session: TOKEN,
+					user: USER,
+					orgs: [ORG, { ...ORG, id: OTHER_PROJECT, role: 'member' }],
+					form: { name: 'Lab', org_id }
+				}).event as never
+			);
+			assert.equal(isActionFailure(refused), true, org_id);
+		}
 		assert.equal(skipped.length, 0);
 	});
 
@@ -266,7 +289,10 @@ describe('org routes', { concurrency: false }, () => {
 		const settings = readFileSync(new URL('../src/routes/projects/[id]/SettingsSection.svelte', import.meta.url), 'utf8');
 		assert.equal(settings.includes('Hosts stay in the organization.'), true);
 		assert.equal(settings.includes('host credentials'), false);
-		const host = readFileSync(new URL('../src/routes/hosts/[id]/+page.server.ts', import.meta.url), 'utf8');
-		assert.equal(host.includes('catalog-approvals'), false);
+		const files = readdirSync(new URL('../src/', import.meta.url), { recursive: true, encoding: 'utf8' }).filter((file) => /\.(ts|svelte)$/.test(file));
+		for (const file of files) {
+			const text = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+			assert.doesNotMatch(text, /catalog-approvals|approveCatalog|revokeCatalog/, file);
+		}
 	});
 });
