@@ -67,6 +67,7 @@ func TestProjectFilesMigration(t *testing.T) {
 	if url == "" {
 		t.Skip()
 	}
+	lockMigrations(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	d, err := Open(ctx, url)
@@ -220,10 +221,10 @@ INSERT INTO app.project_files (
 	}, owner.ID, at); err != nil {
 		t.Fatalf("replace at the limit %v", err)
 	}
-	if _, err := d.DeleteProject(ctx, home.ID, at.Add(time.Minute)); err != nil {
+	if err := d.DeleteProject(ctx, home.ID, at.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.DeleteProject(ctx, limit.ID, at.Add(time.Minute)); err != nil {
+	if err := d.DeleteProject(ctx, limit.ID, at.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	var n int

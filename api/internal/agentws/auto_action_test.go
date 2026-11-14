@@ -138,7 +138,7 @@ func TestAutoActionIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	mk := func(name, slug string) store.Project {
-		p, err := st.CreateProject(ctx, user.ID, name, slug, now())
+		p, err := st.CreateProject(ctx, st.PersonalOrg(user.ID), user.ID, name, slug, now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -158,7 +158,7 @@ func TestAutoActionIngest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateJoinToken(ctx, project.ID, joinHash, nil, user.ID, now().Add(time.Hour), now()); err != nil {
+	if _, err := st.CreateJoinToken(ctx, project.OrgID, joinHash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, user.ID, now().Add(time.Hour), now()); err != nil {
 		t.Fatal(err)
 	}
 	enrollConn := dial(t, url, "")
@@ -173,10 +173,10 @@ func TestAutoActionIngest(t *testing.T) {
 	}
 	credID := enrolled["credential_id"].(string)
 	credential := enrolled["credential"].(string)
-	if _, _, err := st.PutHostShare(ctx, hostID, viewer.ID, "metrics", user.ID, now()); err != nil {
+	if _, _, err := st.PutHostAccess(ctx, hostID, viewer.ID, "metrics", user.ID, now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.PutHostShare(ctx, hostID, deployer.ID, "deploy", user.ID, now()); err != nil {
+	if _, _, err := st.PutHostAccess(ctx, hostID, deployer.ID, "deploy", user.ID, now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -324,7 +324,7 @@ func TestAutoActionIngest(t *testing.T) {
 		t.Fatalf("rollback digests %v %v", digests, err)
 	}
 
-	// A deploy-level share counts; spec_hash comes from its last row.
+	// A deploy-access project counts; spec_hash comes from its last row.
 	sharedID := uuid.New().String()
 	sendAuto(autoFrame(sharedID, "d", "web", "restart", "ok", nil, frameAt))
 	expectAck(t, conn, sharedID)
@@ -333,6 +333,18 @@ func TestAutoActionIngest(t *testing.T) {
 	}
 	if len(autoAudits(t, st, deployer.ID)) != 1 {
 		t.Fatal("shared project audit missing")
+	}
+
+	// Review D25: access removed while the agent stays connected; the next
+	// frame for that project is acknowledged and dropped.
+	if _, err := st.DeleteHostAccess(ctx, hostID, deployer.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	revokedID := uuid.New().String()
+	sendAuto(autoFrame(revokedID, "d", "web", "restart", "ok", nil, frameAt))
+	expectAck(t, conn, revokedID)
+	if len(rows(shared.ID)) != 2 || len(autoAudits(t, st, deployer.ID)) != 1 {
+		t.Fatal("auto_action stored after the project's access was removed")
 	}
 
 	// Frames that fail validation or authority are acknowledged and dropped.

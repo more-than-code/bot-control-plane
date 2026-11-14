@@ -85,7 +85,7 @@ func (f *inviteFix) session(userID uuid.UUID, kind string) string {
 
 func (f *inviteFix) project(owner store.User, name, slug string) store.Project {
 	f.t.Helper()
-	p, err := f.mem.CreateProject(context.Background(), owner.ID, name, slug, f.now)
+	p, err := f.mem.CreateProject(context.Background(), f.mem.PersonalOrg(owner.ID), owner.ID, name, slug, f.now)
 	if err != nil {
 		f.t.Fatal(err)
 	}

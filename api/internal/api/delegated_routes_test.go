@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,16 @@ import (
 // delegatedDenyPatterns is the explicit v1.12.1 deny list. A mutating
 // route left at the zero value fails the guard unless it is named here.
 var delegatedDenyPatterns = []string{
+	"POST /v1/orgs",
+	"PATCH /v1/orgs/{id}",
+	"DELETE /v1/orgs/{id}",
+	"POST /v1/orgs/{id}/members",
+	"PATCH /v1/orgs/{id}/members/{user_id}",
+	"DELETE /v1/orgs/{id}/members/{user_id}",
+	"POST /v1/orgs/{id}/transfer-ownership",
+	"POST /v1/orgs/{id}/projects",
+	"POST /v1/orgs/{id}/join-tokens",
+	"DELETE /v1/orgs/{id}/join-tokens/{token_id}",
 	"POST /v1/projects",
 	"PATCH /v1/projects/{id}",
 	"DELETE /v1/projects/{id}",
@@ -32,8 +43,12 @@ var delegatedDenyPatterns = []string{
 	"POST /v1/projects/{id}/invites",
 	"DELETE /v1/projects/{id}/invites/{invite_id}",
 	"DELETE /v1/hosts/{id}/credential",
+	"PUT /v1/hosts/{id}/access/{project_id}",
+	"DELETE /v1/hosts/{id}/access/{project_id}",
 	"PUT /v1/hosts/{id}/shares/{project_id}",
 	"DELETE /v1/hosts/{id}/shares/{project_id}",
+	"POST /v1/hosts/{id}/catalog-approvals",
+	"DELETE /v1/hosts/{id}/catalog-approvals/{entry_id}",
 	"PATCH /v1/services/{id}",
 	"PUT /v1/projects/{id}/env-sets/{set}/keys/{key}",
 	"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}",
@@ -58,11 +73,11 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 	spare := w.user("spare@ex.com", "Spare")
 	extra := w.user("extra@ex.com", "Extra")
 	sc := w.scene(owner, admin, w.user("viewer@ex.com", "Viewer"), spare, extra)
-	other, err := w.mem.CreateProject(ctx, owner.ID, "Other", "other", w.now)
+	other, err := w.mem.CreateProject(ctx, sc.host.OrgID, owner.ID, "Other", "other", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(ctx, sc.host.ID, other.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, other.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	_, inviteHash, err := secret.NewToken()
@@ -76,6 +91,14 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 	tok := tokenKind(t, w, owner.ID, store.KindDelegated)
 	project := sc.project.ID.String()
 	host := sc.host.ID.String()
+	if _, err := w.mem.AddOrgMember(ctx, sc.project.OrgID, spare.ID, "member", owner.ID, w.now); err != nil {
+		t.Fatal(err)
+	}
+	org := "/v1/orgs/" + sc.project.OrgID.String()
+	orgSnap := func(t *testing.T) string {
+		t.Helper()
+		return orgState(t, w, owner.ID, sc.project.OrgID) + "|" + joinState(t, w, sc.project.ID) + "|" + projectNames(t, w, owner.ID)
+	}
 
 	cases := []struct {
 		pattern string
@@ -84,6 +107,16 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		body    string
 		read    func(t *testing.T) string
 	}{
+		{"POST /v1/orgs", http.MethodPost, "/v1/orgs", `{"name":"Nope"}`, orgSnap},
+		{"PATCH /v1/orgs/{id}", http.MethodPatch, org, `{"name":"Renamed"}`, orgSnap},
+		{"DELETE /v1/orgs/{id}", http.MethodDelete, org, "", orgSnap},
+		{"POST /v1/orgs/{id}/members", http.MethodPost, org + "/members", `{"email":"` + extra.Email + `","role":"member"}`, orgSnap},
+		{"PATCH /v1/orgs/{id}/members/{user_id}", http.MethodPatch, org + "/members/" + spare.ID.String(), `{"role":"admin"}`, orgSnap},
+		{"DELETE /v1/orgs/{id}/members/{user_id}", http.MethodDelete, org + "/members/" + spare.ID.String(), "", orgSnap},
+		{"POST /v1/orgs/{id}/transfer-ownership", http.MethodPost, org + "/transfer-ownership", `{"user_id":"` + spare.ID.String() + `"}`, orgSnap},
+		{"POST /v1/orgs/{id}/projects", http.MethodPost, org + "/projects", `{"name":"Nope"}`, orgSnap},
+		{"POST /v1/orgs/{id}/join-tokens", http.MethodPost, org + "/join-tokens", `{}`, orgSnap},
+		{"DELETE /v1/orgs/{id}/join-tokens/{token_id}", http.MethodDelete, org + "/join-tokens/" + sc.join.ID.String(), "", orgSnap},
 		{"POST /v1/projects", http.MethodPost, "/v1/projects", `{"name":"Nope"}`, func(t *testing.T) string {
 			return projectNames(t, w, owner.ID)
 		}},
@@ -126,14 +159,26 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		{"DELETE /v1/hosts/{id}/credential", http.MethodDelete, "/v1/hosts/" + host + "/credential", "", func(t *testing.T) string {
 			return credState(t, w, sc)
 		}},
-		{"PUT /v1/hosts/{id}/shares/{project_id}", http.MethodPut, "/v1/hosts/" + host + "/shares/" + other.ID.String(),
+		{"PUT /v1/hosts/{id}/access/{project_id}", http.MethodPut, "/v1/hosts/" + host + "/access/" + other.ID.String(),
 			`{"level":"deploy"}`, func(t *testing.T) string {
-				return shareState(t, w, sc.host.ID)
+				return accessState(t, w, sc.host.ID)
 			}},
-		{"DELETE /v1/hosts/{id}/shares/{project_id}", http.MethodDelete, "/v1/hosts/" + host + "/shares/" + other.ID.String(),
+		{"DELETE /v1/hosts/{id}/access/{project_id}", http.MethodDelete, "/v1/hosts/" + host + "/access/" + other.ID.String(),
 			"", func(t *testing.T) string {
-				return shareState(t, w, sc.host.ID)
+				return accessState(t, w, sc.host.ID)
 			}},
+		{"PUT /v1/hosts/{id}/shares/{project_id}", http.MethodPut, "/v1/hosts/" + host + "/shares/" + other.ID.String(), `{"level":"deploy"}`, func(t *testing.T) string {
+			return accessState(t, w, sc.host.ID)
+		}},
+		{"DELETE /v1/hosts/{id}/shares/{project_id}", http.MethodDelete, "/v1/hosts/" + host + "/shares/" + other.ID.String(), "", func(t *testing.T) string {
+			return accessState(t, w, sc.host.ID)
+		}},
+		{"POST /v1/hosts/{id}/catalog-approvals", http.MethodPost, "/v1/hosts/" + host + "/catalog-approvals", `{}`, func(t *testing.T) string {
+			return accessState(t, w, sc.host.ID)
+		}},
+		{"DELETE /v1/hosts/{id}/catalog-approvals/{entry_id}", http.MethodDelete, "/v1/hosts/" + host + "/catalog-approvals/" + uuid.NewString(), "", func(t *testing.T) string {
+			return accessState(t, w, sc.host.ID)
+		}},
 		{"PATCH /v1/services/{id}", http.MethodPatch, "/v1/services/" + sc.svc.ID.String(), `{"display_name":"Renamed"}`, func(t *testing.T) string {
 			return displayName(t, w, sc.svc.ID)
 		}},
@@ -183,7 +228,7 @@ func TestDelegatedDenyUnknownProject(t *testing.T) {
 	owner := w.user("owner@ex.com", "Owner")
 	extra := w.user("extra@ex.com", "Extra")
 	sc := w.scene(owner, w.user("admin@ex.com", "Admin"), w.user("viewer@ex.com", "Viewer"), w.user("spare@ex.com", "Spare"), extra)
-	foreign, err := w.mem.CreateProject(ctx, extra.ID, "Foreign", "foreign", w.now)
+	foreign, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(extra.ID), extra.ID, "Foreign", "foreign", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +366,7 @@ func TestDelegatedHandlerRoutes(t *testing.T) {
 
 func TestDelegatedRouteGuard(t *testing.T) {
 	if got := undeclaredDelegated(contractRoutes(), delegatedDenyPatterns); len(got) != 0 {
-		t.Fatalf("mutating routes with no delegated decision: %s", strings.Join(got, ", "))
+		t.Fatalf("routes with no delegated decision: %s", strings.Join(got, ", "))
 	}
 	found := map[string]delegatedPolicy{}
 	for _, rt := range contractRoutes() {
@@ -346,7 +391,7 @@ func TestDelegatedRouteGuard(t *testing.T) {
 		}
 	}
 
-	deny := []string{"POST /v1/projects"}
+	deny := []string{"POST /v1/projects", "GET /v1/projects"}
 	cases := []struct {
 		name    string
 		pattern string
@@ -357,7 +402,10 @@ func TestDelegatedRouteGuard(t *testing.T) {
 		{"zero value on the deny list", "POST /v1/projects", delegatedDeny, false},
 		{"explicit allow", "POST /v1/made-up", delegatedAllow, false},
 		{"explicit handler", "PATCH /v1/made-up", delegatedHandler, false},
-		{"get is not checked", "GET /v1/made-up", delegatedDeny, false},
+		{"zero-value GET is flagged", "GET /v1/made-up", delegatedDeny, true},
+		{"zero-value GET on the deny list is still flagged", "GET /v1/projects", delegatedDeny, true},
+		{"explicit read allow", "GET /v1/made-up", delegatedAllow, false},
+		{"explicit read deny", "GET /v1/made-up", delegatedDenyRead, false},
 		{"zero-value POST /oauth/token is flagged", "POST /oauth/token", delegatedDeny, true},
 	}
 	for _, tc := range cases {
@@ -371,9 +419,11 @@ func TestDelegatedRouteGuard(t *testing.T) {
 	}
 }
 
-// undeclaredDelegated returns mutating patterns whose policy is the zero
-// value and that are not on deny. Every mutating route needs an explicit
-// value. A route added with no decision shows up here.
+// undeclaredDelegated returns the routes whose policy is the zero value
+// without a decision behind it. A mutating route may be the zero value only
+// when it is on deny. A read route never may: delegatedDeny does not refuse
+// reads, so a read must say delegatedAllow or delegatedDenyRead (review
+// batch 2, item 29). A route added with no decision shows up here.
 func undeclaredDelegated(routes []route, deny []string) []string {
 	listed := map[string]bool{}
 	for _, pattern := range deny {
@@ -381,11 +431,11 @@ func undeclaredDelegated(routes []route, deny []string) []string {
 	}
 	var out []string
 	for _, rt := range routes {
-		method, _, ok := strings.Cut(rt.pattern, " ")
-		if !ok || !mutating(method) {
+		if rt.delegated != delegatedDeny {
 			continue
 		}
-		if rt.delegated != delegatedDeny || listed[rt.pattern] {
+		method, _, ok := strings.Cut(rt.pattern, " ")
+		if ok && mutating(method) && listed[rt.pattern] {
 			continue
 		}
 		out = append(out, rt.pattern)
@@ -516,7 +566,11 @@ func memberRole(t *testing.T, w *world, projectID, userID uuid.UUID) string {
 
 func joinState(t *testing.T, w *world, projectID uuid.UUID) string {
 	t.Helper()
-	items, _, err := w.mem.ListJoinTokens(context.Background(), projectID, 50, nil)
+	p, err := w.mem.GetProject(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, _, err := w.mem.ListJoinTokens(context.Background(), p.OrgID, nil, 50, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,9 +605,9 @@ func credState(t *testing.T, w *world, sc scene) string {
 	return fmt.Sprintf("cred=%v host=%v", cred.RevokedAt != nil, host.RevokedAt != nil)
 }
 
-func shareState(t *testing.T, w *world, hostID uuid.UUID) string {
+func accessState(t *testing.T, w *world, hostID uuid.UUID) string {
 	t.Helper()
-	items, err := w.mem.ListHostShares(context.Background(), hostID)
+	items, err := w.mem.ListHostAccess(context.Background(), hostID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,4 +629,24 @@ func displayName(t *testing.T, w *world, id uuid.UUID) string {
 		return ""
 	}
 	return *svc.DisplayName
+}
+
+// orgState is the org's name, members and roles, and whether it is live.
+func orgState(t *testing.T, w *world, userID, orgID uuid.UUID) string {
+	t.Helper()
+	org, err := w.mem.GetOrg(context.Background(), orgID)
+	if err != nil {
+		return "gone"
+	}
+	members, _, err := w.mem.ListOrgMembers(context.Background(), orgID, 50, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Slice(members, func(i, j int) bool { return members[i].UserID.String() < members[j].UserID.String() })
+	parts := []string{org.Name}
+	for _, m := range members {
+		parts = append(parts, m.UserID.String()+"="+m.Role)
+	}
+	orgs, _ := w.mem.ListUserOrgs(context.Background(), userID)
+	return strings.Join(parts, ",") + " orgs=" + strconv.Itoa(len(orgs))
 }

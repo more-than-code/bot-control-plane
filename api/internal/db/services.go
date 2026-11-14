@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"strings"
 	"time"
 
@@ -174,17 +176,12 @@ LIMIT $%d OFFSET $%d
 func (d *DB) projectHostReached(ctx context.Context, projectID, hostID uuid.UUID) (bool, error) {
 	var ok bool
 	err := d.pool.QueryRow(ctx, `
-SELECT
-    EXISTS (
-        SELECT 1 FROM app.hosts h
-        WHERE h.id = $1::uuid AND h.project_id = $2::uuid
-    )
-    OR EXISTS (
-        SELECT 1 FROM app.host_shares hs
-        WHERE hs.host_id = $1::uuid
-          AND hs.project_id = $2::uuid
-          AND hs.level = 'deploy'
-    )
+SELECT EXISTS (
+    SELECT 1 FROM app.host_access a
+    WHERE a.host_id = $1::uuid
+      AND a.project_id = $2::uuid
+      AND a.level = 'deploy'
+)
 `, hostID.String(), projectID.String()).Scan(&ok)
 	if err != nil {
 		return false, mapErr(err)
@@ -192,7 +189,9 @@ SELECT
 	return ok, nil
 }
 
-// projectServiceWhere is the v1.3 row rule plus optional host and search.
+// projectServiceWhere is the v1.3 row rule as amended by v1.24 (the
+// project's own services on hosts where it has deploy access) plus
+// optional host and search.
 // Search parameters are bound. % _ and \ in q match literally.
 func projectServiceWhere(projectID uuid.UUID, q store.ServiceListQuery) (string, []any) {
 	args := []any{projectID.String()}
@@ -203,15 +202,12 @@ func projectServiceWhere(projectID uuid.UUID, q store.ServiceListQuery) (string,
 	}
 	where := `
 WHERE (
-    h.project_id = $1::uuid
-    OR (
-        s.project_id = $1::uuid
-        AND EXISTS (
-            SELECT 1 FROM app.host_shares hs
-            WHERE hs.host_id = h.id
-              AND hs.project_id = $1::uuid
-              AND hs.level = 'deploy'
-        )
+    s.project_id = $1::uuid
+    AND EXISTS (
+        SELECT 1 FROM app.host_access a
+        WHERE a.host_id = h.id
+          AND a.project_id = $1::uuid
+          AND a.level = 'deploy'
     )
 )
 AND ` + hostPred
@@ -326,20 +322,21 @@ func (d *DB) UpsertDiscovered(ctx context.Context, hostID uuid.UUID, items []sto
 		return mapErr(err)
 	}
 	defer tx.Rollback(ctx)
-	var hostProject string
-	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM app.hosts WHERE id = $1::uuid`, hostID.String()).Scan(&hostProject); err != nil {
-		return mapErr(err)
-	}
-	ownerProject, err := parseID(hostProject)
-	if err != nil {
-		return err
-	}
 	names := make([]string, 0, len(items))
 	for _, item := range items {
-		name, source, projectID, catalogEntry := store.PlaceDiscovered(item, ownerProject, func(slug, entry, kind string) (uuid.UUID, bool) {
-			return d.catalogLookup(ctx, tx, slug, entry, kind)
+		name, source, projectID, catalogEntry := store.PlaceDiscovered(item, func(slug, entry, kind string) (uuid.UUID, bool) {
+			return d.ownerLookup(ctx, tx, hostID, slug, entry, kind)
 		})
 		names = append(names, name)
+		if source == "owned" {
+			conflict, err := ownerConflict(ctx, tx, hostID, name, projectID, item, at)
+			if err != nil {
+				return err
+			}
+			if conflict {
+				continue
+			}
+		}
 		if err := exec(ctx, tx, `
 INSERT INTO app.services (
     id, host_id, name, source, kind, ports,
@@ -348,7 +345,7 @@ INSERT INTO app.services (
 ) VALUES (
     $1::uuid, $2::uuid, $3, $4, $5, $6::integer[],
     $7, $8, $9, $10, $11,
-    $12, $12, $13::uuid, $14, $15
+    $12, $12, CAST($13 AS uuid), $14, $15
 )
 ON CONFLICT (host_id, name) DO UPDATE SET
     last_seen_at = EXCLUDED.last_seen_at,
@@ -363,7 +360,8 @@ ON CONFLICT (host_id, name) DO UPDATE SET
     project_id = CASE
         WHEN app.services.source = 'declared' THEN app.services.project_id
         WHEN EXCLUDED.source = 'owned' THEN EXCLUDED.project_id
-        WHEN app.services.source = 'owned' AND EXCLUDED.source = 'discovered' THEN EXCLUDED.project_id
+        -- Ownership ends but the row keeps its project, so the same
+        -- project can own it again (review A2).
         ELSE app.services.project_id
     END,
     catalog_entry = CASE
@@ -381,7 +379,7 @@ ON CONFLICT (host_id, name) DO UPDATE SET
     process_match = CASE WHEN app.services.source <> 'declared' THEN EXCLUDED.process_match ELSE app.services.process_match END
 `, uuid.New().String(), hostID.String(), name, source, item.Kind, intsTo32(item.Ports),
 			optString(item.SystemdUnit), optString(item.SystemdScope), optString(item.ContainerName), optString(item.ImageDigest), optString(item.ProcessName),
-			at, projectID.String(), optString(store.NormalizeOwnerUser(item.OwnerUser)), optString(catalogEntry)); err != nil {
+			at, optID(projectID), optString(store.NormalizeOwnerUser(item.OwnerUser)), optString(catalogEntry)); err != nil {
 			return mapErr(err)
 		}
 	}
@@ -400,6 +398,56 @@ WHERE host_id = $1::uuid
 		return mapErr(err)
 	}
 	return nil
+}
+
+// ownerConflict reports whether an owned report would move an existing row
+// of another project, or an org-level row (review A2). Rows are keyed by
+// (host, name) and an owned row is named after its entry, so two projects'
+// entries can share a name. The row is left as it is and the conflict is
+// audited (service.owner_conflict, via agent) in the same transaction.
+func ownerConflict(ctx context.Context, tx pgx.Tx, hostID uuid.UUID, name string, projectID *uuid.UUID, item store.Discovered, at time.Time) (bool, error) {
+	var serviceText, source string
+	var current *string
+	err := tx.QueryRow(ctx, `
+SELECT id::text, source, project_id::text FROM app.services
+WHERE host_id = $1::uuid AND name = $2
+FOR UPDATE
+`, hostID.String(), name).Scan(&serviceText, &source, &current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, mapErr(err)
+	}
+	if source == "declared" || (current != nil && projectID != nil && *current == projectID.String()) {
+		return false, nil
+	}
+	owner := ""
+	entry := ""
+	if item.Owner != nil {
+		owner, entry = item.Owner.Project, item.Owner.Entry
+	}
+	// Audit only a new conflict: none for the same service, project and entry
+	// within audit.OwnerConflictWindow (the org index bounds the scan).
+	if err := exec(ctx, tx, `
+INSERT INTO app.audit_log (at, via, org_id, host_id, service_id, action, decision, detail)
+SELECT $1, 'agent', h.org_id, h.id, $3::uuid, $4, 'denied', $5::jsonb
+FROM app.hosts h
+WHERE h.id = $2::uuid
+  AND NOT EXISTS (
+    SELECT 1 FROM app.audit_log a
+    WHERE a.org_id = h.org_id
+      AND a.at > $8
+      AND a.action = $4
+      AND a.service_id = $3::uuid
+      AND a.detail->>'project' = $6
+      AND a.detail->>'entry' = $7
+  )
+`, at, hostID.String(), serviceText, audit.ActionServiceOwnerConflict,
+		auditDetail(map[string]any{"name": name, "project": owner, "entry": entry}), owner, entry, at.Add(-audit.OwnerConflictWindow)); err != nil {
+		return false, mapErr(err)
+	}
+	return true, nil
 }
 
 func (d *DB) ReplaceHealthChecks(ctx context.Context, serviceID uuid.UUID, checks []store.HealthCheckInput) ([]store.HealthCheck, error) {
@@ -596,7 +644,8 @@ type projectServiceExtra struct {
 
 func scanServiceInto(row pgx.Row, now time.Time, extra *projectServiceExtra) (store.ProjectService, error) {
 	var s store.Service
-	var id, hostID, projectID string
+	var id, hostID string
+	var projectID *string
 	var ports []int32
 	var checked *time.Time
 	var result *string
@@ -625,7 +674,7 @@ func scanServiceInto(row pgx.Row, now time.Time, extra *projectServiceExtra) (st
 	if s.HostID, err = parseID(hostID); err != nil {
 		return store.ProjectService{}, err
 	}
-	if s.ProjectID, err = parseID(projectID); err != nil {
+	if s.ProjectID, err = parseOptID(projectID); err != nil {
 		return store.ProjectService{}, err
 	}
 	s.Ports = intsFrom32(ports)

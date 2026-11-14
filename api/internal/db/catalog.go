@@ -86,8 +86,8 @@ func (d *DB) ReplaceCatalogEntry(ctx context.Context, projectID uuid.UUID, name 
 	return old, entry, nil
 }
 
-// replaceCatalogEntry is the console replace path, including the approval
-// void when spec_hash changes. The caller holds the transaction.
+// replaceCatalogEntry is the console replace path. The caller holds the
+// transaction.
 func replaceCatalogEntry(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name string, in store.CatalogWrite) (string, store.CatalogEntry, error) {
 	spec, err := marshalWrite(in)
 	if err != nil {
@@ -105,6 +105,7 @@ FOR UPDATE
 		return "", store.CatalogEntry{}, mapErr(err)
 	}
 	if old != in.SpecHash {
+		// Kept so a rollback to v0.2.29 sees no stale approvals; removed in phase 2.
 		if err := exec(ctx, tx, `DELETE FROM app.catalog_host_approvals WHERE entry_id = $1::uuid`, id); err != nil {
 			return "", store.CatalogEntry{}, mapErr(err)
 		}
@@ -138,8 +139,8 @@ func (d *DB) DeleteCatalogEntry(ctx context.Context, projectID uuid.UUID, name s
 	return entry, nil
 }
 
-// deleteCatalogEntry removes the entry. Grants, approvals, and action
-// confirmations cascade. Service rows are not touched.
+// deleteCatalogEntry removes the entry. Grants, the unused phase-1
+// approval rows, and action confirmations cascade. Service rows are not touched.
 func deleteCatalogEntry(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name string) (store.CatalogEntry, error) {
 	return scanCatalog(tx.QueryRow(ctx, `
 DELETE FROM app.catalog_entries
@@ -301,126 +302,6 @@ INSERT INTO app.catalog_grants (entry_id, subject, actions) VALUES ($1::uuid, $2
 		}
 	}
 	return mapErr(tx.Commit(ctx))
-}
-
-func (d *DB) HostProjectRelation(ctx context.Context, projectID, hostID uuid.UUID) (string, error) {
-	var level string
-	err := d.pool.QueryRow(ctx, `
-SELECT CASE
-    WHEN h.project_id = $1::uuid THEN 'owner'
-    ELSE COALESCE((
-        SELECT s.level FROM app.host_shares s
-        WHERE s.host_id = h.id AND s.project_id = $1::uuid
-    ), '')
-END
-FROM app.hosts h
-WHERE h.id = $2::uuid
-`, projectID.String(), hostID.String()).Scan(&level)
-	if err != nil {
-		return "", mapErr(err)
-	}
-	return level, nil
-}
-
-func (d *DB) ListCatalogApprovals(ctx context.Context, hostID uuid.UUID) ([]store.CatalogApproval, error) {
-	rows, err := d.pool.Query(ctx, approvalSelect+`
-WHERE a.host_id = $1::uuid
-ORDER BY a.requested_at DESC, a.entry_id ASC
-`, hostID.String())
-	if err != nil {
-		return nil, mapErr(err)
-	}
-	defer rows.Close()
-	out := []store.CatalogApproval{}
-	for rows.Next() {
-		item, err := scanApproval(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, mapErr(err)
-	}
-	return out, nil
-}
-
-func (d *DB) ApproveCatalog(ctx context.Context, hostID, entryID uuid.UUID, specHash string, approver uuid.UUID, at time.Time) (store.CatalogApproval, error) {
-	tx, err := d.pool.Begin(ctx)
-	if err != nil {
-		return store.CatalogApproval{}, mapErr(err)
-	}
-	defer tx.Rollback(ctx)
-	var current string
-	err = tx.QueryRow(ctx, `
-SELECT spec_hash FROM app.catalog_entries WHERE id = $1::uuid FOR UPDATE
-`, entryID.String()).Scan(&current)
-	if err != nil {
-		return store.CatalogApproval{}, mapErr(err)
-	}
-	if current != specHash {
-		return store.CatalogApproval{}, store.ErrConflict
-	}
-	var hostOK bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM app.hosts WHERE id = $1::uuid)`, hostID.String()).Scan(&hostOK); err != nil {
-		return store.CatalogApproval{}, mapErr(err)
-	}
-	if !hostOK {
-		return store.CatalogApproval{}, store.ErrNotFound
-	}
-	if err := exec(ctx, tx, `
-INSERT INTO app.catalog_host_approvals (
-    entry_id, host_id, spec_hash, status, requested_by, requested_at, approved_by, approved_at
-) VALUES ($1::uuid, $2::uuid, $3, 'approved', $4::uuid, $5, $4::uuid, $5)
-ON CONFLICT (entry_id, host_id) DO UPDATE SET
-    spec_hash = EXCLUDED.spec_hash,
-    status = 'approved',
-    approved_by = EXCLUDED.approved_by,
-    approved_at = EXCLUDED.approved_at
-`, entryID.String(), hostID.String(), specHash, approver.String(), at); err != nil {
-		return store.CatalogApproval{}, mapErr(err)
-	}
-	item, err := scanApproval(tx.QueryRow(ctx, approvalSelect+`
-WHERE a.entry_id = $1::uuid AND a.host_id = $2::uuid
-`, entryID.String(), hostID.String()))
-	if err != nil {
-		return store.CatalogApproval{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return store.CatalogApproval{}, mapErr(err)
-	}
-	return item, nil
-}
-
-func (d *DB) DeleteCatalogApproval(ctx context.Context, hostID, entryID uuid.UUID) error {
-	tag, err := d.pool.Exec(ctx, `
-DELETE FROM app.catalog_host_approvals WHERE host_id = $1::uuid AND entry_id = $2::uuid
-`, hostID.String(), entryID.String())
-	if err != nil {
-		return mapErr(err)
-	}
-	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
-	}
-	return nil
-}
-
-func (d *DB) UpsertPendingApproval(ctx context.Context, entryID, hostID uuid.UUID, specHash string, userID uuid.UUID, at time.Time) error {
-	err := exec(ctx, d.pool, `
-INSERT INTO app.catalog_host_approvals (
-    entry_id, host_id, spec_hash, status, requested_by, requested_at
-) VALUES ($1::uuid, $2::uuid, $3, 'pending', $4::uuid, $5)
-ON CONFLICT (entry_id, host_id) DO UPDATE SET
-    spec_hash = EXCLUDED.spec_hash,
-    status = 'pending',
-    requested_by = EXCLUDED.requested_by,
-    requested_at = EXCLUDED.requested_at,
-    approved_by = NULL,
-    approved_at = NULL
-WHERE catalog_host_approvals.status = 'pending'
-   OR catalog_host_approvals.spec_hash IS DISTINCT FROM EXCLUDED.spec_hash
-`, entryID.String(), hostID.String(), specHash, userID.String(), at)
-	return mapErr(err)
 }
 
 func (d *DB) PutConfirmation(ctx context.Context, hash []byte, c store.CatalogConfirmation) error {
@@ -599,15 +480,6 @@ func (d *DB) SetHostPrograms(ctx context.Context, hostID uuid.UUID, programs *st
 	return nil
 }
 
-const approvalSelect = `
-SELECT a.entry_id::text, e.name, e.project_id::text, p.name, a.host_id::text, a.spec_hash,
-       e.command_display, e.spec, a.status, a.requested_by::text, a.requested_at,
-       a.approved_by::text, a.approved_at
-FROM app.catalog_host_approvals a
-JOIN app.catalog_entries e ON e.id = a.entry_id
-JOIN app.projects p ON p.id = e.project_id
-`
-
 func scanCatalog(row pgx.Row) (store.CatalogEntry, error) {
 	var e store.CatalogEntry
 	var id, projectID, createdBy string
@@ -634,55 +506,6 @@ func scanCatalog(row pgx.Row) (store.CatalogEntry, error) {
 	}
 	normSpec(&e.Spec)
 	return e, nil
-}
-
-func scanApproval(row pgx.Row) (store.CatalogApproval, error) {
-	var a store.CatalogApproval
-	var entryID, projectID, hostID, requestedBy string
-	var approvedBy *string
-	var spec []byte
-	if err := row.Scan(
-		&entryID, &a.EntryName, &projectID, &a.ProjectName, &hostID, &a.SpecHash,
-		&a.CommandDisplay, &spec, &a.Status, &requestedBy, &a.RequestedAt, &approvedBy, &a.ApprovedAt,
-	); err != nil {
-		return store.CatalogApproval{}, mapErr(err)
-	}
-	var parsed store.ProgramSpec
-	if err := json.Unmarshal(spec, &parsed); err != nil {
-		return store.CatalogApproval{}, err
-	}
-	a.Dir = parsed.Dir
-	a.Exec = parsed.Exec
-	a.Args = parsed.Args
-	if a.Args == nil {
-		a.Args = []string{}
-	}
-	a.Env = parsed.Env
-	if a.Env == nil {
-		a.Env = map[string]string{}
-	}
-	parsed.Norm()
-	a.EnvSets = parsed.EnvSets
-	a.SecretEnv = parsed.SecretEnv
-	a.RunAs = parsed.RunAs
-	a.Shell = parsed.Shell
-	var err error
-	if a.EntryID, err = parseID(entryID); err != nil {
-		return store.CatalogApproval{}, err
-	}
-	if a.ProjectID, err = parseID(projectID); err != nil {
-		return store.CatalogApproval{}, err
-	}
-	if a.HostID, err = parseID(hostID); err != nil {
-		return store.CatalogApproval{}, err
-	}
-	if a.RequestedBy, err = parseID(requestedBy); err != nil {
-		return store.CatalogApproval{}, err
-	}
-	if a.ApprovedBy, err = parseOptID(approvedBy); err != nil {
-		return store.CatalogApproval{}, err
-	}
-	return a, nil
 }
 
 func collectGrants(rows pgx.Rows) ([]store.CatalogGrant, error) {
@@ -760,15 +583,30 @@ func decodePrograms(raw []byte) (*store.HostPrograms, error) {
 	return &p, nil
 }
 
-// catalogLookup finds a live project slug that has a catalog entry of that name.
-func (d *DB) catalogLookup(ctx context.Context, q queryer, slug, entry, kind string) (uuid.UUID, bool) {
+// ownerLookup finds the live project with that slug and a catalog entry of
+// that name and kind, for a services report on hostID: the project must be
+// in the host's org and have deploy access to it (api-v1 v1.24 item 6).
+func (d *DB) ownerLookup(ctx context.Context, q queryer, hostID uuid.UUID, slug, entry, kind string) (uuid.UUID, bool) {
 	var id string
 	err := q.QueryRow(ctx, `
 SELECT p.id::text
 FROM app.projects p
 JOIN app.catalog_entries e ON e.project_id = p.id AND e.name = $2 AND e.kind = $3
+JOIN app.hosts h ON h.id = $4::uuid AND h.org_id = p.org_id
+JOIN app.host_access a ON a.host_id = h.id AND a.project_id = p.id AND a.level = 'deploy'
 WHERE p.slug = $1 AND p.deleted_at IS NULL
-`, slug, entry, kind).Scan(&id)
+  -- D-10: without a reported projects allowlist (agents before 0.2.8) a
+  -- program is placed only for the host's single deploy project.
+  AND (
+    e.kind <> 'program'
+    OR jsonb_typeof(h.programs->'projects') = 'array'
+    OR (
+        SELECT count(*) FROM app.host_access a2
+        JOIN app.projects p2 ON p2.id = a2.project_id AND p2.deleted_at IS NULL
+        WHERE a2.host_id = h.id AND a2.level = 'deploy'
+    ) = 1
+  )
+`, slug, entry, kind, hostID.String()).Scan(&id)
 	if err != nil {
 		return uuid.Nil, false
 	}

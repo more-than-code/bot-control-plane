@@ -130,7 +130,7 @@ func (s *Server) handleHealthHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceRead, &svc.ProjectID, idPtr(svc.ID), ""); !ok {
+	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceRead, svc.ProjectID, idPtr(svc.ID), ""); !ok {
 		return
 	}
 	from, to, ok := s.timeRange(w, r, 24*time.Hour)

@@ -148,7 +148,7 @@ func TestProjectFilesRoundTrip(t *testing.T) {
 	if err := m.DeleteProjectFile(ctx, home.ID, "app.conf"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("second delete %v", err)
 	}
-	if _, err := m.DeleteProject(ctx, home.ID, at); err != nil {
+	if err := m.DeleteProject(ctx, home.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.ListProjectFiles(ctx, home.ID); !errors.Is(err, store.ErrNotFound) {

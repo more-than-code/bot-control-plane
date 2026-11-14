@@ -20,11 +20,11 @@ const amendSentinel = "sentinel-SECRET-value-4b2d"
 func sharedGuest(t *testing.T, w *world, sc scene, owner store.User) (string, uuid.UUID) {
 	t.Helper()
 	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), guestUser.ID, "Guest", "guest", w.now)
+	guest, err := w.mem.CreateProject(context.Background(), w.mem.PersonalOrg(guestUser.ID), guestUser.ID, "Guest", "guest", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	return w.token(guestUser.ID), guest.ID
@@ -36,90 +36,6 @@ func entryHash(t *testing.T, w *world, tok, project, name string) string {
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	h, _ := objectPayload(t, env)["spec_hash"].(string)
 	return h
-}
-
-// api-v1 v1.22 amendment 1: a plain taking-part value is part of the program's
-// approval; a secret value is not; image entries are unchanged. The approval
-// view lists the plain values and never a secret.
-func TestProgramPlainValuesApproval(t *testing.T) {
-	w := newWorld(t)
-	w.srv.Secrets = testBox(t)
-	owner := w.user("owner@ex.com", "Owner")
-	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
-	gtok, guestID := sharedGuest(t, w, sc, owner)
-	gpath := guestID.String()
-	otok := w.token(owner.ID)
-	host := sc.host.ID.String()
-	putEnvFlag(t, w, gtok, gpath, "cfg", "GH_HOST=github.com\nUNUSED=x\n", false)
-	putKey(t, w, gtok, gpath, "cfg", "GH_TOKEN", amendSentinel, nil)
-	putEnvFlag(t, w, gtok, gpath, "other", "DB_HOST=db1\nDB_PORT=5432\n", false)
-	status, env := w.do(gtok, http.MethodPost, "/v1/projects/"+gpath+"/catalog", progBody("gh", map[string]any{
-		"env_sets": []string{"cfg"}, "secret_env": map[string]string{"PGHOST": "other.DB_HOST"},
-	}))
-	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
-	created := objectPayload(t, env)
-	entryID, _ := created["id"].(string)
-	hash, _ := created["spec_hash"].(string)
-	img := createImage(t, w, gtok, guestID, "web", `{"kind":"service","image":"nginx","env_sets":["cfg"]}`)
-	imgHash, _ := img["spec_hash"].(string)
-
-	approve := func(id, h string) string {
-		t.Helper()
-		status, env, raw := mustCall(t, w, otok, http.MethodPost, "/v1/hosts/"+host+"/catalog-approvals", `{"entry_id":"`+id+`","spec_hash":"`+h+`"}`)
-		mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-		return raw
-	}
-	raw := approve(entryID, hash)
-	if strings.Contains(raw, amendSentinel) || !strings.Contains(raw, `"env_set_values":{"cfg":{"GH_HOST":"github.com","UNUSED":"x"},"other":{"DB_HOST":"db1"}}`) {
-		t.Fatalf("approve response %s", raw)
-	}
-	imgID, _ := img["id"].(string)
-	if raw := approve(imgID, imgHash); !strings.Contains(raw, `"env_set_values":{}`) {
-		t.Fatalf("image approval %s", raw)
-	}
-	status, env, raw = mustCall(t, w, otok, http.MethodGet, "/v1/hosts/"+host+"/catalog-approvals", "")
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if strings.Contains(raw, amendSentinel) || strings.Contains(raw, "GH_TOKEN") || strings.Contains(raw, "DB_PORT") {
-		t.Fatalf("approval list %s", raw)
-	}
-
-	// A secret value change: no re-hash, approvals kept.
-	putKey(t, w, gtok, gpath, "cfg", "GH_TOKEN", amendSentinel+"-2", nil)
-	if entryHash(t, w, gtok, gpath, "gh") != hash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 2 {
-		t.Fatal("a secret value change re-hashed or voided an approval")
-	}
-	// A plain value of a key that does not take part (DB_PORT): no change.
-	no := false
-	putKey(t, w, gtok, gpath, "other", "DB_PORT", "6543", &no)
-	if entryHash(t, w, gtok, gpath, "gh") != hash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 2 {
-		t.Fatal("a plain value that does not take part re-hashed the program")
-	}
-	// A plain taking-part value change: the program re-hashes and loses its
-	// approval; the image entry on the same set keeps both.
-	putKey(t, w, gtok, gpath, "cfg", "GH_HOST", "ghe.example", &no)
-	if entryHash(t, w, gtok, gpath, "gh") == hash {
-		t.Fatal("a plain value change did not re-hash the program")
-	}
-	if entryHash(t, w, gtok, gpath, "web") != imgHash {
-		t.Fatal("an image entry re-hashed on a value change")
-	}
-	left := listApprovals(t, w, owner.ID, sc.host.ID)
-	if len(left) != 1 || left[0]["entry_id"] != imgID {
-		t.Fatalf("approvals after plain change %#v", left)
-	}
-	// A plain secret_env target that changes: same.
-	hash = entryHash(t, w, gtok, gpath, "gh")
-	putKey(t, w, gtok, gpath, "other", "DB_HOST", "db2", &no)
-	if entryHash(t, w, gtok, gpath, "gh") == hash {
-		t.Fatal("a plain secret_env target change did not re-hash")
-	}
-	// A plain key that turns secret leaves env_values: re-hash.
-	hash = entryHash(t, w, gtok, gpath, "gh")
-	status, env, _ = markSecret(t, w, gtok, gpath, "cfg", "UNUSED")
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if entryHash(t, w, gtok, gpath, "gh") == hash {
-		t.Fatal("a plain key turning secret did not re-hash")
-	}
 }
 
 // api-v1 v1.22 amendments 2 and 3: the extended list for secret values, on

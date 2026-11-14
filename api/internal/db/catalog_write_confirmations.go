@@ -67,20 +67,6 @@ func scanCatalogWriteConfirmation(row pgx.Row) (store.CatalogWriteConfirmation, 
 	return c, nil
 }
 
-func (d *DB) CountEntryApprovals(ctx context.Context, projectID uuid.UUID, name string) (int, error) {
-	var n int
-	err := d.pool.QueryRow(ctx, `
-SELECT count(*)
-FROM app.catalog_host_approvals a
-JOIN app.catalog_entries e ON e.id = a.entry_id
-WHERE e.project_id = $1::uuid AND e.name = $2
-`, projectID.String(), name).Scan(&n)
-	if err != nil {
-		return 0, mapErr(err)
-	}
-	return n, nil
-}
-
 // CommitCatalogWrite locks the plan and the catalog row, applies the console
 // write, and deletes the plan in that same transaction. The idempotency
 // record keeps the response. A conflict rolls back, so the plan stays.

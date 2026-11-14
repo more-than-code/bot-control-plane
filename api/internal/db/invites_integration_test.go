@@ -26,7 +26,7 @@ func assertInvites(t *testing.T, d *DB, ctx context.Context) {
 
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	owner := inviteUser(t, d, ctx, "invite-owner", at)
-	project, err := d.CreateProject(ctx, owner.ID, "Invites", "invites", at)
+	project, err := d.CreateProject(ctx, personalOrg(t, d, ctx, owner.ID), owner.ID, "Invites", "invites", at)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -48,7 +48,7 @@ func assertInvites(t *testing.T, d *DB, ctx context.Context) {
 	assertInviteChecks(t, d, ctx, project.ID, owner.ID, at)
 
 	otherOwner := inviteUser(t, d, ctx, "invite-other", at)
-	other, err := d.CreateProject(ctx, otherOwner.ID, "Other", "invite-other", at)
+	other, err := d.CreateProject(ctx, personalOrg(t, d, ctx, otherOwner.ID), otherOwner.ID, "Other", "invite-other", at)
 	if err != nil {
 		t.Fatalf("other project: %v", err)
 	}
@@ -59,7 +59,7 @@ func assertInvites(t *testing.T, d *DB, ctx context.Context) {
 	if _, err := d.CreateInvite(ctx, other.ID, otherHash, "admin", otherOwner.ID, at.Add(time.Hour), at, 1); err != nil {
 		t.Fatalf("other invite: %v", err)
 	}
-	if _, err := d.DeleteProject(ctx, project.ID, at); err != nil {
+	if err := d.DeleteProject(ctx, project.ID, at); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
 	if n := inviteCount(t, d, ctx, project.ID); n != 0 {
@@ -70,7 +70,7 @@ func assertInvites(t *testing.T, d *DB, ctx context.Context) {
 	}
 
 	hard := inviteUser(t, d, ctx, "invite-hard", at)
-	hardProject, err := d.CreateProject(ctx, hard.ID, "Hard", "invite-hard", at)
+	hardProject, err := d.CreateProject(ctx, personalOrg(t, d, ctx, hard.ID), hard.ID, "Hard", "invite-hard", at)
 	if err != nil {
 		t.Fatalf("hard project: %v", err)
 	}
@@ -374,7 +374,7 @@ func assertInviteAcceptCap(t *testing.T, d *DB, ctx context.Context, at time.Tim
 	const n = 5
 	const extra = 5
 	owner := inviteUser(t, d, ctx, "invite-cap-owner", at)
-	project, err := d.CreateProject(ctx, owner.ID, "Cap", "invite-cap", at)
+	project, err := d.CreateProject(ctx, personalOrg(t, d, ctx, owner.ID), owner.ID, "Cap", "invite-cap", at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -542,7 +542,7 @@ type acceptResult struct {
 func inviteMemberFixture(t *testing.T, d *DB, ctx context.Context, slug string, at time.Time) (store.User, store.Project, store.User, store.Invite, []byte) {
 	t.Helper()
 	owner := inviteUser(t, d, ctx, slug+"-owner", at)
-	project, err := d.CreateProject(ctx, owner.ID, slug, slug, at)
+	project, err := d.CreateProject(ctx, personalOrg(t, d, ctx, owner.ID), owner.ID, slug, slug, at)
 	if err != nil {
 		t.Fatal(err)
 	}

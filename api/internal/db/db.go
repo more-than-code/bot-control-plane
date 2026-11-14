@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
 	"time"
 
@@ -69,15 +70,7 @@ func mapErr(err error) error {
 	if isFK(err) {
 		return store.ErrNotFound
 	}
-	if isOwnerShare(err) {
-		return store.ErrInvalid
-	}
 	return fmt.Errorf("database: %w", scrub(err))
-}
-
-func isOwnerShare(err error) bool {
-	var pe *pgconn.PgError
-	return errors.As(err, &pe) && pe.ConstraintName == "host_shares_not_owner"
 }
 
 func scrub(err error) error {
@@ -113,4 +106,12 @@ func optString(s *string) any {
 		return nil
 	}
 	return *s
+}
+
+// optID is a nullable uuid parameter: nil, or the text form.
+func optID(id *uuid.UUID) any {
+	if id == nil {
+		return nil
+	}
+	return id.String()
 }

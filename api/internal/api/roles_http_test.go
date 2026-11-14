@@ -50,12 +50,14 @@ func TestRoleEnforcementHTTP(t *testing.T) {
 		{"transfer", http.MethodPost, func(s scene) string { return "/v1/projects/" + s.project.ID.String() + "/transfer-ownership" },
 			func(s scene) string { return `{"user_id":"` + admin.ID.String() + `"}` }, 200, 403, 403, false},
 		{"create join token", http.MethodPost, func(s scene) string { return "/v1/projects/" + s.project.ID.String() + "/join-tokens" },
-			func(scene) string { return `{}` }, 201, 201, 403, false},
+			func(scene) string { return `{}` }, 201, 403, 403, false},
+		// v1.24 item 3: join tokens and revoke need org admin+; a project
+		// admin who is not an org admin is refused.
 		{"revoke join token", http.MethodDelete, func(s scene) string {
 			return "/v1/projects/" + s.project.ID.String() + "/join-tokens/" + s.join.ID.String()
-		}, func(scene) string { return "" }, 200, 200, 403, false},
+		}, func(scene) string { return "" }, 200, 403, 403, false},
 		{"revoke host", http.MethodDelete, func(s scene) string { return "/v1/hosts/" + s.host.ID.String() + "/credential" },
-			func(scene) string { return "" }, 200, 200, 403, false},
+			func(scene) string { return "" }, 200, 403, 403, false},
 		{"replace health checks", http.MethodPut, func(s scene) string { return "/v1/services/" + s.svc.ID.String() + "/health-checks" },
 			func(scene) string { return health }, 200, 200, 403, false},
 		{"snapshot", http.MethodPost, func(s scene) string { return "/v1/hosts/" + s.host.ID.String() + "/snapshot" },

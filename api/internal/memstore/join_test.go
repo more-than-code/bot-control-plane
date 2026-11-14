@@ -20,7 +20,7 @@ func TestConsumeJoinTokenOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := m.CreateProject(ctx, user.ID, "Lab", "lab", now)
+	project, err := m.CreateProject(ctx, m.PersonalOrg(user.ID), user.ID, "Lab", "lab", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestConsumeJoinTokenOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.CreateJoinToken(ctx, project.ID, hash, nil, user.ID, now.Add(time.Hour), now); err != nil {
+	if _, err := m.CreateJoinToken(ctx, project.OrgID, hash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, user.ID, now.Add(time.Hour), now); err != nil {
 		t.Fatal(err)
 	}
 	var ok atomic.Int32
@@ -66,7 +66,7 @@ func TestDiscoveredDoesNotDowngradeDeclared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := m.CreateProject(ctx, user.ID, "Lab", "lab", now)
+	project, err := m.CreateProject(ctx, m.PersonalOrg(user.ID), user.ID, "Lab", "lab", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestDiscoveredDoesNotDowngradeDeclared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.CreateJoinToken(ctx, project.ID, hash, nil, user.ID, now.Add(time.Hour), now); err != nil {
+	if _, err := m.CreateJoinToken(ctx, project.OrgID, hash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, user.ID, now.Add(time.Hour), now); err != nil {
 		t.Fatal(err)
 	}
 	_, credHash, err := secret.NewToken()

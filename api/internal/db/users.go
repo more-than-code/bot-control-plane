@@ -129,6 +129,22 @@ RETURNING id::text, email, name, avatar_url, disabled_at, created_at
 	if err != nil {
 		return store.User{}, err
 	}
+	// D-8 for users from before orgs who own no project (review B16): one
+	// personal org when they belong to none.
+	var inOrg bool
+	if err := tx.QueryRow(ctx, `
+SELECT EXISTS (
+    SELECT 1 FROM app.org_members m JOIN app.orgs o ON o.id = m.org_id AND o.deleted_at IS NULL
+    WHERE m.user_id = $1::uuid
+)
+`, userID.String()).Scan(&inOrg); err != nil {
+		return store.User{}, mapErr(err)
+	}
+	if !inOrg {
+		if _, err := createOrgTx(ctx, tx, user.ID, store.PersonalOrgName(user.Name, user.Email), store.PersonalOrgSlug(user.ID), in.At); err != nil {
+			return store.User{}, mapErr(err)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.User{}, mapErr(err)
 	}
@@ -159,6 +175,10 @@ INSERT INTO app.user_identities (
     id, user_id, provider, provider_subject, email, email_verified, created_at, last_login_at
 ) VALUES ($1::uuid, $2::uuid, 'google', $3, $4, true, $5, $5)
 `, uuid.New().String(), user.ID.String(), in.Subject, in.Email, in.At); err != nil {
+		return store.User{}, err
+	}
+	// D-8: a new user gets a personal org, so "create a project" always has one.
+	if _, err := createOrgTx(ctx, tx, user.ID, store.PersonalOrgName(user.Name, user.Email), store.PersonalOrgSlug(user.ID), in.At); err != nil {
 		return store.User{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {

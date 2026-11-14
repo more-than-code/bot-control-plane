@@ -58,7 +58,8 @@ func (s *Server) issueHealthConfirmation(w http.ResponseWriter, r *http.Request,
 	body := envelopeRaw("ok", "ok", payload)
 	s.finishIdempotency(r.Context(), p.User.ID, key, http.StatusAccepted, body)
 	s.auditOK(r.Context(), p, store.AuditRow{
-		ProjectID: idPtr(host.ProjectID),
+		OrgID:     idPtr(host.OrgID),
+		ProjectID: svc.ProjectID,
 		HostID:    idPtr(host.ID),
 		ServiceID: idPtr(svc.ID),
 		Action:    audit.ActionHealthConfirmation,
@@ -142,7 +143,7 @@ func (s *Server) healthConfirmTarget(w http.ResponseWriter, r *http.Request, p p
 		s.fail(w, err)
 		return store.Service{}, store.Host{}, false
 	}
-	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceWrite, &svc.ProjectID, idPtr(svc.ID), audit.ActionHealthChecks); !ok {
+	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceWrite, svc.ProjectID, idPtr(svc.ID), audit.ActionHealthChecks); !ok {
 		return store.Service{}, store.Host{}, false
 	}
 	return svc, host, true
@@ -164,7 +165,8 @@ func (s *Server) finishHealthReplace(r *http.Request, p principal, host store.Ho
 		checks = []store.HealthCheck{}
 	}
 	s.auditOK(r.Context(), p, store.AuditRow{
-		ProjectID: idPtr(host.ProjectID),
+		OrgID:     idPtr(host.OrgID),
+		ProjectID: svc.ProjectID,
 		HostID:    idPtr(host.ID),
 		ServiceID: idPtr(svc.ID),
 		Action:    audit.ActionHealthChecks,

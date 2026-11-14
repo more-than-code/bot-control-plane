@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"unicode"
@@ -31,17 +32,80 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	project, err := s.Store.CreateProject(r.Context(), p.User.ID, name, store.Slug(name), s.now())
+	// api-v1 v1.24 item 3: kept for one release; the project goes into the
+	// caller's only org where they are owner or admin.
+	orgs, err := s.Store.ListUserOrgs(r.Context(), p.User.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	orgID := uuid.Nil
+	for _, o := range orgs {
+		if !store.OrgAdmin(o.Role) {
+			continue
+		}
+		if orgID != uuid.Nil {
+			writeCode(w, "bad_request", "choose an organization")
+			return
+		}
+		orgID = o.ID
+	}
+	if orgID == uuid.Nil {
+		writeCode(w, "bad_request", "choose an organization")
+		return
+	}
+	s.createProject(w, r, p, orgID, name)
+}
+
+// createProject creates the project in orgID with the caller as owner.
+func (s *Server) createProject(w http.ResponseWriter, r *http.Request, p principal, orgID uuid.UUID, name string) {
+	project, err := s.Store.CreateProject(r.Context(), orgID, p.User.ID, name, store.Slug(name), s.now())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.auditOK(r.Context(), p, store.AuditRow{
+		OrgID:     idPtr(orgID),
 		ProjectID: idPtr(project.ID),
 		Action:    audit.ActionProjectCreate,
 		Detail:    map[string]any{"slug": project.Slug},
 	})
 	writeOK(w, http.StatusCreated, project)
+}
+
+// callerRole is the caller's effective project role for catalog grants and
+// actions (api-v1 v1.24 item 2, D-1): their membership role, raised to admin
+// when they own or administer the project's org. ErrNotFound when the
+// project does not reach them.
+func (s *Server) callerRole(ctx context.Context, projectID, userID uuid.UUID) (string, error) {
+	pa, err := s.Store.ProjectAccess(ctx, projectID, userID)
+	if err != nil {
+		return "", err
+	}
+	role := pa.MemberRole
+	if store.OrgAdmin(pa.OrgRole) && role != authz.RoleOwner {
+		role = authz.RoleAdmin
+	}
+	if role == "" {
+		return "", store.ErrNotFound
+	}
+	return role, nil
+}
+
+// withCallerRole sets role and via for the caller (api-v1 v1.24 item 1): a
+// membership wins; an org owner or admin without one is admin via org.
+func (s *Server) withCallerRole(r *http.Request, project store.Project, userID uuid.UUID) (store.Project, error) {
+	pa, err := s.Store.ProjectAccess(r.Context(), project.ID, userID)
+	if err != nil {
+		return project, err
+	}
+	switch {
+	case pa.MemberRole != "":
+		project.Role, project.Via = pa.MemberRole, "member"
+	case store.OrgAdmin(pa.OrgRole):
+		project.Role, project.Via = authz.RoleAdmin, "org"
+	}
+	return project, nil
 }
 
 func (s *Server) handleProjectList(w http.ResponseWriter, r *http.Request) {
@@ -87,12 +151,11 @@ func (s *Server) handleProjectGet(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	role, err := s.Store.Role(r.Context(), id, p.User.ID)
+	project, err = s.withCallerRole(r, project, p.User.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	project.Role = role
 	writeOK(w, http.StatusOK, project)
 }
 
@@ -124,8 +187,12 @@ func (s *Server) handleProjectPatch(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	project.Role = authz.RoleOwner
-	s.auditOK(r.Context(), p, store.AuditRow{ProjectID: idPtr(id), Action: audit.ActionProjectRename})
+	project, err = s.withCallerRole(r, project, p.User.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.auditOK(r.Context(), p, store.AuditRow{OrgID: idPtr(project.OrgID), ProjectID: idPtr(id), Action: audit.ActionProjectRename})
 	writeOK(w, http.StatusOK, project)
 }
 
@@ -142,25 +209,17 @@ func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) {
 		s.deny(w, r, p, idPtr(id), nil, nil, audit.ActionProjectDelete, err)
 		return
 	}
-	hosts, err := s.Store.DeleteProject(r.Context(), id, s.now())
+	project, err := s.Store.GetProject(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	if s.Hub != nil {
-		for _, hostID := range hosts {
-			s.Hub.CloseHost(hostID)
-		}
+	// api-v1 v1.24 item 7: hosts stay in the org; nothing is revoked or stopped.
+	if err := s.Store.DeleteProject(r.Context(), id, s.now()); err != nil {
+		s.fail(w, err)
+		return
 	}
-	s.auditOK(r.Context(), p, store.AuditRow{ProjectID: idPtr(id), Action: audit.ActionProjectDelete})
-	for _, hostID := range hosts {
-		hid := hostID
-		s.auditOK(r.Context(), p, store.AuditRow{
-			ProjectID: idPtr(id),
-			HostID:    &hid,
-			Action:    audit.ActionHostRevoke,
-		})
-	}
+	s.auditOK(r.Context(), p, store.AuditRow{OrgID: idPtr(project.OrgID), ProjectID: idPtr(id), Action: audit.ActionProjectDelete})
 	writeOK(w, http.StatusOK, nil)
 }
 

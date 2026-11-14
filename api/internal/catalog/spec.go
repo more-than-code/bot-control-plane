@@ -306,7 +306,7 @@ func validateEnv(env map[string]string) error {
 
 // ChangesWhatRunsSecret is api-v1 v1.22 amendment 2: the v1.6.1 list plus
 // the keys a secret value may not set on a program, because a secret value
-// is not shown in the host owner's approval. The proxy keys match in either
+// is not shown in any plan or view. The proxy keys match in either
 // case.
 func ChangesWhatRunsSecret(key string) bool {
 	if changesWhatRuns(key) {
@@ -370,7 +370,7 @@ func Canonical(p Program) string {
 // spec, and beside it env_keys {<set>: EnvKeyDigest} as images do, and
 // env_values {<set>: EnvValueDigest} of the set's plain taking-part keys.
 // Secret values never enter it; inline env values do. An entry without sets
-// keeps the v1.6 input, so its hash and host approvals do not change.
+// keeps the v1.6 input, so its hash does not change.
 func CanonicalProgram(p Program, sets SetState) string {
 	refs := p.EnvRefs()
 	if !refs.Any() {

@@ -608,27 +608,20 @@ func TestFileDeployEdges(t *testing.T) {
 		t.Fatal("content rewrite changed spec_hash")
 	}
 	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), guestUser.ID, "Guest", "guest", w.now)
+	guest, err := w.mem.CreateProject(context.Background(), sc.project.OrgID, guestUser.ID, "Guest", "guest", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	gtok := w.token(guestUser.ID)
 	putFile(t, w, gtok, guest.ID.String(), "app.conf", "guest-file-body-one", boolPtr(false))
 	shared := createImage(t, w, gtok, guest.ID, "web", `{"kind":"service","image":"nginx","files":[{"file":"app.conf","target":"/config/app.conf"}]}`)
 	sharedHash, _ := shared["spec_hash"].(string)
-	sharedID, _ := shared["id"].(string)
-	status, env, _ = mustCall(t, w, tok, http.MethodPost, "/v1/hosts/"+host+"/catalog-approvals", `{"entry_id":"`+sharedID+`","spec_hash":"`+sharedHash+`"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	putFile(t, w, gtok, guest.ID.String(), "app.conf", "guest-file-body-two", boolPtr(false))
 	if createImageGet(t, w, gtok, guest.ID, "web")["spec_hash"] != sharedHash {
 		t.Fatal("shared content rewrite changed spec_hash")
-	}
-	approved := listApprovals(t, w, owner.ID, sc.host.ID)
-	if len(approved) != 1 || approved[0]["status"] != "approved" || approved[0]["spec_hash"] != sharedHash {
-		t.Fatalf("content rewrite voided the approval %#v", approved)
 	}
 	status, env, _ = mustCall(t, w, tok, http.MethodPut, "/v1/projects/"+project+"/catalog/web", `{"kind":"image","spec":{"kind":"service","image":"nginx","files":[{"file":"app.conf","target":"/config/other.conf"}]}}`)
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")

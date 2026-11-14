@@ -64,6 +64,7 @@ func TestServiceConfirmationsMigration(t *testing.T) {
 	if url == "" {
 		t.Skip()
 	}
+	lockMigrations(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	d, err := Open(ctx, url)
@@ -109,7 +110,7 @@ func TestServiceConfirmationsMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := store.ServiceConfirmation{
-		UserID: owner.ID, ProjectID: project.ID, ServiceID: svc.ID, Action: "health_checks",
+		UserID: owner.ID, ProjectID: &project.ID, ServiceID: svc.ID, Action: "health_checks",
 		RequestHash: bytes.Repeat([]byte{1}, 32), CurrentHash: bytes.Repeat([]byte{2}, 32),
 		Checks: checks, IdempotencyKey: "hc-0011", CreatedAt: at, ExpiresAt: at.Add(5 * time.Minute),
 	}

@@ -9,9 +9,12 @@ import (
 // Config is the process configuration. Secrets come from the environment
 // and are never logged.
 type Config struct {
-	Listen                string
-	DatabaseURL           string
-	MigrateDatabaseURL    string
+	Listen             string
+	DatabaseURL        string
+	MigrateDatabaseURL string
+	// OrgMappingFile is BOT_API_ORG_MAPPING_FILE, read only with --migrate:
+	// the org mapping for migration 0015 (spec-organizations §4.1).
+	OrgMappingFile        string
 	GoogleClientID        string
 	GoogleClientSecret    string
 	GoogleIssuer          string
@@ -40,6 +43,7 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 		Listen:                strings.TrimSpace(getenv("BOT_API_LISTEN")),
 		DatabaseURL:           strings.TrimSpace(getenv("DATABASE_URL")),
 		MigrateDatabaseURL:    strings.TrimSpace(getenv("BOT_API_MIGRATE_DATABASE_URL")),
+		OrgMappingFile:        strings.TrimSpace(getenv("BOT_API_ORG_MAPPING_FILE")),
 		GoogleClientID:        strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_ID")),
 		GoogleClientSecret:    strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_SECRET")),
 		GoogleIssuer:          strings.TrimSpace(getenv("BOT_API_GOOGLE_ISSUER")),

@@ -30,7 +30,7 @@ func TestRunMigrateIsOptIn(t *testing.T) {
 			opened = true
 			return nil, errors.New("database connection failed")
 		},
-		migrate: func(context.Context, string) error {
+		migrate: func(context.Context, string, string) error {
 			migrated = true
 			return nil
 		},
@@ -96,7 +96,7 @@ func TestRunRejectsMCPSecretMode(t *testing.T) {
 			opened = true
 			return nil, errors.New("database connection failed")
 		},
-		migrate: func(context.Context, string) error { return nil },
+		migrate: func(context.Context, string, string) error { return nil },
 		serve:   func(string, http.Handler, func()) error { return nil },
 	}
 	getenv := func(k string) string {
@@ -195,5 +195,24 @@ func TestNoDDLInGo(t *testing.T) {
 func TestRunUnknownArgumentExitsOne(t *testing.T) {
 	if code := Run(context.Background(), []string{"--bogus"}); code != 1 {
 		t.Fatalf("Run(--bogus) = %d, want 1", code)
+	}
+}
+
+func TestOrgSource(t *testing.T) {
+	if got, err := orgSource(""); err != nil || got.Chosen {
+		t.Fatalf("unset %+v %v", got, err)
+	}
+	if got, err := orgSource("none"); err != nil || !got.Chosen || got.Mapping != nil {
+		t.Fatalf("none %+v %v", got, err)
+	}
+	if _, err := orgSource(filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Fatal("missing file accepted")
+	}
+	path := filepath.Join(t.TempDir(), "orgs.json")
+	if err := os.WriteFile(path, []byte(`{"orgs":[{"slug":"mtc","name":"MTC","owner_email":"o@example.com","projects":["p"]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := orgSource(path); err != nil || !got.Chosen || got.Mapping == nil {
+		t.Fatalf("file %+v %v", got, err)
 	}
 }

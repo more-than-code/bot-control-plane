@@ -19,7 +19,7 @@ func TestMakeEnvKeysSecret(t *testing.T) {
 	at := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	owner := catalogUser(t, m, "secret-owner")
 	home := catalogProject(t, m, owner.ID, "Sec", "sec", at)
-	host := catalogHost(t, m, home, owner.ID, "pi", at)
+	_ = catalogHost(t, m, home, owner.ID, "pi", at)
 	box, err := seal.New(bytes.Repeat([]byte{5}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -40,14 +40,11 @@ func TestMakeEnvKeysSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := catalog.ImageHash(img, map[string]string{"svc": catalog.EnvKeyDigest([]string{"A", "B", "C"})})
-	entry, err := m.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+	_, err = m.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "web", Kind: "image", ImageRaw: []byte(catalog.SpecJSON(img)),
 		SpecHash: hash, CommandDisplay: img.Image, Actor: owner.ID, At: at,
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	sealer := func(key, plain string) (store.EnvSecret, error) {
@@ -152,9 +149,8 @@ func TestMakeEnvKeysSecret(t *testing.T) {
 	}
 
 	got, err := m.GetCatalogEntry(ctx, home.ID, "web")
-	kept, err2 := m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || err2 != nil || got.SpecHash != hash || len(kept) != 1 {
-		t.Fatalf("hash %s approvals %d %v %v", got.SpecHash, len(kept), err, err2)
+	if err != nil || got.SpecHash != hash {
+		t.Fatalf("hash %s %v", got.SpecHash, err)
 	}
 	// The key PUT still refuses a flag change.
 	plainFlag := false

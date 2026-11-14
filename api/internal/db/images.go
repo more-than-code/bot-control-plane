@@ -226,10 +226,11 @@ JOIN app.catalog_entries e ON e.project_id = p.id
 JOIN app.hosts h ON h.id = $3::uuid
 WHERE p.slug = $1 AND p.deleted_at IS NULL
   AND e.name = $2 AND e.kind = 'image'
-  AND (h.project_id = p.id OR EXISTS (
-      SELECT 1 FROM app.host_shares s
-      WHERE s.host_id = h.id AND s.project_id = p.id AND s.level = 'deploy'
-  ))
+  AND h.org_id = p.org_id
+  AND EXISTS (
+      SELECT 1 FROM app.host_access a
+      WHERE a.host_id = h.id AND a.project_id = p.id AND a.level = 'deploy'
+  )
 `, projectSlug, entry, hostID.String()).Scan(&projectID, &entryID, &raw, &deployed)
 	if err != nil {
 		return store.AutoTarget{}, mapErr(err)
@@ -625,8 +626,7 @@ FOR UPDATE
 		return store.EnvKey{}, false, err
 	}
 	// Every write re-hashes: a new key changes key names, and a plain value
-	// change re-hashes program entries (api-v1 v1.22 amendment 1). Entries
-	// whose hash is unchanged keep their approvals.
+	// change re-hashes program entries (api-v1 v1.22 amendment 1).
 	if err := d.rehashTx(ctx, tx, projectID, name, at); err != nil {
 		return store.EnvKey{}, false, err
 	}
@@ -950,6 +950,7 @@ UPDATE app.catalog_entries SET spec_hash = $2, updated_at = $3 WHERE id = $1::uu
 `, h.id, h.next, at); err != nil {
 			return mapErr(err)
 		}
+		// Kept so a rollback to v0.2.29 sees no stale approvals; removed in phase 2.
 		if err := exec(ctx, tx, `DELETE FROM app.catalog_host_approvals WHERE entry_id = $1::uuid`, h.id); err != nil {
 			return mapErr(err)
 		}

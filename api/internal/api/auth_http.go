@@ -118,6 +118,11 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	orgs, err := s.Store.ListUserOrgs(r.Context(), p.User.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	view := make([]map[string]string, 0, len(idents))
 	for _, idn := range idents {
 		view = append(view, map[string]string{"provider": idn.Provider, "email": idn.Email})
@@ -129,6 +134,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"user":       p.User,
 		"identities": view,
 		"projects":   projects,
+		"orgs":       nonNilSlice(orgs),
 	})
 }
 

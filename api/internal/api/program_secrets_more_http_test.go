@@ -20,11 +20,11 @@ func TestProgramEnvSetsOnlyKeyDelete(t *testing.T) {
 	owner := w.user("owner@ex.com", "Owner")
 	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
 	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), guestUser.ID, "Guest", "guest", w.now)
+	guest, err := w.mem.CreateProject(context.Background(), sc.project.OrgID, guestUser.ID, "Guest", "guest", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	gtok := w.token(guestUser.ID)
@@ -34,10 +34,6 @@ func TestProgramEnvSetsOnlyKeyDelete(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
 	created := objectPayload(t, env)
 	hash, _ := created["spec_hash"].(string)
-	entryID, _ := created["id"].(string)
-	host := sc.host.ID.String()
-	status, env, _ = mustCall(t, w, w.token(owner.ID), http.MethodPost, "/v1/hosts/"+host+"/catalog-approvals", `{"entry_id":"`+entryID+`","spec_hash":"`+hash+`"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 
 	status, env, _ = mustCall(t, w, gtok, http.MethodDelete, envKeyPath(gpath, "gh", "GH_HOST"), "")
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
@@ -52,40 +48,35 @@ func TestProgramEnvSetsOnlyKeyDelete(t *testing.T) {
 	if got == hash || got != want {
 		t.Fatalf("hash after key delete %v, was %s, want %s", got, hash, want)
 	}
-	if n := len(listApprovals(t, w, owner.ID, sc.host.ID)); n != 0 {
-		t.Fatalf("approvals after key delete %d", n)
-	}
 	status, env, _ = mustCall(t, w, gtok, http.MethodDelete, envPath(gpath, "gh"), "")
 	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
 }
 
-// api-v1 v1.23 item 2 ordering: on a shared host the approval check comes
-// first, so an unapproved guest Run waits for approval even when the host's
-// list does not include the guest.
-func TestProjectsPreCheckAfterApproval(t *testing.T) {
+// api-v1 v1.24 item 4 ordering: the deploy access check comes first, then
+// the v1.23 allowlist pre-check.
+func TestProjectsPreCheckAfterAccess(t *testing.T) {
 	w := newWorld(t)
 	owner := w.user("owner@ex.com", "Owner")
 	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
 	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), guestUser.ID, "Guest", "guest", w.now)
+	guest, err := w.mem.CreateProject(context.Background(), sc.project.OrgID, guestUser.ID, "Guest", "guest", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(context.Background(), sc.host.ID, guest.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	gtok := w.token(guestUser.ID)
 	gpath := guest.ID.String()
-	created := createProgram(t, w, gtok, guest.ID, "tra", "pnpm run dev", false)
+	createProgram(t, w, gtok, guest.ID, "tra", "pnpm run dev", false)
 	conn := helloAgent(t, w, sc.host, sc.credPlain, sc.credID, secretsPrograms(false, []string{"proj"}), nil)
 	log := watchTasks(t, conn, succeededTask)
 	host := sc.host.ID.String()
 	status, env := postAct(w, gtok, gpath, "tra", "run", host, "ord-1", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "waiting for the host owner's approval")
-	hash, _ := created["spec_hash"].(string)
-	entryID, _ := created["id"].(string)
-	status, env, _ = mustCall(t, w, w.token(owner.ID), http.MethodPost, "/v1/hosts/"+host+"/catalog-approvals", `{"entry_id":"`+entryID+`","spec_hash":"`+hash+`"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "this project has no deploy access to the host")
+	if _, _, err := w.grant(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
+		t.Fatal(err)
+	}
 	status, env = postAct(w, gtok, gpath, "tra", "run", host, "ord-2", nil)
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "this host's allowlist does not include project guest")
 	if log.count() != 0 {

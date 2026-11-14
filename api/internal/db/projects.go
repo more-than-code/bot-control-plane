@@ -10,7 +10,16 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-func (d *DB) CreateProject(ctx context.Context, ownerID uuid.UUID, name, baseSlug string, at time.Time) (store.Project, error) {
+func (d *DB) CreateProject(ctx context.Context, orgID, ownerID uuid.UUID, name, baseSlug string, at time.Time) (store.Project, error) {
+	var alive bool
+	if err := d.pool.QueryRow(ctx, `
+SELECT EXISTS (SELECT 1 FROM app.orgs WHERE id = $1::uuid AND deleted_at IS NULL)
+`, orgID.String()).Scan(&alive); err != nil {
+		return store.Project{}, mapErr(err)
+	}
+	if !alive {
+		return store.Project{}, store.ErrNotFound
+	}
 	for n := 1; n < 1000; n++ {
 		var slug string
 		if n == 1 {
@@ -21,7 +30,7 @@ func (d *DB) CreateProject(ctx context.Context, ownerID uuid.UUID, name, baseSlu
 		} else {
 			slug = store.WithSuffix(baseSlug, n, 80)
 		}
-		p, err := d.insertProject(ctx, ownerID, name, slug, at)
+		p, err := d.insertProject(ctx, orgID, ownerID, name, slug, at)
 		if err == nil {
 			return p, nil
 		}
@@ -33,7 +42,7 @@ func (d *DB) CreateProject(ctx context.Context, ownerID uuid.UUID, name, baseSlu
 	return store.Project{}, store.ErrConflict
 }
 
-func (d *DB) insertProject(ctx context.Context, ownerID uuid.UUID, name, slug string, at time.Time) (store.Project, error) {
+func (d *DB) insertProject(ctx context.Context, orgID, ownerID uuid.UUID, name, slug string, at time.Time) (store.Project, error) {
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		return store.Project{}, err
@@ -41,9 +50,9 @@ func (d *DB) insertProject(ctx context.Context, ownerID uuid.UUID, name, slug st
 	defer tx.Rollback(ctx)
 	id := uuid.New()
 	if err := exec(ctx, tx, `
-INSERT INTO app.projects (id, name, slug, created_by, created_at)
-VALUES ($1::uuid, $2, $3, $4::uuid, $5)
-`, id.String(), name, slug, ownerID.String(), at); err != nil {
+INSERT INTO app.projects (id, org_id, name, slug, created_by, created_at)
+VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6)
+`, id.String(), orgID.String(), name, slug, ownerID.String(), at); err != nil {
 		return store.Project{}, err
 	}
 	if err := exec(ctx, tx, `
@@ -57,15 +66,37 @@ VALUES ($1::uuid, $2::uuid, 'owner', $2::uuid, $3)
 	}
 	return store.Project{
 		ID:        id,
+		OrgID:     orgID,
 		Name:      name,
 		Slug:      slug,
 		Role:      "owner",
+		Via:       "member",
 		CreatedBy: ownerID,
 		CreatedAt: at,
 	}, nil
 }
 
+const projectCols = `p.id::text, p.org_id::text, p.name, p.slug`
+
+// reachSQL lists the projects $1 can reach (api-v1 v1.24 item 1): a
+// membership (via member), or an org owner or admin role (via org, as
+// admin). $2 limits to one org when not null.
+const reachSQL = `
+SELECT ` + projectCols + `, COALESCE(m.role, 'admin'),
+       CASE WHEN m.role IS NULL THEN 'org' ELSE 'member' END,
+       p.created_by::text, p.created_at
+FROM app.projects p
+LEFT JOIN app.project_members m ON m.project_id = p.id AND m.user_id = $1::uuid
+LEFT JOIN app.org_members om ON om.org_id = p.org_id AND om.user_id = $1::uuid AND om.role IN ('owner', 'admin')
+WHERE p.deleted_at IS NULL
+  AND (m.role IS NOT NULL OR om.user_id IS NOT NULL)
+  AND (CAST($2 AS uuid) IS NULL OR p.org_id = CAST($2 AS uuid))`
+
 func (d *DB) ListProjects(ctx context.Context, userID uuid.UUID, limit int, cursor *store.Cursor) ([]store.Project, *store.Cursor, error) {
+	return d.listReach(ctx, userID, nil, limit, cursor)
+}
+
+func (d *DB) listReach(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, limit int, cursor *store.Cursor) ([]store.Project, *store.Cursor, error) {
 	lim := pageLimit(limit)
 	var atArg any
 	var idArg any
@@ -73,18 +104,14 @@ func (d *DB) ListProjects(ctx context.Context, userID uuid.UUID, limit int, curs
 		atArg = cursor.At
 		idArg = cursor.ID
 	}
-	rows, err := d.pool.Query(ctx, `
-SELECT p.id::text, p.name, p.slug, m.role, p.created_by::text, p.created_at
-FROM app.projects p
-JOIN app.project_members m ON m.project_id = p.id AND m.user_id = $1::uuid
-WHERE p.deleted_at IS NULL
+	rows, err := d.pool.Query(ctx, reachSQL+`
   AND (
-    CAST($2 AS timestamptz) IS NULL
-    OR (p.created_at, p.id) > (CAST($2 AS timestamptz), CAST($3 AS uuid))
+    CAST($3 AS timestamptz) IS NULL
+    OR (p.created_at, p.id) > (CAST($3 AS timestamptz), CAST($4 AS uuid))
   )
 ORDER BY p.created_at ASC, p.id ASC
-LIMIT $4
-`, userID.String(), atArg, idArg, lim+1)
+LIMIT $5
+`, userID.String(), optID(orgID), atArg, idArg, lim+1)
 	if err != nil {
 		return nil, nil, mapErr(err)
 	}
@@ -108,11 +135,19 @@ func (d *DB) ListAllProjects(ctx context.Context, userID uuid.UUID) ([]store.Pro
 	return items, err
 }
 
+func (d *DB) ListOrgProjects(ctx context.Context, orgID, userID uuid.UUID) ([]store.Project, error) {
+	if _, err := d.GetOrg(ctx, orgID); err != nil {
+		return nil, err
+	}
+	items, _, err := d.listReach(ctx, userID, &orgID, 10000, nil)
+	return items, err
+}
+
 func (d *DB) GetProject(ctx context.Context, id uuid.UUID) (store.Project, error) {
 	return scanProject(d.pool.QueryRow(ctx, `
-SELECT id::text, name, slug, ''::text, created_by::text, created_at
-FROM app.projects
-WHERE id = $1::uuid AND deleted_at IS NULL
+SELECT `+projectCols+`, ''::text, ''::text, p.created_by::text, p.created_at
+FROM app.projects p
+WHERE p.id = $1::uuid AND p.deleted_at IS NULL
 `, id.String()))
 }
 
@@ -130,135 +165,109 @@ WHERE p.id = $1::uuid AND p.deleted_at IS NULL
 	return role, nil
 }
 
+func (d *DB) ProjectAccess(ctx context.Context, projectID, userID uuid.UUID) (store.ProjectAccess, error) {
+	var pa store.ProjectAccess
+	var orgText string
+	err := d.pool.QueryRow(ctx, `
+SELECT p.org_id::text,
+       COALESCE((SELECT m.role FROM app.project_members m WHERE m.project_id = p.id AND m.user_id = $2::uuid), ''),
+       COALESCE((
+           SELECT om.role FROM app.org_members om
+           JOIN app.orgs o ON o.id = om.org_id AND o.deleted_at IS NULL
+           WHERE om.org_id = p.org_id AND om.user_id = $2::uuid
+       ), '')
+FROM app.projects p
+WHERE p.id = $1::uuid AND p.deleted_at IS NULL
+`, projectID.String(), userID.String()).Scan(&orgText, &pa.MemberRole, &pa.OrgRole)
+	if err != nil {
+		return store.ProjectAccess{}, mapErr(err)
+	}
+	if pa.OrgID, err = parseID(orgText); err != nil {
+		return store.ProjectAccess{}, err
+	}
+	return pa, nil
+}
+
 func (d *DB) RenameProject(ctx context.Context, id uuid.UUID, name string) (store.Project, error) {
 	return scanProject(d.pool.QueryRow(ctx, `
-UPDATE app.projects
+UPDATE app.projects p
 SET name = $2
-WHERE id = $1::uuid AND deleted_at IS NULL
-RETURNING id::text, name, slug, ''::text, created_by::text, created_at
+WHERE p.id = $1::uuid AND p.deleted_at IS NULL
+RETURNING `+projectCols+`, ''::text, ''::text, p.created_by::text, p.created_at
 `, id.String(), name))
 }
 
-func (d *DB) DeleteProject(ctx context.Context, id uuid.UUID, at time.Time) ([]uuid.UUID, error) {
+// DeleteProject is api-v1 v1.24 item 7: no host is revoked or stopped.
+func (d *DB) DeleteProject(ctx context.Context, id uuid.UUID, at time.Time) error {
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
-		return nil, mapErr(err)
+		return mapErr(err)
 	}
 	defer tx.Rollback(ctx)
+	if err := deleteProjectTx(ctx, tx, id, at); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return mapErr(err)
+	}
+	return nil
+}
+
+func deleteProjectTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, at time.Time) error {
 	tag, err := tx.Exec(ctx, `
 UPDATE app.projects
 SET deleted_at = $2
 WHERE id = $1::uuid AND deleted_at IS NULL
 `, id.String(), at)
 	if err != nil {
-		return nil, mapErr(err)
+		return mapErr(err)
 	}
 	if tag.RowsAffected() == 0 {
-		return nil, store.ErrNotFound
+		return store.ErrNotFound
+	}
+	if err := exec(ctx, tx, `DELETE FROM app.host_access WHERE project_id = $1::uuid`, id.String()); err != nil {
+		return mapErr(err)
 	}
 	if err := exec(ctx, tx, `
-UPDATE app.hosts
+UPDATE app.join_tokens
 SET revoked_at = $2
-WHERE project_id = $1::uuid AND revoked_at IS NULL
+WHERE grant_project_id = $1::uuid AND revoked_at IS NULL AND used_at IS NULL
 `, id.String(), at); err != nil {
-		return nil, mapErr(err)
+		return mapErr(err)
 	}
+	// The project's services are gone wherever they run. A row that is
+	// already gone keeps its time. Nothing is stopped on the host.
 	if err := exec(ctx, tx, `
-UPDATE app.agent_credentials c
-SET revoked_at = $2
-FROM app.hosts h
-WHERE c.host_id = h.id AND h.project_id = $1::uuid AND c.revoked_at IS NULL
+UPDATE app.services SET gone_at = $2
+WHERE project_id = $1::uuid AND gone_at IS NULL
 `, id.String(), at); err != nil {
-		return nil, mapErr(err)
-	}
-	// Still-present rows of this project's hosts go gone at the host's
-	// revoke time. A row that is already gone keeps its time. Services on
-	// another project's host are left for the hand-back below.
-	if err := exec(ctx, tx, `
-UPDATE app.services AS s
-SET gone_at = h.revoked_at
-FROM app.hosts AS h
-WHERE s.host_id = h.id
-  AND h.project_id = $1::uuid
-  AND h.revoked_at IS NOT NULL
-  AND s.gone_at IS NULL
-`, id.String()); err != nil {
-		return nil, mapErr(err)
-	}
-	// Services this project owns on someone else's host go back to that host's owner.
-	if err := exec(ctx, tx, `
-UPDATE app.services s
-SET project_id = h.project_id
-FROM app.hosts h
-WHERE s.host_id = h.id
-  AND s.project_id = $1::uuid
-  AND h.project_id <> $1::uuid
-`, id.String()); err != nil {
-		return nil, mapErr(err)
-	}
-	if err := exec(ctx, tx, `
-DELETE FROM app.host_shares
-WHERE project_id = $1::uuid
-   OR host_id IN (SELECT id FROM app.hosts WHERE project_id = $1::uuid)
-`, id.String()); err != nil {
-		return nil, mapErr(err)
+		return mapErr(err)
 	}
 	// Soft-delete does not fire ON DELETE CASCADE. The function runs as
 	// the table owner so deploybot_api can remove invites without DELETE.
 	deleted, err := tx.Query(ctx, `SELECT app.invites_delete_for_project($1::uuid)`, id.String())
 	if err != nil {
-		return nil, mapErr(err)
+		return mapErr(err)
 	}
 	deleted.Close()
 	if err := deleted.Err(); err != nil {
-		return nil, mapErr(err)
+		return mapErr(err)
 	}
 	// Soft-delete does not cascade. Catalog DELETE is granted, and it
-	// removes grants, approvals, and confirmations with the entry.
-	// Catalog-write plans reference the project, not the entry, so they
-	// are removed here. The project row stays, and the foreign key does not fire.
-	if err := exec(ctx, tx, `DELETE FROM app.catalog_entries WHERE project_id = $1::uuid`, id.String()); err != nil {
-		return nil, mapErr(err)
-	}
-	if err := exec(ctx, tx, `DELETE FROM app.catalog_write_confirmations WHERE project_id = $1::uuid`, id.String()); err != nil {
-		return nil, mapErr(err)
-	}
-	if err := exec(ctx, tx, `DELETE FROM app.env_sets WHERE project_id = $1::uuid`, id.String()); err != nil {
-		return nil, mapErr(err)
-	}
-	if err := exec(ctx, tx, `DELETE FROM app.registries WHERE project_id = $1::uuid`, id.String()); err != nil {
-		return nil, mapErr(err)
-	}
-	// Soft-delete does not cascade. Files have no FK from catalog rows.
-	if err := exec(ctx, tx, `DELETE FROM app.project_files WHERE project_id = $1::uuid`, id.String()); err != nil {
-		return nil, mapErr(err)
-	}
-	rows, err := tx.Query(ctx, `
-SELECT id::text FROM app.hosts WHERE project_id = $1::uuid ORDER BY id::text
-`, id.String())
-	if err != nil {
-		return nil, mapErr(err)
-	}
-	defer rows.Close()
-	ids := []uuid.UUID{}
-	for rows.Next() {
-		var text string
-		if err := rows.Scan(&text); err != nil {
-			return nil, mapErr(err)
+	// removes grants and confirmations with the entry. Catalog-write plans
+	// reference the project, not the entry, so they are removed here.
+	for _, q := range []string{
+		`DELETE FROM app.catalog_entries WHERE project_id = $1::uuid`,
+		`DELETE FROM app.catalog_write_confirmations WHERE project_id = $1::uuid`,
+		`DELETE FROM app.env_sets WHERE project_id = $1::uuid`,
+		`DELETE FROM app.registries WHERE project_id = $1::uuid`,
+		`DELETE FROM app.project_files WHERE project_id = $1::uuid`,
+	} {
+		if err := exec(ctx, tx, q, id.String()); err != nil {
+			return mapErr(err)
 		}
-		hid, err := parseID(text)
-		if err != nil {
-			return nil, err
-		}
-		ids = append(ids, hid)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, mapErr(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, mapErr(err)
-	}
-	return ids, nil
+	return nil
 }
 
 func (d *DB) ListMembers(ctx context.Context, projectID uuid.UUID, limit int, cursor *store.Cursor) ([]store.Member, *store.Cursor, error) {
@@ -462,12 +471,15 @@ WHERE project_id = $1::uuid AND user_id = $2::uuid
 
 func scanProject(row pgx.Row) (store.Project, error) {
 	var p store.Project
-	var id, createdBy string
-	if err := row.Scan(&id, &p.Name, &p.Slug, &p.Role, &createdBy, &p.CreatedAt); err != nil {
+	var id, orgID, createdBy string
+	if err := row.Scan(&id, &orgID, &p.Name, &p.Slug, &p.Role, &p.Via, &createdBy, &p.CreatedAt); err != nil {
 		return store.Project{}, mapErr(err)
 	}
 	var err error
 	if p.ID, err = parseID(id); err != nil {
+		return store.Project{}, err
+	}
+	if p.OrgID, err = parseID(orgID); err != nil {
 		return store.Project{}, err
 	}
 	if p.CreatedBy, err = parseID(createdBy); err != nil {

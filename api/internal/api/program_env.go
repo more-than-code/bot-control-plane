@@ -120,33 +120,3 @@ func (s *Server) originReason(ctx context.Context, projectID uuid.UUID, refs cat
 	}
 	return "", nil
 }
-
-// withSetValues fills Approval.env_set_values (api-v1 v1.22 amendment 1):
-// for a program entry with sets, the plain taking-part keys and their current
-// values, which are the values its current spec_hash covers. Every other
-// approval gets {}. Secret keys are never listed.
-func (s *Server) withSetValues(ctx context.Context, items []store.CatalogApproval) error {
-	for i := range items {
-		items[i].EnvSetValues = map[string]map[string]string{}
-		refs := catalog.EnvRefs{Sets: items[i].EnvSets, Secret: items[i].SecretEnv}
-		if !refs.Any() {
-			continue
-		}
-		entry, err := s.Store.GetCatalogEntry(ctx, items[i].ProjectID, items[i].EntryName)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if entry.Kind == "image" {
-			continue
-		}
-		plain, err := s.plainValues(ctx, items[i].ProjectID, refs.SetNames())
-		if err != nil {
-			return err
-		}
-		items[i].EnvSetValues = refs.PlainTakingPart(plain)
-	}
-	return nil
-}

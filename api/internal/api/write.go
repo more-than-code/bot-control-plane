@@ -67,6 +67,8 @@ func statusFor(code string) int {
 		return http.StatusForbidden
 	case "not_found":
 		return http.StatusNotFound
+	case "gone":
+		return http.StatusGone
 	case "conflict":
 		return http.StatusConflict
 	case "unavailable":

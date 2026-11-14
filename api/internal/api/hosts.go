@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"regexp"
 	"slices"
@@ -15,31 +16,45 @@ import (
 
 var hostHint = regexp.MustCompile(`^[a-z0-9-]{1,63}$`)
 
-func (s *Server) handleJoinCreate(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.require(w, r)
-	if !ok {
-		return
+// projectOrgAdmin is the v1.24 rule for the project-scoped join-token routes
+// (item 3): the caller must be an org owner or admin of the project's org.
+// A caller the project does not reach gets not_found; one who reaches it
+// but is not an org admin gets forbidden.
+func (s *Server) projectOrgAdmin(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, action string) (uuid.UUID, bool) {
+	pa, err := s.Store.ProjectAccess(r.Context(), projectID, p.User.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.fail(w, err)
+		return uuid.Nil, false
 	}
-	id, ok := s.pathID(w, r, "id")
-	if !ok {
-		return
+	facts := authz.ProjectFacts{Found: err == nil, MemberRole: pa.MemberRole, OrgRole: pa.OrgRole}
+	var denied error
+	switch {
+	case !authz.Reaches(facts):
+		denied = &authz.Denied{Code: "not_found"}
+	case !store.OrgAdmin(pa.OrgRole):
+		denied = &authz.Denied{Code: "forbidden"}
 	}
-	if err := authz.Authorize(r.Context(), p.User.ID, id, authz.CapJoinToken); err != nil {
-		s.deny(w, r, p, idPtr(id), nil, nil, audit.ActionJoinCreate, err)
-		return
+	if denied != nil {
+		s.deny(w, r, p, idPtr(projectID), nil, nil, action, denied)
+		return uuid.Nil, false
 	}
-	var body struct {
-		Hint    *string `json:"host_name_hint"`
-		Expires *int    `json:"expires_in_sec"`
-	}
-	if !decodeJSON(w, r, &body) {
-		return
-	}
+	return pa.OrgID, true
+}
+
+type joinTokenBody struct {
+	Hint    *string           `json:"host_name_hint"`
+	Expires *int              `json:"expires_in_sec"`
+	Grant   *store.TokenGrant `json:"grant"`
+}
+
+// newJoinToken validates the body fields shared by the org and project
+// routes and creates the token. The grant is checked by the caller.
+func (s *Server) newJoinToken(w http.ResponseWriter, r *http.Request, p principal, orgID uuid.UUID, body joinTokenBody) (store.JoinToken, string, bool) {
 	var hint *string
 	if body.Hint != nil && *body.Hint != "" {
 		if !hostHint.MatchString(*body.Hint) {
 			writeCode(w, "bad_request", "invalid host_name_hint")
-			return
+			return store.JoinToken{}, "", false
 		}
 		hint = body.Hint
 	}
@@ -49,24 +64,23 @@ func (s *Server) handleJoinCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if sec < 300 || sec > 604800 {
 		writeCode(w, "bad_request", "invalid expires_in_sec")
-		return
+		return store.JoinToken{}, "", false
 	}
 	plain, hash, err := secret.NewToken()
 	if err != nil {
 		s.fail(w, err)
-		return
+		return store.JoinToken{}, "", false
 	}
 	now := s.now()
-	tok, err := s.Store.CreateJoinToken(r.Context(), id, hash, hint, p.User.ID, now.Add(time.Duration(sec)*time.Second), now)
+	tok, err := s.Store.CreateJoinToken(r.Context(), orgID, hash, hint, body.Grant, p.User.ID, now.Add(time.Duration(sec)*time.Second), now)
 	if err != nil {
 		s.fail(w, err)
-		return
+		return store.JoinToken{}, "", false
 	}
-	s.auditOK(r.Context(), p, store.AuditRow{
-		ProjectID: idPtr(id),
-		Action:    audit.ActionJoinCreate,
-		Detail:    map[string]any{"token_id": tok.ID.String()},
-	})
+	return tok, plain, true
+}
+
+func (s *Server) writeJoinToken(w http.ResponseWriter, tok store.JoinToken, plain string) {
 	writeOK(w, http.StatusCreated, struct {
 		store.JoinToken
 		Token          string `json:"token"`
@@ -76,6 +90,40 @@ func (s *Server) handleJoinCreate(w http.ResponseWriter, r *http.Request) {
 		Token:          plain,
 		InstallCommand: installCommand(s.AgentWSURL, plain),
 	})
+}
+
+// handleJoinCreate is the v1.0 project route kept for one release (v1.24
+// item 3): org admin+ of the project's org; it creates an org token that
+// grants this project deploy.
+func (s *Server) handleJoinCreate(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.require(w, r)
+	if !ok {
+		return
+	}
+	id, ok := s.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	orgID, ok := s.projectOrgAdmin(w, r, p, id, audit.ActionJoinCreate)
+	if !ok {
+		return
+	}
+	var body joinTokenBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	body.Grant = &store.TokenGrant{ProjectID: id, Level: authz.LevelDeploy}
+	tok, plain, ok := s.newJoinToken(w, r, p, orgID, body)
+	if !ok {
+		return
+	}
+	s.auditOK(r.Context(), p, store.AuditRow{
+		OrgID:     idPtr(orgID),
+		ProjectID: idPtr(id),
+		Action:    audit.ActionJoinCreate,
+		Detail:    map[string]any{"token_id": tok.ID.String()},
+	})
+	s.writeJoinToken(w, tok, plain)
 }
 
 // installCommand is the v1.0.2 shell line. The token is written to stdin, not argv.
@@ -92,8 +140,8 @@ func (s *Server) handleJoinList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := authz.Authorize(r.Context(), p.User.ID, id, authz.CapJoinToken); err != nil {
-		s.deny(w, r, p, idPtr(id), nil, nil, "", err)
+	orgID, ok := s.projectOrgAdmin(w, r, p, id, "")
+	if !ok {
 		return
 	}
 	limit, ok := s.limit(w, r)
@@ -104,7 +152,7 @@ func (s *Server) handleJoinList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, next, err := s.Store.ListJoinTokens(r.Context(), id, limit, cur)
+	items, next, err := s.Store.ListJoinTokens(r.Context(), orgID, &id, limit, cur)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -125,15 +173,16 @@ func (s *Server) handleJoinRevoke(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := authz.Authorize(r.Context(), p.User.ID, id, authz.CapJoinToken); err != nil {
-		s.deny(w, r, p, idPtr(id), nil, nil, audit.ActionJoinRevoke, err)
+	orgID, ok := s.projectOrgAdmin(w, r, p, id, audit.ActionJoinRevoke)
+	if !ok {
 		return
 	}
-	if err := s.Store.RevokeJoinToken(r.Context(), id, tokenID, s.now()); err != nil {
+	if err := s.Store.RevokeJoinToken(r.Context(), orgID, &id, tokenID, s.now()); err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.auditOK(r.Context(), p, store.AuditRow{
+		OrgID:     idPtr(orgID),
 		ProjectID: idPtr(id),
 		Action:    audit.ActionJoinRevoke,
 		Detail:    map[string]any{"token_id": tokenID.String()},
@@ -172,11 +221,74 @@ func (s *Server) handleHostList(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	orgAdmin, err := s.isOrgAdmin(r, viewer.OrgID, p.User.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	orgAdmin = orgAdmin && p.Session.Kind != store.KindDelegated
+	mirror := s.newMirrorFilter(r, p.User.ID, orgAdmin)
 	for i := range items {
+		level := ""
+		if items[i].AccessLevel != nil {
+			level = *items[i].AccessLevel
+		}
+		items[i] = withAccessLevel(items[i], level)
 		items[i].Status = s.hostStatus(items[i])
-		items[i] = projectsView(items[i], id, viewer.Slug)
+		items[i] = projectsView(items[i], id, viewer.Slug, orgAdmin)
+		if items[i], err = mirror.apply(items[i]); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	writeList(w, items, next)
+}
+
+// mirrorFilter hides the deprecated Host.project_id mirror (review A6): it
+// is returned only to org owners and admins and to members of that project.
+// Membership answers are cached per request.
+type mirrorFilter struct {
+	s        *Server
+	r        *http.Request
+	userID   uuid.UUID
+	orgAdmin bool
+	member   map[uuid.UUID]bool
+}
+
+func (s *Server) newMirrorFilter(r *http.Request, userID uuid.UUID, orgAdmin bool) *mirrorFilter {
+	return &mirrorFilter{s: s, r: r, userID: userID, orgAdmin: orgAdmin, member: map[uuid.UUID]bool{}}
+}
+
+func (f *mirrorFilter) apply(h store.Host) (store.Host, error) {
+	if h.ProjectID == nil || f.orgAdmin {
+		return h, nil
+	}
+	pid := *h.ProjectID
+	ok, seen := f.member[pid]
+	if !seen {
+		_, err := f.s.Store.Role(f.r.Context(), pid, f.userID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return h, err
+		}
+		ok = err == nil
+		f.member[pid] = ok
+	}
+	if !ok {
+		h.ProjectID = nil
+	}
+	return h, nil
+}
+
+// isOrgAdmin reports whether the user owns or administers the org.
+func (s *Server) isOrgAdmin(r *http.Request, orgID, userID uuid.UUID) (bool, error) {
+	role, err := s.Store.OrgRole(r.Context(), orgID, userID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return store.OrgAdmin(role), nil
 }
 
 func (s *Server) handleHostGet(w http.ResponseWriter, r *http.Request) {
@@ -188,31 +300,41 @@ func (s *Server) handleHostGet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	host = withRelation(host, rel)
+	host = withAccessLevel(host, authz.HighestLevel(rel.Access))
 	host.Status = s.hostStatus(host)
-	viewer, slug, err := s.hostViewer(r, host, rel)
+	// A delegated (MCP) session never gets access or the allowlist (review A5).
+	orgView := rel.OrgAdmin() && p.Session.Kind != store.KindDelegated
+	if orgView {
+		access, err := s.Store.ListHostAccess(r.Context(), host.ID)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		host.Access = &access
+	}
+	viewer, slug, err := s.hostViewer(r, rel)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeOK(w, http.StatusOK, projectsView(host, viewer, slug))
+	host, err = s.newMirrorFilter(r, p.User.ID, rel.OrgAdmin()).apply(host)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, projectsView(host, viewer, slug, orgView))
 }
 
-// hostViewer is the project whose view GET /v1/hosts/{id} shows: the owning
-// project for its members, or the caller's one sharing project. A caller in
-// several sharing projects gets uuid.Nil, so project_listed stays null.
-func (s *Server) hostViewer(r *http.Request, host store.Host, rel authz.Relation) (uuid.UUID, string, error) {
+// hostViewer is the project whose view GET /v1/hosts/{id} shows: the
+// caller's one project with access. A caller in several projects with
+// access, or in none, gets uuid.Nil, so project_listed stays null.
+func (s *Server) hostViewer(r *http.Request, rel authz.Relation) (uuid.UUID, string, error) {
 	viewer := uuid.Nil
-	switch rel.Kind {
-	case authz.RelOwner:
-		viewer = host.ProjectID
-	case authz.RelShare:
-		for _, sh := range rel.Shares {
-			if viewer != uuid.Nil && sh.ProjectID != viewer {
-				return uuid.Nil, "", nil
-			}
-			viewer = sh.ProjectID
+	for _, a := range rel.Access {
+		if viewer != uuid.Nil && a.ProjectID != viewer {
+			return uuid.Nil, "", nil
 		}
+		viewer = a.ProjectID
 	}
 	if viewer == uuid.Nil {
 		return uuid.Nil, "", nil
@@ -224,11 +346,11 @@ func (s *Server) hostViewer(r *http.Request, host store.Host, rel authz.Relation
 	return viewer, project.Slug, nil
 }
 
-// projectsView applies api-v1 v1.23 item 1 for the viewing project: the
-// projects allowlist only for the owning project, and project_listed for the
+// projectsView applies api-v1 v1.23 item 1 as amended by v1.24 item 3:
+// the projects allowlist only for org admins, and project_listed for the
 // viewer's slug (null when the list is unknown or the viewer is unknown).
 // Programs is copied, never changed in place.
-func projectsView(h store.Host, viewer uuid.UUID, slug string) store.Host {
+func projectsView(h store.Host, viewer uuid.UUID, slug string, orgAdmin bool) store.Host {
 	if h.Programs == nil {
 		return h
 	}
@@ -238,7 +360,7 @@ func projectsView(h store.Host, viewer uuid.UUID, slug string) store.Host {
 		listed := slices.Contains(cp.Projects, slug)
 		cp.ProjectListed = &listed
 	}
-	if viewer == uuid.Nil || viewer != h.ProjectID {
+	if !orgAdmin {
 		cp.Projects = nil
 	} else if cp.Projects != nil {
 		cp.Projects = append([]string{}, cp.Projects...)
@@ -262,11 +384,7 @@ func (s *Server) handleHostRevoke(w http.ResponseWriter, r *http.Request) {
 	if s.Hub != nil {
 		s.Hub.CloseHost(host.ID)
 	}
-	s.auditOK(r.Context(), p, store.AuditRow{
-		ProjectID: idPtr(host.ProjectID),
-		HostID:    idPtr(host.ID),
-		Action:    audit.ActionHostRevoke,
-	})
+	s.auditOK(r.Context(), p, hostAuditRow(host, nil, audit.ActionHostRevoke))
 	writeOK(w, http.StatusOK, nil)
 }
 

@@ -181,35 +181,6 @@ type CatalogGrant struct {
 	Actions []string `json:"actions"`
 }
 
-// CatalogApproval is a pending or approved run of one entry on one host.
-type CatalogApproval struct {
-	EntryID        uuid.UUID         `json:"entry_id"`
-	EntryName      string            `json:"entry_name"`
-	ProjectID      uuid.UUID         `json:"project_id"`
-	ProjectName    string            `json:"project_name"`
-	HostID         uuid.UUID         `json:"host_id"`
-	SpecHash       string            `json:"spec_hash"`
-	CommandDisplay string            `json:"command_display"`
-	Dir            string            `json:"dir"`
-	Exec           string            `json:"exec"`
-	Args           []string          `json:"args"`
-	Env            map[string]string `json:"env"`
-	// EnvSets and SecretEnv are the references (api-v1 v1.22 item 6), never
-	// a resolved value.
-	EnvSets   []string          `json:"env_sets"`
-	SecretEnv map[string]string `json:"secret_env"`
-	// EnvSetValues is filled by the API (api-v1 v1.22 amendment 1): plain
-	// taking-part keys and values per set of a program entry; {} otherwise.
-	EnvSetValues map[string]map[string]string `json:"env_set_values"`
-	RunAs        string                       `json:"run_as"`
-	Shell        bool                         `json:"shell"`
-	Status       string                       `json:"status"`
-	RequestedBy  uuid.UUID                    `json:"requested_by"`
-	RequestedAt  time.Time                    `json:"requested_at"`
-	ApprovedBy   *uuid.UUID                   `json:"approved_by"`
-	ApprovedAt   *time.Time                   `json:"approved_at"`
-}
-
 // CatalogConfirmation is a single-use delegated action, stored by token hash.
 type CatalogConfirmation struct {
 	UserID         uuid.UUID
@@ -235,8 +206,9 @@ type CatalogConfirmation struct {
 // catalog confirmations. Checks is the normalized set to apply. RequestHash
 // binds the request. CurrentHash binds the check set at issue time.
 type ServiceConfirmation struct {
-	UserID         uuid.UUID
-	ProjectID      uuid.UUID
+	UserID uuid.UUID
+	// ProjectID is the service's project; nil for an org-level service (api-v1 v1.24).
+	ProjectID      *uuid.UUID
 	ServiceID      uuid.UUID
 	Action         string
 	RequestHash    []byte
@@ -299,27 +271,29 @@ type DiscoveredOwner struct {
 }
 
 // PlaceDiscovered decides the service row for one reported item.
-// lookup reports the project id when that slug has a live catalog entry
-// of the given name and kind. A matching owner is stored as source owned.
+// lookup reports the project id when that slug names a live project in the
+// host's org with deploy access to the host and a live catalog entry of the
+// given name and kind (api-v1 v1.24 item 6). A matching owner is stored as
+// source owned. Anything else is an org-level discovered row: project nil.
 // A program owner that misses falls back to the unit name. An image owner
 // that misses keeps the reported container name.
-func PlaceDiscovered(item Discovered, hostProject uuid.UUID, lookup func(slug, entry, kind string) (uuid.UUID, bool)) (name, source string, projectID uuid.UUID, catalog *string) {
+func PlaceDiscovered(item Discovered, lookup func(slug, entry, kind string) (uuid.UUID, bool)) (name, source string, projectID *uuid.UUID, catalog *string) {
 	if item.Owner == nil || item.Owner.Project == "" || item.Owner.Entry == "" {
-		return item.Name, "discovered", hostProject, nil
+		return item.Name, "discovered", nil, nil
 	}
 	if item.Owner.Kind != "program" && item.Owner.Kind != "image" {
-		return item.Name, "discovered", hostProject, nil
+		return item.Name, "discovered", nil, nil
 	}
 	if id, ok := lookup(item.Owner.Project, item.Owner.Entry, item.Owner.Kind); ok {
 		ce := item.Owner.Entry
-		return item.Owner.Entry, "owned", id, &ce
+		return item.Owner.Entry, "owned", &id, &ce
 	}
 	if item.Owner.Kind == "image" {
-		return item.Name, "discovered", hostProject, nil
+		return item.Name, "discovered", nil, nil
 	}
 	name = item.Name
 	if item.SystemdUnit != nil && serviceNameRe.MatchString(*item.SystemdUnit) {
 		name = *item.SystemdUnit
 	}
-	return name, "discovered", hostProject, nil
+	return name, "discovered", nil, nil
 }

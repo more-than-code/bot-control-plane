@@ -83,6 +83,7 @@ func TestCatalogWriteConfirmationsMigration(t *testing.T) {
 	if url == "" {
 		t.Skip()
 	}
+	lockMigrations(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	d, err := Open(ctx, url)
@@ -172,12 +173,6 @@ SELECT token_hash, body::text FROM app.catalog_write_confirmations WHERE entry_n
 		t.Fatalf("second create commit %v", err)
 	}
 
-	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, entry.SpecHash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
-	if catalogApprovalCount(t, d, ctx, entry.ID) != 1 {
-		t.Fatal("approval missing")
-	}
 	next := dbImageWrite(t, "web", `{"kind":"service","image":"nginx:1.27"}`, owner.ID, at)
 	_, staleHash, err := secret.NewToken()
 	if err != nil {
@@ -218,13 +213,7 @@ SELECT token_hash, body::text FROM app.catalog_write_confirmations WHERE entry_n
 	if _, err := d.GetCatalogWriteConfirmation(ctx, updHash); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("applied update kept the plan %v", err)
 	}
-	if catalogApprovalCount(t, d, ctx, entry.ID) != 0 {
-		t.Fatal("update did not void the approval")
-	}
 
-	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, updated.SpecHash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
 	_, delHash, err := secret.NewToken()
 	if err != nil {
 		t.Fatal(err)
@@ -244,9 +233,6 @@ SELECT token_hash, body::text FROM app.catalog_write_confirmations WHERE entry_n
 	}
 	if _, err := d.GetCatalogEntry(ctx, project.ID, "web"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted entry %v", err)
-	}
-	if catalogApprovalCount(t, d, ctx, entry.ID) != 0 {
-		t.Fatal("delete left an approval")
 	}
 	var grants int
 	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM app.catalog_grants WHERE entry_id = $1::uuid`, entry.ID.String()).Scan(&grants); err != nil || grants != 0 {
@@ -306,7 +292,7 @@ SELECT token_hash, body::text FROM app.catalog_write_confirmations WHERE entry_n
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.DeleteProject(ctx, dropProject.ID, at); err != nil {
+	if err := d.DeleteProject(ctx, dropProject.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.GetCatalogWriteConfirmation(ctx, dropHash); !errors.Is(err, store.ErrNotFound) {

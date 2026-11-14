@@ -192,7 +192,7 @@ func assertEnvKeyUpsertDelete(t *testing.T, d *DB, ctx context.Context, at time.
 	t.Helper()
 	owner := catalogUser(t, d, ctx, "env-key", at)
 	home := catalogProject(t, d, ctx, owner.ID, "Keys", "envkey", at)
-	host := enrollHostDB(t, d, ctx, home.ID, owner.ID, "key-host", at)
+	_ = enrollHostDB(t, d, ctx, home.ID, owner.ID, "key-host", at)
 	box, err := seal.New(bytes.Repeat([]byte{4}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -222,14 +222,11 @@ func assertEnvKeyUpsertDelete(t *testing.T, d *DB, ctx context.Context, at time.
 		t.Fatal(err)
 	}
 	hash := catalog.ImageHash(img, map[string]string{"svc": catalog.EnvKeyDigest([]string{"NOTE", "TOKEN"})})
-	entry, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+	_, err = d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "web", Kind: "image", ImageRaw: []byte(catalog.SpecJSON(img)),
 		SpecHash: hash, CommandDisplay: img.Image, Actor: owner.ID, At: at,
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	before := envRows(t, d, ctx, home.ID, "svc")
@@ -240,8 +237,8 @@ func assertEnvKeyUpsertDelete(t *testing.T, d *DB, ctx context.Context, at time.
 	}
 	got, err := d.GetCatalogEntry(ctx, home.ID, "web")
 	view, err2 := d.GetEnvSet(ctx, home.ID, "svc")
-	if err != nil || err2 != nil || got.SpecHash != hash || catalogApprovalCount(t, d, ctx, entry.ID) != 1 || !view.UpdatedAt.Equal(at.Add(time.Minute)) {
-		t.Fatalf("value-only hash %s approvals %d at %s %v", got.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), view.UpdatedAt, err)
+	if err != nil || err2 != nil || got.SpecHash != hash || !view.UpdatedAt.Equal(at.Add(time.Minute)) {
+		t.Fatalf("value-only hash %s at %s %v", got.SpecHash, view.UpdatedAt, err)
 	}
 	token := envRows(t, d, ctx, home.ID, "svc")["TOKEN"]
 	if bytes.Equal(token.Nonce, before["TOKEN"].Nonce) || token.Plain != "" {
@@ -302,18 +299,15 @@ func assertEnvKeyUpsertDelete(t *testing.T, d *DB, ctx context.Context, at time.
 		t.Fatalf("add %#v %v %v", extra, created, err)
 	}
 	got, err = d.GetCatalogEntry(ctx, home.ID, "web")
-	if err != nil || got.SpecHash == hash || catalogApprovalCount(t, d, ctx, entry.ID) != 0 {
-		t.Fatalf("add hash %s approvals %d %v", got.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), err)
-	}
-	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, got.SpecHash, owner.ID, at); err != nil {
-		t.Fatal(err)
+	if err != nil || got.SpecHash == hash {
+		t.Fatalf("add hash %s %v", got.SpecHash, err)
 	}
 	if err := d.DeleteEnvKey(ctx, home.ID, "svc", "EXTRA", owner.ID, at.Add(5*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	got, err = d.GetCatalogEntry(ctx, home.ID, "web")
-	if err != nil || got.SpecHash != hash || catalogApprovalCount(t, d, ctx, entry.ID) != 0 {
-		t.Fatalf("delete hash %s approvals %d %v", got.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	if err != nil || got.SpecHash != hash {
+		t.Fatalf("delete hash %s %v", got.SpecHash, err)
 	}
 	if err := d.DeleteEnvKey(ctx, home.ID, "svc", "GONE", owner.ID, at); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing key %v", err)
@@ -367,7 +361,7 @@ func assertEnvMergeCreate(t *testing.T, d *DB, ctx context.Context, at time.Time
 	t.Helper()
 	owner := catalogUser(t, d, ctx, "env-merge", at)
 	home := catalogProject(t, d, ctx, owner.ID, "Merge", "envmerge", at)
-	host := enrollHostDB(t, d, ctx, home.ID, owner.ID, "merge-host", at)
+	_ = enrollHostDB(t, d, ctx, home.ID, owner.ID, "merge-host", at)
 	box, err := seal.New(bytes.Repeat([]byte{5}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -422,14 +416,11 @@ func assertEnvMergeCreate(t *testing.T, d *DB, ctx context.Context, at time.Time
 		t.Fatal(err)
 	}
 	hash := catalog.ImageHash(img, map[string]string{"svc": catalog.EnvKeyDigest([]string{"NOTE", "TOKEN", "VIS"})})
-	entry, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+	_, err = d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "web", Kind: "image", ImageRaw: []byte(catalog.SpecJSON(img)),
 		SpecHash: hash, CommandDisplay: img.Image, Actor: owner.ID, At: at,
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
 		t.Fatal(err)
 	}
 
@@ -460,8 +451,8 @@ func assertEnvMergeCreate(t *testing.T, d *DB, ctx context.Context, at time.Time
 		t.Fatalf("value merge rows %#v", rows)
 	}
 	got, err := d.GetCatalogEntry(ctx, home.ID, "web")
-	if err != nil || got.SpecHash != hash || catalogApprovalCount(t, d, ctx, entry.ID) != 1 {
-		t.Fatalf("value merge hash %s approvals %d %v", got.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	if err != nil || got.SpecHash != hash {
+		t.Fatalf("value merge hash %s %v", got.SpecHash, err)
 	}
 
 	// A merge adding names follows newKeysSecret and voids the approval;
@@ -475,8 +466,8 @@ func assertEnvMergeCreate(t *testing.T, d *DB, ctx context.Context, at time.Time
 		t.Fatalf("add merge rows %#v", rows)
 	}
 	got, err = d.GetCatalogEntry(ctx, home.ID, "web")
-	if err != nil || got.SpecHash == hash || catalogApprovalCount(t, d, ctx, entry.ID) != 0 {
-		t.Fatalf("add merge hash %s approvals %d %v", got.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	if err != nil || got.SpecHash == hash {
+		t.Fatalf("add merge hash %s %v", got.SpecHash, err)
 	}
 }
 
@@ -545,9 +536,6 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key = 'TOKEN'
 	if plain != nil || bytes.Contains(stored, []byte("db-secret-value")) {
 		t.Fatal("env value stored in the clear")
 	}
-	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
 	nonce2, ct2, err := box.Seal(seal.EnvAAD(home.ID.String(), "svc", "TOKEN"), []byte("other-secret-value"))
 	if err != nil {
 		t.Fatal(err)
@@ -558,8 +546,8 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key = 'TOKEN'
 		t.Fatal(err)
 	}
 	same, err := d.GetCatalogEntry(ctx, home.ID, "web")
-	if err != nil || same.SpecHash != hash || catalogApprovalCount(t, d, ctx, entry.ID) != 1 {
-		t.Fatalf("value change hash %s approvals %d %v", same.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	if err != nil || same.SpecHash != hash {
+		t.Fatalf("value change hash %s %v", same.SpecHash, err)
 	}
 	nA, cA, err := box.Seal(seal.EnvAAD(home.ID.String(), "svc", "TOKEN"), []byte("db-secret-value"))
 	if err != nil {
@@ -576,8 +564,8 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key = 'TOKEN'
 		t.Fatal(err)
 	}
 	changed, err := d.GetCatalogEntry(ctx, home.ID, "web")
-	if err != nil || changed.SpecHash == hash || catalogApprovalCount(t, d, ctx, entry.ID) != 0 {
-		t.Fatalf("key add hash %s approvals %d %v", changed.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	if err != nil || changed.SpecHash == hash {
+		t.Fatalf("key add hash %s %v", changed.SpecHash, err)
 	}
 	rn, rc, err := box.Seal(seal.RegistryAAD(home.ID.String(), "ghcr.io"), []byte("registry-token-value"))
 	if err != nil {
@@ -715,7 +703,7 @@ VALUES ($1::uuid, 'svc', 'LEAK', true, 'plain-and-secret')
 	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
 		t.Fatalf("form check insert %v", err)
 	}
-	if _, err := d.DeleteProject(ctx, home.ID, at.Add(time.Minute)); err != nil {
+	if err := d.DeleteProject(ctx, home.ID, at.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	var n int

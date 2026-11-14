@@ -37,11 +37,7 @@ func TestEnvKeysSecret(t *testing.T) {
 	putEnvFlag(t, w, tok, project, "svc", "LONG="+plainLong+"\nSHORT="+plainShort+"\nSTAY="+plainStay+"\n", false)
 	putKey(t, w, tok, project, "svc", "TOKEN", envSecret, nil)
 
-	created := createImage(t, w, tok, sc.project.ID, "web", `{"kind":"service","image":"nginx","env_sets":["svc"]}`)
-	hash, _ := created["spec_hash"].(string)
-	entryID, _ := created["id"].(string)
-	status, env, _ := mustCall(t, w, tok, http.MethodPost, "/v1/hosts/"+sc.host.ID.String()+"/catalog-approvals", `{"entry_id":"`+entryID+`","spec_hash":"`+hash+`"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	createImage(t, w, tok, sc.project.ID, "web", `{"kind":"service","image":"nginx","env_sets":["svc"]}`)
 	before, err := w.mem.GetEnvSet(context.Background(), sc.project.ID, "svc")
 	if err != nil {
 		t.Fatal(err)
@@ -128,9 +124,6 @@ func TestEnvKeysSecret(t *testing.T) {
 				t.Fatalf("audit row %s held a test value", row.Action)
 			}
 		}
-	}
-	if createImageGet(t, w, tok, sc.project.ID, "web")["spec_hash"] != hash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 1 {
-		t.Fatal("make secret changed the hash or dropped the approval")
 	}
 
 	// A repeat changes nothing: no audit rows and no updated_at move.

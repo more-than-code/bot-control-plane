@@ -32,7 +32,7 @@ func TestDockerHealthGateAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := st.CreateProject(ctx, user.ID, "P", "p", now())
+	project, err := st.CreateProject(ctx, st.PersonalOrg(user.ID), user.ID, "P", "p", now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestDockerHealthGateAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateJoinToken(ctx, project.ID, joinHash, nil, user.ID, now().Add(time.Hour), now()); err != nil {
+	if _, err := st.CreateJoinToken(ctx, project.OrgID, joinHash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, user.ID, now().Add(time.Hour), now()); err != nil {
 		t.Fatal(err)
 	}
 	enrollConn := dial(t, url, "")

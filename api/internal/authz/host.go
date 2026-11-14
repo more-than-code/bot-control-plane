@@ -8,92 +8,94 @@ import (
 )
 
 const (
-	RelOwner = "owner"
-	RelShare = "share"
-	RelNone  = "none"
-
-	ShareMetrics = "metrics"
-	ShareDeploy  = "deploy"
+	LevelMetrics = "metrics"
+	LevelDeploy  = "deploy"
 
 	// Host and service capabilities. AuthorizeHost is the check.
 	// Project routes keep using Authorize.
-	// CapHostView is any relation to the host. It covers seeing the host,
-	// its status and metrics, the full process list, and host snapshot.
+	// CapHostView covers seeing the host, its status and metrics, the full
+	// process list, and host snapshot.
 	CapHostView     = "host_view"
 	CapHostServices = "host_services"
 	CapServiceRead  = "service_read"
-	// CapServiceWrite is the service edit capability in spec-shared-hosts §4:
-	// an owner admin+, or a deploy-share admin for that service's own project.
-	// Health-check replacement and PATCH display_name both use it.
+	// CapServiceWrite is deploy, run, stop, health-check edits and rename
+	// (api-v1 v1.24 item 2): an org admin+, or an admin+ of a deploy project
+	// for that service's own project.
 	CapServiceWrite = "service_write"
-	CapHostAdmin    = "host_admin"
+	// CapHostAdmin is credential revoke, access grants and join tokens: org admin+.
+	CapHostAdmin = "host_admin"
 )
 
-// Share is one project this caller belongs to that the host is shared with.
-type Share struct {
+// Access is one project with access to the host that the caller belongs to,
+// with the caller's role in that project.
+type Access struct {
 	ProjectID uuid.UUID
 	Level     string
 	Role      string
 }
 
-// Relation is one user's access to one host. Kind is owner, share, or none.
-// Shares holds every share the caller belongs to. Owner wins when the user is
-// also a member of the owning project: Shares is then empty.
+// Relation is one user's standing on one host (spec-organizations §3.2).
+// OrgRole is the caller's role in the host's org ("" when none). Access is
+// every project with access to the host that the caller is a member of.
 type Relation struct {
-	Kind      string
-	OwnerRole string
-	Shares    []Share
+	OrgID   uuid.UUID
+	OrgRole string
+	Access  []Access
 }
 
-// Relate builds a relation. A non-empty owner role wins and drops every share.
-func Relate(ownerRole string, shares []Share) Relation {
-	if ownerRole != "" {
-		return Relation{Kind: RelOwner, OwnerRole: ownerRole}
-	}
-	kept := make([]Share, 0, len(shares))
-	for _, sh := range shares {
-		if sh.ProjectID == uuid.Nil {
+// Relate builds a relation and drops access rows that are not usable.
+func Relate(orgID uuid.UUID, orgRole string, access []Access) Relation {
+	kept := make([]Access, 0, len(access))
+	for _, a := range access {
+		if a.ProjectID == uuid.Nil || a.Role == "" {
 			continue
 		}
-		if sh.Level != ShareMetrics && sh.Level != ShareDeploy {
+		if a.Level != LevelMetrics && a.Level != LevelDeploy {
 			continue
 		}
-		kept = append(kept, sh)
+		kept = append(kept, a)
 	}
-	if len(kept) == 0 {
-		return Relation{Kind: RelNone}
-	}
-	return Relation{Kind: RelShare, Shares: kept}
+	return Relation{OrgID: orgID, OrgRole: orgRole, Access: kept}
 }
 
-// HighestShareLevel is deploy when any share is deploy, otherwise metrics.
-// An empty list returns "".
-func HighestShareLevel(shares []Share) string {
+// OrgAdmin reports whether the caller owns or administers the host's org.
+func (rel Relation) OrgAdmin() bool {
+	return orgAdminRole(rel.OrgRole)
+}
+
+// Sees reports whether the caller can see the host at all.
+func (rel Relation) Sees() bool {
+	return rel.OrgAdmin() || len(rel.Access) > 0
+}
+
+// HighestLevel is deploy when any of the caller's access rows is deploy,
+// otherwise metrics. No rows returns "".
+func HighestLevel(access []Access) string {
 	level := ""
-	for _, sh := range shares {
-		if sh.Level == ShareDeploy {
-			return ShareDeploy
+	for _, a := range access {
+		if a.Level == LevelDeploy {
+			return LevelDeploy
 		}
-		if sh.Level == ShareMetrics {
-			level = ShareMetrics
+		if a.Level == LevelMetrics {
+			level = LevelMetrics
 		}
 	}
 	return level
 }
 
 // ServiceProjectFilter is the project set for the service list.
-// Nil means every service on the host (an owner). A share returns the
-// deploy-level project ids only. That slice is empty when none of the
-// shares are deploy, and an empty slice matches no rows.
+// Nil means every service on the host, org-level rows included (an org
+// admin). Otherwise it is the caller's deploy projects; the slice is empty
+// when there are none, and an empty slice matches no rows.
 // The process list is not filtered: it uses CapHostView.
 func ServiceProjectFilter(rel Relation) []uuid.UUID {
-	if rel.Kind != RelShare {
+	if rel.OrgAdmin() {
 		return nil
 	}
-	ids := make([]uuid.UUID, 0, len(rel.Shares))
-	for _, sh := range rel.Shares {
-		if sh.Level == ShareDeploy && sh.ProjectID != uuid.Nil {
-			ids = append(ids, sh.ProjectID)
+	ids := make([]uuid.UUID, 0, len(rel.Access))
+	for _, a := range rel.Access {
+		if a.Level == LevelDeploy {
+			ids = append(ids, a.ProjectID)
 		}
 	}
 	return ids
@@ -119,118 +121,93 @@ func HostRelation(ctx context.Context, userID, hostID uuid.UUID) (Relation, erro
 	if lookup == nil {
 		return Relation{}, errors.New("authz host lookup is not configured")
 	}
-	rel, err := lookup(ctx, userID, hostID)
-	if err != nil {
-		return Relation{}, err
-	}
-	if rel.Kind == "" {
-		rel.Kind = RelNone
-	}
-	return rel, nil
+	return lookup(ctx, userID, hostID)
 }
 
 // AuthorizeHost decides whether rel may use capability.
-// serviceProjectID is the service's project for service_read and service_write.
-// It is ignored for host-level capabilities. None is not_found. A relation
-// that is too weak is forbidden.
-func AuthorizeHost(rel Relation, capability string, serviceProjectID uuid.UUID) error {
-	if rel.Kind != RelOwner && rel.Kind != RelShare {
+// serviceProject is the service's project for service_read and
+// service_write; nil is an org-level service. It is ignored for host-level
+// capabilities. A caller who cannot see the host is not_found. One who is
+// too weak is forbidden.
+func AuthorizeHost(rel Relation, capability string, serviceProject *uuid.UUID) error {
+	if !rel.Sees() {
 		return &Denied{Code: "not_found"}
 	}
-	if !hostAllows(rel, capability, serviceProjectID) {
+	if !hostAllows(rel, capability, serviceProject) {
 		return &Denied{Code: "forbidden"}
 	}
 	return nil
 }
 
-// AuthorizeUnshare decides whether rel may remove the share with targetProjectID.
-// An owner admin may remove any share. An admin of that sharing project may
-// remove it (leave the share), including when they are also an owner-project
-// viewer. None is not_found.
-func AuthorizeUnshare(rel Relation, targetProjectID uuid.UUID, targetRole string, targetMember bool) error {
-	if rel.Kind != RelOwner && rel.Kind != RelShare {
+// AuthorizeAccessRemove decides whether rel may remove targetProjectID's
+// access (api-v1 v1.24 item 3): an org admin+, or an admin+ of that project
+// leaving. projectRole is the caller's role in that project ("" when none).
+// A caller who cannot see the host is not_found.
+func AuthorizeAccessRemove(rel Relation, projectRole string) error {
+	if !rel.Sees() {
 		return &Denied{Code: "not_found"}
 	}
-	if rel.Kind == RelOwner && adminRole(rel.OwnerRole) {
-		return nil
-	}
-	if targetMember && targetProjectID != uuid.Nil && adminRole(targetRole) {
+	if rel.OrgAdmin() || adminRole(projectRole) {
 		return nil
 	}
 	return &Denied{Code: "forbidden"}
 }
 
-func hostAllows(rel Relation, capability string, serviceProjectID uuid.UUID) bool {
-	owner := rel.Kind == RelOwner
-	share := rel.Kind == RelShare
+func hostAllows(rel Relation, capability string, serviceProject *uuid.UUID) bool {
+	if rel.OrgAdmin() {
+		switch capability {
+		case CapHostView, CapHostServices, CapServiceRead, CapServiceWrite, CapHostAdmin:
+			return true
+		default:
+			return false
+		}
+	}
 	switch capability {
 	case CapHostView:
-		return owner || share
+		return len(rel.Access) > 0
 	case CapHostServices:
-		return owner || hasLevel(rel, ShareDeploy)
+		return HighestLevel(rel.Access) == LevelDeploy
 	case CapServiceRead:
-		_, ok := deployShare(rel, serviceProjectID)
-		return owner || ok
+		_, ok := deployAccess(rel, serviceProject)
+		return ok
 	case CapServiceWrite:
-		if owner {
-			return adminRole(rel.OwnerRole)
-		}
-		sh, ok := deployShare(rel, serviceProjectID)
-		return ok && adminRole(sh.Role)
-	case CapHostAdmin:
-		return owner && adminRole(rel.OwnerRole)
+		a, ok := deployAccess(rel, serviceProject)
+		return ok && adminRole(a.Role)
 	default:
 		return false
 	}
 }
 
-// deployShare is the caller's deploy share for this service's project.
-// A metrics share of that project, or no share of it, does not match.
-func deployShare(rel Relation, projectID uuid.UUID) (Share, bool) {
-	if rel.Kind != RelShare || projectID == uuid.Nil {
-		return Share{}, false
+// deployAccess is the caller's deploy row for this service's project.
+// An org-level service (nil), a metrics row, or no row does not match.
+func deployAccess(rel Relation, projectID *uuid.UUID) (Access, bool) {
+	if projectID == nil || *projectID == uuid.Nil {
+		return Access{}, false
 	}
-	for _, sh := range rel.Shares {
-		if sh.ProjectID == projectID && sh.Level == ShareDeploy {
-			return sh, true
+	for _, a := range rel.Access {
+		if a.ProjectID == *projectID && a.Level == LevelDeploy {
+			return a, true
 		}
 	}
-	return Share{}, false
-}
-
-func hasLevel(rel Relation, level string) bool {
-	if rel.Kind != RelShare {
-		return false
-	}
-	for _, sh := range rel.Shares {
-		if sh.Level == level {
-			return true
-		}
-	}
-	return false
+	return Access{}, false
 }
 
 func adminRole(role string) bool {
 	return role == RoleOwner || role == RoleAdmin
 }
 
-// ProjectServiceVisible is the v1.3 project-services row rule.
-// owned is true when projectID owns the host. shareLevel is that host's
-// share with projectID, or "" when there is no share. Owning the host
-// shows every service on it. A deploy share shows only services whose
-// project is projectID. A metrics share shows none.
-func ProjectServiceVisible(owned bool, shareLevel string, serviceProject, projectID uuid.UUID) bool {
-	if projectID == uuid.Nil {
+// ProjectServiceVisible is the v1.3 project-services row rule under v1.24:
+// a project sees its own services on hosts where it has deploy access.
+// Org-level rows (nil project) are never in a project list.
+func ProjectServiceVisible(level string, serviceProject *uuid.UUID, projectID uuid.UUID) bool {
+	if projectID == uuid.Nil || serviceProject == nil {
 		return false
 	}
-	if owned {
-		return true
-	}
-	return shareLevel == ShareDeploy && serviceProject == projectID
+	return level == LevelDeploy && *serviceProject == projectID
 }
 
 // ProjectHostReached reports whether a project services list may filter
-// to this host. Metrics shares and hosts with no relation are not reached.
-func ProjectHostReached(owned bool, shareLevel string) bool {
-	return owned || shareLevel == ShareDeploy
+// to this host: the project has deploy access.
+func ProjectHostReached(level string) bool {
+	return level == LevelDeploy
 }

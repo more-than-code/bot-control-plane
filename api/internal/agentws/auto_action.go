@@ -4,6 +4,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 	"github.com/more-than-code/bot-control-plane/api/internal/ingest"
@@ -185,14 +187,18 @@ func (ac *agentConn) allowAuto(now time.Time) bool {
 
 func (h *Hub) recordAutoAudit(ac *agentConn, target store.AutoTarget, in ingest.AutoAction) {
 	hostName := ""
+	var orgID *uuid.UUID
 	if host, err := h.st.GetHost(ac.parent, ac.hostID); err == nil {
 		hostName = host.Name
+		org := host.OrgID
+		orgID = &org
 	}
 	projectID := target.ProjectID
 	hostID := ac.hostID
 	result := in.Result
 	row := store.AuditRow{
 		Via:       audit.ViaAgent,
+		OrgID:     orgID,
 		ProjectID: &projectID,
 		HostID:    &hostID,
 		Action:    autoAuditActions[in.Action],

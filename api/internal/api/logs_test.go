@@ -28,7 +28,7 @@ func TestLogsOmitSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := st.CreateProject(t.Context(), user.ID, "Lab", "lab", now)
+	project, err := st.CreateProject(t.Context(), st.PersonalOrg(user.ID), user.ID, "Lab", "lab", now)
 	if err != nil {
 		t.Fatal(err)
 	}

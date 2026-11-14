@@ -137,7 +137,7 @@ func TestInviteAcceptKeepsMember(t *testing.T) {
 
 func TestInviteDeleteProjectRemovesRows(t *testing.T) {
 	m, owner, project, at := inviteFixture(t)
-	other, err := m.CreateProject(context.Background(), owner.ID, "Other", "other", at)
+	other, err := m.CreateProject(context.Background(), m.PersonalOrg(owner.ID), owner.ID, "Other", "other", at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestInviteDeleteProjectRemovesRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.DeleteProject(context.Background(), project.ID, at); err != nil {
+	if err := m.DeleteProject(context.Background(), project.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := m.invites[inv.ID]; ok {
@@ -183,7 +183,7 @@ func inviteFixture(t *testing.T) (*Mem, store.User, store.Project, time.Time) {
 	m := New()
 	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	owner := inviteUser(t, m, at, -1)
-	project, err := m.CreateProject(context.Background(), owner.ID, "Lab", "lab", at)
+	project, err := m.CreateProject(context.Background(), m.PersonalOrg(owner.ID), owner.ID, "Lab", "lab", at)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -8,10 +9,10 @@ import (
 )
 
 func TestMigrationSkipsDownScript(t *testing.T) {
-	if numberedSQL("0003_shared_hosts.down.sql") || numberedSQL("0004_service_names.down.sql") || numberedSQL("0005_mcp_oauth.down.sql") || numberedSQL("0006_invites.down.sql") || numberedSQL("0007_catalog.down.sql") || numberedSQL("0008_service_gone.down.sql") || numberedSQL("0009_catalog_images.down.sql") || numberedSQL("0010_project_files.down.sql") || numberedSQL("0011_service_confirmations.down.sql") || numberedSQL("0012_revoked_host_rows.down.sql") || numberedSQL("0013_catalog_write_confirmations.down.sql") || numberedSQL("0014_auto_actions.down.sql") {
+	if numberedSQL("0003_shared_hosts.down.sql") || numberedSQL("0004_service_names.down.sql") || numberedSQL("0005_mcp_oauth.down.sql") || numberedSQL("0006_invites.down.sql") || numberedSQL("0007_catalog.down.sql") || numberedSQL("0008_service_gone.down.sql") || numberedSQL("0009_catalog_images.down.sql") || numberedSQL("0010_project_files.down.sql") || numberedSQL("0011_service_confirmations.down.sql") || numberedSQL("0012_revoked_host_rows.down.sql") || numberedSQL("0013_catalog_write_confirmations.down.sql") || numberedSQL("0014_auto_actions.down.sql") || numberedSQL("0015_orgs.down.sql") {
 		t.Fatal("down script is numbered SQL")
 	}
-	if !numberedSQL("0003_shared_hosts.sql") || !numberedSQL("0004_service_names.sql") || !numberedSQL("0005_mcp_oauth.sql") || !numberedSQL("0006_invites.sql") || !numberedSQL("0007_catalog.sql") || !numberedSQL("0008_service_gone.sql") || !numberedSQL("0009_catalog_images.sql") || !numberedSQL("0010_project_files.sql") || !numberedSQL("0011_service_confirmations.sql") || !numberedSQL("0012_revoked_host_rows.sql") || !numberedSQL("0013_catalog_write_confirmations.sql") || !numberedSQL("0014_auto_actions.sql") {
+	if !numberedSQL("0003_shared_hosts.sql") || !numberedSQL("0004_service_names.sql") || !numberedSQL("0005_mcp_oauth.sql") || !numberedSQL("0006_invites.sql") || !numberedSQL("0007_catalog.sql") || !numberedSQL("0008_service_gone.sql") || !numberedSQL("0009_catalog_images.sql") || !numberedSQL("0010_project_files.sql") || !numberedSQL("0011_service_confirmations.sql") || !numberedSQL("0012_revoked_host_rows.sql") || !numberedSQL("0013_catalog_write_confirmations.sql") || !numberedSQL("0014_auto_actions.sql") || !numberedSQL("0015_orgs.sql") {
 		t.Fatal("numbered migration was skipped")
 	}
 	names, err := migrationFiles()
@@ -19,7 +20,7 @@ func TestMigrationSkipsDownScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(names, ",")
-	for _, want := range []string{"0001_app.sql", "0002_metrics.sql", "0003_shared_hosts.sql", "0004_service_names.sql", "0005_mcp_oauth.sql", "0006_invites.sql", "0007_catalog.sql", "0008_service_gone.sql", "0009_catalog_images.sql", "0010_project_files.sql", "0011_service_confirmations.sql", "0012_revoked_host_rows.sql", "0013_catalog_write_confirmations.sql", "0014_auto_actions.sql"} {
+	for _, want := range []string{"0001_app.sql", "0002_metrics.sql", "0003_shared_hosts.sql", "0004_service_names.sql", "0005_mcp_oauth.sql", "0006_invites.sql", "0007_catalog.sql", "0008_service_gone.sql", "0009_catalog_images.sql", "0010_project_files.sql", "0011_service_confirmations.sql", "0012_revoked_host_rows.sql", "0013_catalog_write_confirmations.sql", "0014_auto_actions.sql", "0015_orgs.sql"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("migrations = %s", got)
 		}
@@ -406,5 +407,70 @@ func TestInviteMigrationText(t *testing.T) {
 	}
 	if strings.Index(downText, "DROP FUNCTION") > strings.Index(downText, "DROP TABLE") {
 		t.Fatal("down script drops the table before the function")
+	}
+}
+
+// TestMigrateUsesOneConnection guards the org mapping: 0015 reads the
+// session setting deploybot.org_mapping, which exists only on the one
+// connection that MigrateWith opens. A pool would lose it between files.
+func TestMigrateUsesOneConnection(t *testing.T) {
+	raw, err := os.ReadFile("migrate.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	if !strings.Contains(src, "pgx.ConnectConfig(ctx, cfg)") || strings.Contains(src, "pgxpool") {
+		t.Fatal("Migrate must apply every file on one pgx.Connect connection, not a pool")
+	}
+	if strings.Count(src, "pgx.Connect") != 1 {
+		t.Fatal("Migrate opens more than one connection")
+	}
+	if !strings.Contains(src, "pg_advisory_lock($1)") {
+		t.Fatal("Migrate no longer serializes runs with an advisory lock")
+	}
+	body, err := migrations.FS.ReadFile("0015_orgs.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "current_setting('deploybot.org_mapping', true)") || !strings.Contains(string(body), "DROP TABLE app.org_migration_mapping") {
+		t.Fatal("0015 no longer reads the mapping table")
+	}
+	for _, stmt := range splitSQL(string(body)) {
+		if !meaningfulSQL(stmt) {
+			t.Fatalf("comment-only statement: %q", stmt)
+		}
+	}
+}
+
+func TestParseOrgMapping(t *testing.T) {
+	good := `{"require_all_projects":true,"orgs":[
+	{"slug":"more-than-code","name":"More Than Code","owner_email":"o@example.com","projects":["deploybot","daikou","defect-drainer"]},
+	{"slug":"saasifyease","name":"SaasifyEase","owner_email":"o@example.com","projects":["mohiguide","ai-hub","ai-hub-uat"]}]}`
+	m, err := ParseOrgMapping([]byte(good))
+	if err != nil || !m.RequireAllProjects || len(m.Orgs) != 2 || len(m.Orgs[0].Projects) != 3 {
+		t.Fatalf("good mapping %+v %v", m, err)
+	}
+	bad := map[string]string{
+		"unknown key":     `{"orgs":[],"extra":1}`,
+		"no orgs":         `{"orgs":[]}`,
+		"bad slug":        `{"orgs":[{"slug":"Bad","name":"X","owner_email":"o@example.com","projects":["a"]}]}`,
+		"personal prefix": `{"orgs":[{"slug":"u-abc","name":"X","owner_email":"o@example.com","projects":["a"]}]}`,
+		"dup org":         `{"orgs":[{"slug":"a","name":"X","owner_email":"o@example.com","projects":["a"]},{"slug":"a","name":"Y","owner_email":"o@example.com","projects":["b"]}]}`,
+		"empty name":      `{"orgs":[{"slug":"a","name":" ","owner_email":"o@example.com","projects":["a"]}]}`,
+		"bad email":       `{"orgs":[{"slug":"a","name":"X","owner_email":"nobody","projects":["a"]}]}`,
+		"no projects":     `{"orgs":[{"slug":"a","name":"X","owner_email":"o@example.com","projects":[]}]}`,
+		"bad project":     `{"orgs":[{"slug":"a","name":"X","owner_email":"o@example.com","projects":["Bad Slug"]}]}`,
+		"project twice":   `{"orgs":[{"slug":"a","name":"X","owner_email":"o@example.com","projects":["p"]},{"slug":"b","name":"Y","owner_email":"o@example.com","projects":["p"]}]}`,
+		"trailing":        good + ` {}`,
+	}
+	for name, raw := range bad {
+		if _, err := ParseOrgMapping([]byte(raw)); err == nil {
+			t.Fatalf("%s accepted", name)
+		} else if strings.Contains(err.Error(), "o@example.com") {
+			t.Fatalf("%s error leaks the owner email: %v", name, err)
+		}
+	}
+	if _, err := LoadOrgMapping(t.TempDir() + "/missing.json"); err == nil {
+		t.Fatal("missing file accepted")
 	}
 }

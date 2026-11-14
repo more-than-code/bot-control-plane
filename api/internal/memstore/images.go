@@ -209,19 +209,9 @@ func (m *Mem) AutoActionTarget(ctx context.Context, hostID uuid.UUID, projectSlu
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	projectID, ok := m.lookupCatalogLocked(projectSlug, entry, "image")
+	projectID, ok := m.lookupOwnerLocked(hostID, projectSlug, entry, "image")
 	if !ok {
 		return store.AutoTarget{}, store.ErrNotFound
-	}
-	h, ok := m.hosts[hostID]
-	if !ok {
-		return store.AutoTarget{}, store.ErrNotFound
-	}
-	if h.ProjectID != projectID {
-		sh, shared := m.shares[shareKey(hostID, projectID)]
-		if !shared || sh.Level != "deploy" {
-			return store.AutoTarget{}, store.ErrNotFound
-		}
 	}
 	entryID := m.entryByName[entryKey(projectID, entry)]
 	deployed := false
@@ -729,7 +719,6 @@ func (m *Mem) rehashSetLocked(projectID uuid.UUID, set string, at time.Time) {
 		e.SpecHash = next
 		e.UpdatedAt = at
 		m.entries[id] = e
-		m.deleteApprovalsLocked(id)
 	}
 }
 

@@ -136,18 +136,18 @@ func TestHealthPolicyPlan(t *testing.T) {
 		t.Fatalf("create plan %s", got)
 	}
 	const defaults = "on_deploy_failure=rollback on_unhealthy=none unhealthy_after_sec=45 max_actions_per_hour=3"
-	if got := catalogUpdatePlan("web", plain, img, 1); !strings.Contains(got, "health_policy: "+defaults+" → "+phrase) {
+	if got := catalogUpdatePlan("web", plain, img); !strings.Contains(got, "health_policy: "+defaults+" → "+phrase) {
 		t.Fatalf("added plan %s", got)
 	}
-	if got := catalogUpdatePlan("web", img, plain, 1); !strings.Contains(got, "health_policy: "+phrase+" → "+defaults) {
+	if got := catalogUpdatePlan("web", img, plain); !strings.Contains(got, "health_policy: "+phrase+" → "+defaults) {
 		t.Fatalf("removed plan %s", got)
 	}
-	if got := catalogUpdatePlan("web", plain, dflt, 0); strings.Contains(got, "health_policy") {
+	if got := catalogUpdatePlan("web", plain, dflt); strings.Contains(got, "health_policy") {
 		t.Fatalf("defaults-only update listed health_policy: %s", got)
 	}
 	next := mustPlanImage(t, "web", `{"kind":"service","image":"redis",`+policyHealthcheck+`,"health_policy":{"on_unhealthy":"rollback","on_deploy_failure":"stop"}}`, nil, nil)
 	want := "health_policy: " + phrase + " → on_deploy_failure=stop on_unhealthy=rollback unhealthy_after_sec=45 max_actions_per_hour=3"
-	if got := catalogUpdatePlan("web", img, next, 0); !strings.Contains(got, want) {
+	if got := catalogUpdatePlan("web", img, next); !strings.Contains(got, want) {
 		t.Fatalf("changed plan %s", got)
 	}
 }

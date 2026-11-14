@@ -718,13 +718,20 @@ func (d *DB) InsertAudit(ctx context.Context, row store.AuditRow) error {
 	if err := exec(ctx, d.pool, `
 INSERT INTO app.audit_log (
     at, actor_user_id, via, project_id, host_id, service_id,
-    action, decision, task_id, result, error_code, detail
+    action, decision, task_id, result, error_code, detail, org_id
 ) VALUES (
     $1, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid,
-    $7, $8, $9::uuid, $10, $11, $12::jsonb
+    $7, $8, $9::uuid, $10, $11, $12::jsonb,
+    -- A row with a host or project and no org takes the host's org, else
+    -- the project's (review A3).
+    COALESCE(
+        $13::uuid,
+        (SELECT org_id FROM app.hosts WHERE id = $5::uuid),
+        (SELECT org_id FROM app.projects WHERE id = $4::uuid)
+    )
 )
 `, row.At, optUUID(row.ActorUserID), row.Via, optUUID(row.ProjectID), optUUID(row.HostID), optUUID(row.ServiceID),
-		row.Action, row.Decision, optUUID(row.TaskID), optString(row.Result), optString(row.ErrorCode), auditDetail(row.Detail)); err != nil {
+		row.Action, row.Decision, optUUID(row.TaskID), optString(row.Result), optString(row.ErrorCode), auditDetail(row.Detail), optUUID(row.OrgID)); err != nil {
 		return mapErr(err)
 	}
 	return nil
@@ -742,6 +749,19 @@ func auditDetail(detail map[string]any) []byte {
 }
 
 func (d *DB) ListAudit(ctx context.Context, projectID uuid.UUID, limit int, cursor *store.Cursor) ([]store.AuditEntry, *store.Cursor, error) {
+	return d.listAudit(ctx, "project_id", projectID, limit, cursor)
+}
+
+// ListOrgAudit is the rows whose org_id is orgID (api-v1 v1.24 item 3).
+func (d *DB) ListOrgAudit(ctx context.Context, orgID uuid.UUID, limit int, cursor *store.Cursor) ([]store.AuditEntry, *store.Cursor, error) {
+	return d.listAudit(ctx, "org_id", orgID, limit, cursor)
+}
+
+// listAudit pages rows by column (project_id or org_id, never caller input).
+func (d *DB) listAudit(ctx context.Context, column string, id uuid.UUID, limit int, cursor *store.Cursor) ([]store.AuditEntry, *store.Cursor, error) {
+	if column != "project_id" && column != "org_id" {
+		return nil, nil, errors.New("audit: bad column")
+	}
 	lim := pageLimit(limit)
 	hasCursor := cursor != nil
 	var cursorAt time.Time
@@ -752,13 +772,13 @@ func (d *DB) ListAudit(ctx context.Context, projectID uuid.UUID, limit int, curs
 	}
 	rows, err := d.pool.Query(ctx, `
 SELECT id, at, actor_user_id::text, via, project_id::text, host_id::text, service_id::text,
-       action, decision, task_id::text, result, error_code, detail
+       action, decision, task_id::text, result, error_code, detail, org_id::text
 FROM app.audit_log
-WHERE project_id = $1::uuid
+WHERE `+column+` = $1::uuid
   AND ($2::boolean = false OR (at, id) < ($3::timestamptz, $4::bigint))
 ORDER BY at DESC, id DESC
 LIMIT $5
-`, projectID.String(), hasCursor, cursorAt, cursorID, lim+1)
+`, id.String(), hasCursor, cursorAt, cursorID, lim+1)
 	if err != nil {
 		return nil, nil, mapErr(err)
 	}
@@ -767,11 +787,11 @@ LIMIT $5
 	for rows.Next() {
 		var entry store.AuditEntry
 		var id int64
-		var actor, project, host, service, task *string
+		var actor, project, host, service, task, org *string
 		var detail []byte
 		if err := rows.Scan(
 			&id, &entry.At, &actor, &entry.Via, &project, &host, &service,
-			&entry.Action, &entry.Decision, &task, &entry.Result, &entry.ErrorCode, &detail,
+			&entry.Action, &entry.Decision, &task, &entry.Result, &entry.ErrorCode, &detail, &org,
 		); err != nil {
 			return nil, nil, mapErr(err)
 		}
@@ -780,6 +800,9 @@ LIMIT $5
 			return nil, nil, err
 		}
 		if entry.ProjectID, err = parseOptID(project); err != nil {
+			return nil, nil, err
+		}
+		if entry.OrgID, err = parseOptID(org); err != nil {
 			return nil, nil, err
 		}
 		if entry.HostID, err = parseOptID(host); err != nil {

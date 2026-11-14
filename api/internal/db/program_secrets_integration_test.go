@@ -41,7 +41,7 @@ func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time
 		t.Fatal(err)
 	}
 	hash := catalog.ProgramHash(prog, catalog.SetState{Keys: map[string][]string{"gh": {"GH_TOKEN"}}})
-	entry, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+	_, err = d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "gh", Spec: store.ProgramSpec{
 			Dir: prog.Dir, Exec: prog.Exec, Args: prog.Args, RunAs: prog.RunAs, Env: prog.Env,
 			EnvSets: prog.EnvSets, SecretEnv: prog.SecretEnv, Restart: prog.Restart,
@@ -57,28 +57,20 @@ func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time
 	if err := d.DeleteEnvSet(ctx, home.ID, "gh"); err != store.ErrConflict {
 		t.Fatalf("delete of a set a program uses: %v", err)
 	}
-	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
-	approvals, err := d.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || len(approvals) != 1 || approvals[0].SecretEnv["GH_TOKEN"] != "gh.GH_TOKEN" ||
-		approvals[0].EnvSets == nil || approvals[0].Env["MODE"] != "ci" {
-		t.Fatalf("approval view %+v %v", approvals, err)
-	}
 	if _, err := d.PutEnvSet(ctx, home.ID, "gh", []store.EnvSecret{sealed("GH_TOKEN", "db-prog-secret-2")}, owner.ID, at.Add(time.Second), true); err != nil {
 		t.Fatal(err)
 	}
 	same, err := d.GetCatalogEntry(ctx, home.ID, "gh")
-	if err != nil || same.SpecHash != hash || catalogApprovalCount(t, d, ctx, entry.ID) != 1 {
-		t.Fatalf("value-only change: hash %s approvals %d %v", same.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	if err != nil || same.SpecHash != hash {
+		t.Fatalf("value-only change: hash %s %v", same.SpecHash, err)
 	}
 	if _, err := d.PutEnvSet(ctx, home.ID, "gh", []store.EnvSecret{sealed("GH_TOKEN", "db-prog-secret-2"), sealed("GH_HOST", "github.com")}, owner.ID, at.Add(2*time.Second), true); err != nil {
 		t.Fatal(err)
 	}
 	changed, err := d.GetCatalogEntry(ctx, home.ID, "gh")
 	want := catalog.ProgramHash(prog, catalog.SetState{Keys: map[string][]string{"gh": {"GH_TOKEN", "GH_HOST"}}})
-	if err != nil || changed.SpecHash != want || catalogApprovalCount(t, d, ctx, entry.ID) != 0 {
-		t.Fatalf("key add: hash %s want %s approvals %d %v", changed.SpecHash, want, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	if err != nil || changed.SpecHash != want {
+		t.Fatalf("key add: hash %s want %s %v", changed.SpecHash, want, err)
 	}
 
 	// An entry that uses a set only through env_sets (the env_sets ? $2 branch).
@@ -101,7 +93,7 @@ func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time
 		t.Fatal(err)
 	}
 	setsHash := catalog.ProgramHash(setsOnly, catalog.SetState{Keys: map[string][]string{"cfg": {"A_KEY", "B_KEY"}}})
-	setsEntry, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+	_, err = d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "sets-only", Spec: store.ProgramSpec{
 			Dir: setsOnly.Dir, Exec: setsOnly.Exec, Args: setsOnly.Args, RunAs: setsOnly.RunAs, Env: setsOnly.Env,
 			EnvSets: setsOnly.EnvSets, SecretEnv: setsOnly.SecretEnv, Restart: setsOnly.Restart,
@@ -110,16 +102,13 @@ func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.ApproveCatalog(ctx, host.ID, setsEntry.ID, setsHash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
 	if err := d.DeleteEnvKey(ctx, home.ID, "cfg", "B_KEY", owner.ID, at.Add(3*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	afterDelete, err := d.GetCatalogEntry(ctx, home.ID, "sets-only")
 	wantSets := catalog.ProgramHash(setsOnly, catalog.SetState{Keys: map[string][]string{"cfg": {"A_KEY"}}})
-	if err != nil || afterDelete.SpecHash != wantSets || catalogApprovalCount(t, d, ctx, setsEntry.ID) != 0 {
-		t.Fatalf("key delete: hash %s want %s approvals %d %v", afterDelete.SpecHash, wantSets, catalogApprovalCount(t, d, ctx, setsEntry.ID), err)
+	if err != nil || afterDelete.SpecHash != wantSets {
+		t.Fatalf("key delete: hash %s want %s %v", afterDelete.SpecHash, wantSets, err)
 	}
 	if err := d.DeleteEnvSet(ctx, home.ID, "cfg"); err != store.ErrConflict {
 		t.Fatalf("delete of a set used through env_sets: %v", err)
@@ -150,7 +139,7 @@ func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time
 		}
 	}
 	plHash := catalog.ProgramHash(plProg, plState("https://a.example"))
-	plEntry, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+	_, err = d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "plain-vals", Spec: store.ProgramSpec{
 			Dir: plProg.Dir, Exec: plProg.Exec, Args: plProg.Args, RunAs: plProg.RunAs, Env: plProg.Env,
 			EnvSets: plProg.EnvSets, SecretEnv: plProg.SecretEnv, Restart: plProg.Restart,
@@ -159,22 +148,19 @@ func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.ApproveCatalog(ctx, host.ID, plEntry.ID, plHash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
 	s2 := sealedPl(t, box, home.ID.String(), "TOKEN_V", "pl-secret-2")
 	if _, _, err := d.PutEnvKey(ctx, home.ID, "pl", store.EnvKeyPut{Key: "TOKEN_V", Plain: "x", Nonce: s2.Nonce, Ciphertext: s2.Ciphertext, KeyVersion: seal.KeyVersion}, owner.ID, at.Add(4*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if e, err := d.GetCatalogEntry(ctx, home.ID, "plain-vals"); err != nil || e.SpecHash != plHash || catalogApprovalCount(t, d, ctx, plEntry.ID) != 1 {
-		t.Fatalf("secret value change: hash %s approvals %d %v", e.SpecHash, catalogApprovalCount(t, d, ctx, plEntry.ID), err)
+	if e, err := d.GetCatalogEntry(ctx, home.ID, "plain-vals"); err != nil || e.SpecHash != plHash {
+		t.Fatalf("secret value change: hash %s %v", e.SpecHash, err)
 	}
 	if _, _, err := d.PutEnvKey(ctx, home.ID, "pl", store.EnvKeyPut{Key: "HOST_URL", Plain: "https://b.example"}, owner.ID, at.Add(5*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	wantPl := catalog.ProgramHash(plProg, plState("https://b.example"))
-	if e, err := d.GetCatalogEntry(ctx, home.ID, "plain-vals"); err != nil || e.SpecHash != wantPl || catalogApprovalCount(t, d, ctx, plEntry.ID) != 0 {
-		t.Fatalf("plain value change: hash %s want %s approvals %d %v", e.SpecHash, wantPl, catalogApprovalCount(t, d, ctx, plEntry.ID), err)
+	if e, err := d.GetCatalogEntry(ctx, home.ID, "plain-vals"); err != nil || e.SpecHash != wantPl {
+		t.Fatalf("plain value change: hash %s want %s %v", e.SpecHash, wantPl, err)
 	}
 
 	// An entry without sets is untouched by a rehash of any set.

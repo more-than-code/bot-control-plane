@@ -41,26 +41,6 @@ func (m *Mem) GetCatalogWriteConfirmation(_ context.Context, hash []byte) (store
 	return cloneCatalogWriteConfirmation(rec.row), nil
 }
 
-func (m *Mem) CountEntryApprovals(_ context.Context, projectID uuid.UUID, name string) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.countEntryApprovalsLocked(projectID, name), nil
-}
-
-func (m *Mem) countEntryApprovalsLocked(projectID uuid.UUID, name string) int {
-	id, ok := m.entryByName[entryKey(projectID, name)]
-	if !ok {
-		return 0
-	}
-	n := 0
-	for _, a := range m.approvals {
-		if a.EntryID == id {
-			n++
-		}
-	}
-	return n
-}
-
 // CommitCatalogWrite holds the memstore mutex across the re-check, the
 // catalog write, and the delete of the plan. A conflict leaves the plan.
 func (m *Mem) CommitCatalogWrite(_ context.Context, hash []byte, userID uuid.UUID, at time.Time, in store.CatalogWrite) (string, store.CatalogEntry, error) {

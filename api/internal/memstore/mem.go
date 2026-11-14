@@ -34,6 +34,10 @@ type Mem struct {
 	codeByHash    map[string]uuid.UUID
 	oauthGrants   map[uuid.UUID]store.OAuthGrant
 
+	orgs       map[uuid.UUID]store.Org
+	orgBySlug  map[string]uuid.UUID
+	orgMembers map[string]orgMemberRec
+
 	projects map[uuid.UUID]store.Project
 	bySlug   map[string]uuid.UUID
 	members  map[string]memberRec
@@ -47,7 +51,7 @@ type Mem struct {
 	hosts      map[uuid.UUID]store.Host
 	creds      map[uuid.UUID]credRec
 	credByHash map[string]uuid.UUID
-	shares     map[string]store.HostShare
+	access     map[string]store.HostAccess
 
 	services map[uuid.UUID]store.Service
 	checks   map[uuid.UUID]store.HealthCheck
@@ -65,7 +69,6 @@ type Mem struct {
 	entries                   map[uuid.UUID]store.CatalogEntry
 	entryByName               map[string]uuid.UUID
 	grants                    map[uuid.UUID][]store.CatalogGrant
-	approvals                 map[string]store.CatalogApproval
 	confirmations             map[string]confirmationRec
 	serviceConfirmations      map[string]serviceConfirmationRec
 	catalogWriteConfirmations map[string]catalogWriteConfirmationRec
@@ -97,6 +100,14 @@ type memberRec struct {
 	CreatedAt time.Time
 }
 
+type orgMemberRec struct {
+	OrgID   uuid.UUID
+	UserID  uuid.UUID
+	Role    string
+	AddedBy uuid.UUID
+	AddedAt time.Time
+}
+
 type tokenRec struct {
 	store.JoinToken
 	hash []byte
@@ -126,6 +137,9 @@ func New() *Mem {
 		oauthCodes:                map[uuid.UUID]oauthCodeRec{},
 		codeByHash:                map[string]uuid.UUID{},
 		oauthGrants:               map[uuid.UUID]store.OAuthGrant{},
+		orgs:                      map[uuid.UUID]store.Org{},
+		orgBySlug:                 map[string]uuid.UUID{},
+		orgMembers:                map[string]orgMemberRec{},
 		projects:                  map[uuid.UUID]store.Project{},
 		bySlug:                    map[string]uuid.UUID{},
 		members:                   map[string]memberRec{},
@@ -136,7 +150,7 @@ func New() *Mem {
 		hosts:                     map[uuid.UUID]store.Host{},
 		creds:                     map[uuid.UUID]credRec{},
 		credByHash:                map[string]uuid.UUID{},
-		shares:                    map[string]store.HostShare{},
+		access:                    map[string]store.HostAccess{},
 		services:                  map[uuid.UUID]store.Service{},
 		checks:                    map[uuid.UUID]store.HealthCheck{},
 		batches:                   map[string]time.Time{},
@@ -146,7 +160,6 @@ func New() *Mem {
 		entries:                   map[uuid.UUID]store.CatalogEntry{},
 		entryByName:               map[string]uuid.UUID{},
 		grants:                    map[uuid.UUID][]store.CatalogGrant{},
-		approvals:                 map[string]store.CatalogApproval{},
 		confirmations:             map[string]confirmationRec{},
 		serviceConfirmations:      map[string]serviceConfirmationRec{},
 		catalogWriteConfirmations: map[string]catalogWriteConfirmationRec{},
@@ -194,6 +207,12 @@ func (m *Mem) UpsertGoogleUser(_ context.Context, in store.GoogleSignIn) (store.
 			user.AvatarURL = in.AvatarURL
 		}
 		m.users[user.ID] = user
+		// D-8 for users from before orgs who own no project (review B16).
+		if !m.inAnyOrgLocked(user.ID) {
+			if _, err := m.createOrgLocked(user.ID, store.PersonalOrgName(user.Name, user.Email), store.PersonalOrgSlug(user.ID), in.At); err != nil {
+				return store.User{}, err
+			}
+		}
 		return user, nil
 	}
 	if _, taken := m.byEmail[in.Email]; taken {
@@ -220,6 +239,9 @@ func (m *Mem) UpsertGoogleUser(_ context.Context, in store.GoogleSignIn) (store.
 	m.byEmail[user.Email] = user.ID
 	m.idents[ident.ID] = ident
 	m.bySubject[subjectKey("google", in.Subject)] = ident.ID
+	if _, err := m.createOrgLocked(user.ID, store.PersonalOrgName(user.Name, user.Email), store.PersonalOrgSlug(user.ID), in.At); err != nil {
+		return store.User{}, err
+	}
 	return user, nil
 }
 

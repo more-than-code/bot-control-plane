@@ -10,24 +10,35 @@ import (
 )
 
 const (
-	ActionSignIn                   = "sign_in"
-	ActionProjectCreate            = "project.create"
-	ActionProjectRename            = "project.rename"
-	ActionProjectDelete            = "project.delete"
-	ActionProjectTransfer          = "project.transfer"
-	ActionMemberAdd                = "member.add"
-	ActionMemberUpdate             = "member.update"
-	ActionMemberRemove             = "member.remove"
-	ActionJoinCreate               = "join_token.create"
-	ActionJoinRevoke               = "join_token.revoke"
-	ActionInviteCreate             = "invite.create"
-	ActionInviteRevoke             = "invite.revoke"
-	ActionInviteAccept             = "invite.accept"
-	ActionHostEnroll               = "host.enroll"
-	ActionHostRevoke               = "host.revoke"
-	ActionHostShare                = "host.share"
-	ActionHostShareUpdate          = "host.share_update"
-	ActionHostUnshare              = "host.unshare"
+	ActionSignIn          = "sign_in"
+	ActionProjectCreate   = "project.create"
+	ActionProjectRename   = "project.rename"
+	ActionProjectDelete   = "project.delete"
+	ActionProjectTransfer = "project.transfer"
+	ActionMemberAdd       = "member.add"
+	ActionMemberUpdate    = "member.update"
+	ActionMemberRemove    = "member.remove"
+	ActionJoinCreate      = "join_token.create"
+	ActionJoinRevoke      = "join_token.revoke"
+	ActionInviteCreate    = "invite.create"
+	ActionInviteRevoke    = "invite.revoke"
+	ActionInviteAccept    = "invite.accept"
+	ActionHostEnroll      = "host.enroll"
+	ActionHostRevoke      = "host.revoke"
+	// api-v1 v1.24 item 8. The old host.share* and catalog approval
+	// actions stay readable in history; nothing writes them now.
+	ActionHostAccessGrant          = "host.access_grant"
+	ActionHostAccessUpdate         = "host.access_update"
+	ActionHostAccessRevoke         = "host.access_revoke"
+	ActionOrgCreate                = "org.create"
+	ActionOrgRename                = "org.rename"
+	ActionOrgDelete                = "org.delete"
+	ActionOrgTransfer              = "org.transfer"
+	ActionOrgMemberAdd             = "org_member.add"
+	ActionOrgMemberUpdate          = "org_member.update"
+	ActionOrgMemberRemove          = "org_member.remove"
+	ActionOrgJoinCreate            = "org_join_token.create"
+	ActionOrgJoinRevoke            = "org_join_token.revoke"
 	ActionHealthChecks             = "health_checks.replace"
 	ActionHealthConfirmation       = "health_checks.confirmation_issued"
 	ActionServiceRename            = "service.rename"
@@ -44,8 +55,6 @@ const (
 	ActionCatalogDelete            = "catalog.delete"
 	ActionCatalogWriteConfirmation = "catalog.write_confirmation_issued"
 	ActionCatalogPermissions       = "catalog.permissions"
-	ActionCatalogApprove           = "catalog.approve"
-	ActionCatalogApprovalRevoke    = "catalog.approval_revoke"
 	ActionProgramRun               = "program.run"
 	ActionProgramStop              = "program.stop"
 	ActionProgramRestart           = "program.restart"
@@ -69,6 +78,9 @@ const (
 	ActionFilePut                  = "file.put"
 	ActionFileDelete               = "file.delete"
 	ActionDelegatedDenied          = "delegated.denied"
+	// ActionServiceOwnerConflict is an owned services report that would have
+	// moved a row of another project, or an org-level row (review A2).
+	ActionServiceOwnerConflict = "service.owner_conflict"
 
 	ViaConsole = "console"
 	ViaMCP     = "mcp"
@@ -78,6 +90,12 @@ const (
 	DecisionAllowed = "allowed"
 	DecisionDenied  = "denied"
 )
+
+// OwnerConflictWindow is how long an identical service.owner_conflict (same
+// service, reported project and entry) is not audited again. Agents resend
+// their report every 300 s, so a stuck service would otherwise write about
+// 288 rows a day (review batch 2, item 30).
+const OwnerConflictWindow = 24 * time.Hour
 
 // Writer appends audit rows. A write failure is logged and not returned:
 // the caller's HTTP result must not depend on the audit insert succeeding

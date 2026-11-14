@@ -178,11 +178,14 @@ func (h *Hub) enroll(ac *agentConn, f frame) {
 		ac.fail(websocket.StatusInternalError, "error", "unavailable")
 		return
 	}
-	projectID := host.ProjectID
+	// api-v1 v1.24 item 5: the org, plus the grant's project when the
+	// token carried one (the host's project_id mirror).
+	orgID := host.OrgID
 	hostID := host.ID
 	h.aud.Record(ac.parent, store.AuditRow{
 		Via:       audit.ViaAgent,
-		ProjectID: &projectID,
+		OrgID:     &orgID,
+		ProjectID: host.ProjectID,
 		HostID:    &hostID,
 		Action:    audit.ActionHostEnroll,
 		Decision:  audit.DecisionAllowed,

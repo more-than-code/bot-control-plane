@@ -384,11 +384,11 @@ func TestDelegatedHealthShareRules(t *testing.T) {
 	deployOwner := w.user("deploy-owner@ex.com", "DO")
 	deployAdmin := w.user("deploy-admin@ex.com", "DA")
 	deployViewer := w.user("deploy-viewer@ex.com", "DV")
-	metrics, err := w.mem.CreateProject(ctx, metricsOwner.ID, "Metrics", "hcmetrics", w.now)
+	metrics, err := w.mem.CreateProject(ctx, sc.host.OrgID, metricsOwner.ID, "Metrics", "hcmetrics", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deploy, err := w.mem.CreateProject(ctx, deployOwner.ID, "Deploy", "hcdeploy", w.now)
+	deploy, err := w.mem.CreateProject(ctx, sc.host.OrgID, deployOwner.ID, "Deploy", "hcdeploy", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,10 +401,10 @@ func TestDelegatedHealthShareRules(t *testing.T) {
 	if _, err := w.mem.AddMember(ctx, deploy.ID, deployViewer.ID, "viewer", deployOwner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(ctx, sc.host.ID, metrics.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, metrics.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(ctx, sc.host.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	own := w.mem.PutDeclared(sc.host.ID, "swag", "process", []int{443, 8080}, w.now)
@@ -433,7 +433,7 @@ func TestDelegatedHealthShareRules(t *testing.T) {
 	if len(storedChecks(t, w, own.ID)) != 0 {
 		t.Fatal("share plan replaced checks")
 	}
-	if _, _, err := w.mem.PutHostShare(ctx, sc.host.ID, deploy.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, deploy.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	status, env = w.do(deployTok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("share-own"))
@@ -441,7 +441,7 @@ func TestDelegatedHealthShareRules(t *testing.T) {
 	if len(storedChecks(t, w, own.ID)) != 0 {
 		t.Fatal("forbidden confirm replaced checks")
 	}
-	if _, _, err := w.mem.PutHostShare(ctx, sc.host.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	status, env = w.do(deployTok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("share-own"))
@@ -449,9 +449,10 @@ func TestDelegatedHealthShareRules(t *testing.T) {
 	if len(storedChecks(t, w, own.ID)) != 1 {
 		t.Fatal("restored share did not confirm")
 	}
-	rows := auditRows(t, w, sc.project.ID)
+	// v1.24 item 8: the row carries the service's project (and the org).
+	rows := auditRows(t, w, deploy.ID)
 	if auditCount(rows, audit.ActionHealthChecks, audit.DecisionAllowed) != 1 || auditVia(t, rows, audit.ActionHealthChecks) != audit.ViaMCP {
-		t.Fatal("share confirm did not audit the owning project")
+		t.Fatal("share confirm did not audit the service's project")
 	}
 }
 

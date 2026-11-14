@@ -88,7 +88,7 @@ func TestCatalogLastDeployedProgram(t *testing.T) {
 	createProgram(t, w, tok, sc.project.ID, "quiet", "pnpm run dev", false)
 	createProgram(t, w, tok, sc.project.ID, "mcp-run", "pnpm run dev", false)
 
-	other, err := w.mem.CreateProject(ctx, owner.ID, "Other", "other", w.now)
+	other, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Other", "other", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}

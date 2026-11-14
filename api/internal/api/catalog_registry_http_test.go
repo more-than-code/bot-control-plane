@@ -366,7 +366,7 @@ func TestImageLookupNeverLeaks(t *testing.T) {
 func (f *registryFixture) projectB(t *testing.T) string {
 	t.Helper()
 	owner := f.w.user("owner@ex.com", "Owner")
-	p, err := f.w.mem.CreateProject(context.Background(), owner.ID, "Other", "other", f.w.now)
+	p, err := f.w.mem.CreateProject(context.Background(), f.w.mem.PersonalOrg(owner.ID), owner.ID, "Other", "other", f.w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
