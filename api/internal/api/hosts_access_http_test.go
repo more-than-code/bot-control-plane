@@ -289,15 +289,15 @@ func TestHostViewsAllowlistAndAccess(t *testing.T) {
 		}
 	}
 	metrics := get(actMetricsViewer)
-	if metrics["access_level"] != "metrics" || metrics["relation"] != "shared" || metrics["share_level"] != "metrics" {
-		t.Fatalf("metrics mirrors %#v %#v %#v", metrics["access_level"], metrics["relation"], metrics["share_level"])
+	if metrics["access_level"] != "metrics" {
+		t.Fatalf("metrics access_level %#v", metrics["access_level"])
 	}
 	if listed := metrics["programs"].(map[string]any)["project_listed"]; listed != false {
 		t.Fatalf("metrics project_listed %#v", listed)
 	}
 	deploy := get(actDeployAdmin)
-	if deploy["access_level"] != "deploy" || deploy["relation"] != "owner" {
-		t.Fatalf("deploy mirrors %#v %#v", deploy["access_level"], deploy["relation"])
+	if deploy["access_level"] != "deploy" {
+		t.Fatalf("deploy access_level %#v", deploy["access_level"])
 	}
 	if listed := deploy["programs"].(map[string]any)["project_listed"]; listed != true {
 		t.Fatalf("deploy project_listed %#v", listed)
@@ -397,6 +397,7 @@ func TestSharesAndApprovalsGone(t *testing.T) {
 	fx := newAccessFixture(t)
 	paths := []struct{ method, path string }{
 		{http.MethodGet, fx.hostPath("/shares")},
+		{http.MethodGet, fx.hostPath("/shares/" + fx.metrics.ID.String())},
 		{http.MethodPut, fx.hostPath("/shares/" + fx.metrics.ID.String())},
 		{http.MethodDelete, fx.hostPath("/shares/" + fx.metrics.ID.String())},
 		{http.MethodGet, fx.hostPath("/catalog-approvals")},
@@ -407,6 +408,19 @@ func TestSharesAndApprovalsGone(t *testing.T) {
 		code, env := fx.do(actOwnerOwner, p.method, p.path, `{}`)
 		if code != http.StatusGone || env.Code != "gone" {
 			t.Fatalf("%s %s %d %s", p.method, p.path, code, env.Code)
+		}
+	}
+	// A delegated (MCP) session: the reads are delegatedAllow and reach the
+	// 410 handler; the writes are delegatedDeny and are refused (403) before it.
+	tok := tokenKind(t, fx.w, fx.users[actOwnerOwner].ID, store.KindDelegated)
+	for _, p := range paths {
+		code, env := fx.w.do(tok, p.method, p.path, `{}`)
+		want, wantCode := http.StatusForbidden, "forbidden"
+		if p.method == http.MethodGet {
+			want, wantCode = http.StatusGone, "gone"
+		}
+		if code != want || env.Code != wantCode {
+			t.Fatalf("delegated %s %s %d %s, want %d %s", p.method, p.path, code, env.Code, want, wantCode)
 		}
 	}
 }

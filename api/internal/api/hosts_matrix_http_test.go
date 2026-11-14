@@ -294,28 +294,53 @@ func TestDelegatedHostViews(t *testing.T) {
 	assertHTTP(t, code, env, http.StatusForbidden)
 }
 
-// TestHostProjectMirror is review A6: the deprecated project_id goes to org
-// admins and members of that project only.
-func TestHostProjectMirror(t *testing.T) {
+// TestHostRemovedKeys is api-v1 v1.26 item 1: no Host JSON carries
+// project_id, relation or share_level, for any caller or view.
+func TestHostRemovedKeys(t *testing.T) {
 	fx := newAccessFixture(t)
-	for actor, want := range map[string]any{
-		actOwnerOwner:    fx.home.ID.String(),
-		actOwnerAdmin:    fx.home.ID.String(),
-		actOwnerViewer:   fx.home.ID.String(),
-		actMetricsViewer: nil,
-		actDeployAdmin:   nil,
-	} {
-		code, env := fx.do(actor, http.MethodGet, fx.hostPath(""), "")
-		assertHTTP(t, code, env, http.StatusOK)
-		if got := objectPayload(t, env)["project_id"]; got != want {
-			t.Fatalf("%s project_id %#v want %#v", actor, got, want)
+	check := func(where string, h map[string]any) {
+		for _, key := range []string{"project_id", "relation", "share_level"} {
+			if _, present := h[key]; present {
+				t.Fatalf("%s has %s", where, key)
+			}
 		}
 	}
-	code, env := fx.do(actDeployAdmin, http.MethodGet, "/v1/projects/"+fx.deploy.ID.String()+"/hosts", "")
-	assertHTTP(t, code, env, http.StatusOK)
-	if item := findItem(t, listItems(t, env), "id", fx.sc.host.ID.String()); item["project_id"] != nil {
-		t.Fatalf("project list mirror %#v", item["project_id"])
+	for _, actor := range []string{actOwnerOwner, actOwnerAdmin, actOwnerViewer, actMetricsViewer, actDeployAdmin} {
+		code, env := fx.do(actor, http.MethodGet, fx.hostPath(""), "")
+		assertHTTP(t, code, env, http.StatusOK)
+		check(actor+" host", objectPayload(t, env))
 	}
+	for actor, project := range map[string]store.Project{actDeployAdmin: fx.deploy, actMetricsViewer: fx.metrics} {
+		code, env := fx.do(actor, http.MethodGet, "/v1/projects/"+project.ID.String()+"/hosts", "")
+		assertHTTP(t, code, env, http.StatusOK)
+		check(actor+" project list", findItem(t, listItems(t, env), "id", fx.sc.host.ID.String()))
+	}
+	code, env := fx.do(actOwnerOwner, http.MethodGet, "/v1/orgs/"+fx.home.OrgID.String()+"/hosts", "")
+	assertHTTP(t, code, env, http.StatusOK)
+	check("org list", findItem(t, listItems(t, env), "id", fx.sc.host.ID.String()))
+
+	// A delegated (MCP) session, on the single host and on both lists.
+	tok := tokenKind(t, fx.w, fx.users[actOwnerOwner].ID, store.KindDelegated)
+	code, env = fx.w.do(tok, http.MethodGet, fx.hostPath(""), "")
+	assertHTTP(t, code, env, http.StatusOK)
+	check("delegated host", objectPayload(t, env))
+	code, env = fx.w.do(tok, http.MethodGet, "/v1/projects/"+fx.home.ID.String()+"/hosts", "")
+	assertHTTP(t, code, env, http.StatusOK)
+	check("delegated project list", findItem(t, listItems(t, env), "id", fx.sc.host.ID.String()))
+	code, env = fx.w.do(tok, http.MethodGet, "/v1/orgs/"+fx.home.OrgID.String()+"/hosts", "")
+	assertHTTP(t, code, env, http.StatusOK)
+	check("delegated org list", findItem(t, listItems(t, env), "id", fx.sc.host.ID.String()))
+
+	// The type itself: a zero Host marshals none of the three keys.
+	raw, err := json.Marshal(store.Host{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var zero map[string]any
+	if err := json.Unmarshal(raw, &zero); err != nil {
+		t.Fatal(err)
+	}
+	check("zero store.Host", zero)
 }
 
 // TestProgramsNeedAllowlistAgent is D-10 (review A1): a host that reports

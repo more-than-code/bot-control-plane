@@ -45,6 +45,12 @@ var errNeedsOrgMapping = errors.New("migration 0015 needs BOT_API_ORG_MAPPING_FI
 // lives in session settings (deploybot.org_mapping), which a pool would not
 // carry from one statement to the next. Do not switch this to a pool.
 func MigrateWith(ctx context.Context, databaseURL string, orgs OrgSource) error {
+	return migrateUntil(ctx, databaseURL, orgs, "")
+}
+
+// migrateUntil is MigrateWith that stops after the file named until ("" for
+// every file). Tests use it to rebuild a database as a release left it.
+func migrateUntil(ctx context.Context, databaseURL string, orgs OrgSource, until string) error {
 	cfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
 		return fmt.Errorf("migrate: invalid database url")
@@ -92,6 +98,9 @@ func MigrateWith(ctx context.Context, databaseURL string, orgs OrgSource) error 
 		return err
 	}
 	for _, name := range names {
+		if until != "" && name > until {
+			break
+		}
 		if applied[name] {
 			continue
 		}

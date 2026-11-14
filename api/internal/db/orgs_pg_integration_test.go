@@ -361,9 +361,9 @@ func assertHostAccessCascade(t *testing.T, d *DB, ctx context.Context) {
 	p := f.project(org, owner.ID, "hp")
 	hostID := uuid.New()
 	if _, err := d.pool.Exec(ctx, `
-INSERT INTO app.hosts (id, org_id, project_id, name, node_type, os, arch, always_on, agent_version, enrolled_at)
-VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'pi', 'linux', 'arm64', true, '0.2.8', now())
-`, hostID.String(), org.String(), p.ID.String(), "casc-"+f.tag); err != nil {
+INSERT INTO app.hosts (id, org_id, name, node_type, os, arch, always_on, agent_version, enrolled_at)
+VALUES ($1::uuid, $2::uuid, $3, 'pi', 'linux', 'arm64', true, '0.2.8', now())
+`, hostID.String(), org.String(), "casc-"+f.tag); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := d.PutHostAccess(ctx, hostID, p.ID, "deploy", owner.ID, f.at); err != nil {

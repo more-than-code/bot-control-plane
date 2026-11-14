@@ -173,21 +173,19 @@ func TestParityTokensAndEnrolment(t *testing.T) {
 		owner, admin := p.user("to"), p.user("ta")
 		org := p.org(owner.ID)
 		home := p.project(org, owner.ID, "thome")
-		// other is created later, so home is the org's oldest live project.
 		other, err := p.st.CreateProject(p.ctx, org, owner.ID, "tother", "tother-"+p.tag, p.at.Add(time.Second))
 		if err != nil {
 			p.t.Fatal(err)
 		}
-		// Mirror (review A6): deploy grant names the project; a metrics
-		// grant or no grant takes the org's oldest live project.
-		if h := p.enroll(org, &store.TokenGrant{ProjectID: other.ID, Level: "deploy"}, owner.ID, "d"); h.ProjectID == nil || *h.ProjectID != other.ID {
-			p.t.Fatalf("deploy mirror %v", h.ProjectID)
-		}
-		for _, g := range []*store.TokenGrant{{ProjectID: other.ID, Level: "metrics"}, nil} {
-			h := p.enroll(org, g, owner.ID, "m")
-			if h.ProjectID == nil || *h.ProjectID != home.ID {
-				p.t.Fatalf("mirror %+v -> %v", g, h.ProjectID)
+		// The enrolled host names the grant's project (any level) for the
+		// host.enroll audit row; no grant names none.
+		for _, g := range []*store.TokenGrant{{ProjectID: other.ID, Level: "deploy"}, {ProjectID: other.ID, Level: "metrics"}} {
+			if h := p.enroll(org, g, owner.ID, "g"); h.GrantProjectID == nil || *h.GrantProjectID != other.ID {
+				p.t.Fatalf("grant project %+v -> %v", g, h.GrantProjectID)
 			}
+		}
+		if h := p.enroll(org, nil, owner.ID, "n"); h.GrantProjectID != nil {
+			p.t.Fatalf("no grant -> %v", h.GrantProjectID)
 		}
 		// Project-scoped list and revoke see only tokens that grant it.
 		_, hash, _ := secret.NewToken()

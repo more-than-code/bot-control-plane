@@ -509,6 +509,31 @@ func copyInts(in []int) []int {
 	return append([]int(nil), in...)
 }
 
+// firstDeployProjectLocked is the host's deploy grant project from its join
+// token, or else the project granted deploy access to the host first (by
+// granted_at, then project id), or nil. The seed helpers below place a row
+// there, as a host's former owner used to.
+func (m *Mem) firstDeployProjectLocked(hostID uuid.UUID) *uuid.UUID {
+	if pid, ok := m.enrolGrant[hostID]; ok {
+		return &pid
+	}
+	var best *store.HostAccess
+	for _, a := range m.access {
+		if a.HostID != hostID || a.Level != "deploy" {
+			continue
+		}
+		if best == nil || a.GrantedAt.Before(best.GrantedAt) || (a.GrantedAt.Equal(best.GrantedAt) && a.ProjectID.String() < best.ProjectID.String()) {
+			cp := a
+			best = &cp
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	id := best.ProjectID
+	return &id
+}
+
 // PutDeclared seeds a declared service. Tests use it to prove discovery does
 // not downgrade manually set fields. It is not part of store.Store.
 func (m *Mem) PutDeclared(hostID uuid.UUID, name, kind string, ports []int, at time.Time) store.Service {
@@ -517,7 +542,7 @@ func (m *Mem) PutDeclared(hostID uuid.UUID, name, kind string, ports []int, at t
 	s := store.Service{
 		ID:          uuid.New(),
 		HostID:      hostID,
-		ProjectID:   cloneID(m.hosts[hostID].ProjectID),
+		ProjectID:   m.firstDeployProjectLocked(hostID),
 		Name:        name,
 		Source:      "declared",
 		Kind:        kind,
@@ -538,7 +563,7 @@ func (m *Mem) PutDiscovered(hostID uuid.UUID, name, kind string, ports []int, ow
 	s := store.Service{
 		ID:          uuid.New(),
 		HostID:      hostID,
-		ProjectID:   cloneID(m.hosts[hostID].ProjectID),
+		ProjectID:   m.firstDeployProjectLocked(hostID),
 		Name:        name,
 		Source:      "discovered",
 		Kind:        kind,

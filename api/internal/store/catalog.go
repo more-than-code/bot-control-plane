@@ -39,7 +39,7 @@ type HostPrograms struct {
 	Secrets bool `json:"secrets"`
 	// Projects is hello.programs.projects (api-v1 v1.23 item 1): the host's
 	// runner.toml allowlist. Nil (JSON null) when the agent did not send it.
-	// The API returns it only to members of the host's owning project.
+	// The API returns it only to org owners and admins (api-v1 v1.24 item 1).
 	Projects []string `json:"projects"`
 	// ProjectListed is computed by the API for the viewing project (api-v1
 	// v1.23 item 1). It is never read from hello and nil in the store.

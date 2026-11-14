@@ -389,12 +389,11 @@ func structuredNames(t *testing.T, res *mcp.CallToolResult) []string {
 	return names
 }
 
-// v1.24: a project's host list shows access_level, not the deprecated
-// relation; an org's host list shows each host's project access.
+// v1.24: a project's host list shows access_level; an org's host list shows each host's project access.
 func TestSummarizeHostsAccess(t *testing.T) {
 	project := []byte(`{"items":[
-		{"name":"pi1","status":"online","access_level":"deploy","relation":"owner","share_level":"deploy"},
-		{"name":"pi2","status":"offline","access_level":"metrics","relation":"shared","share_level":"metrics"},
+		{"name":"pi1","status":"online","access_level":"deploy"},
+		{"name":"pi2","status":"offline","access_level":"metrics"},
 		{"name":"pi3","status":"online"}
 	]}`)
 	if got, want := summarizeHosts(project, false), "3 hosts: pi1 online (deploy), pi2 offline (metrics), pi3 online"; got != want {
@@ -453,18 +452,5 @@ func TestProjectOrgs(t *testing.T) {
 		if _, _, err := projectOrgs([]byte(bad)); err == nil {
 			t.Errorf("projectOrgs(%s) accepted a malformed body", bad)
 		}
-	}
-}
-
-// Before v1.24 (or after a rollback to v0.2.29) a project's host list has
-// relation and share_level but no access_level; the summary keeps the
-// owned or shared detail.
-func TestSummarizeHostsRelationFallback(t *testing.T) {
-	old := []byte(`{"items":[
-		{"name":"pi1","status":"online","relation":"owner","share_level":null},
-		{"name":"pi2","status":"online","relation":"shared","share_level":"metrics"}
-	]}`)
-	if got, want := summarizeHosts(old, false), "2 hosts: pi1 online, pi2 online (shared: metrics)"; got != want {
-		t.Fatalf("pre-v1.24 hosts\n got %q\nwant %q", got, want)
 	}
 }

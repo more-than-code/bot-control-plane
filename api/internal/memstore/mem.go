@@ -52,6 +52,10 @@ type Mem struct {
 	creds      map[uuid.UUID]credRec
 	credByHash map[string]uuid.UUID
 	access     map[string]store.HostAccess
+	// enrolGrant is each host's join-token grant project when the grant
+	// was deploy. Only the test seed helpers (PutDeclared, PutDiscovered)
+	// read it, through firstDeployProjectLocked.
+	enrolGrant map[uuid.UUID]uuid.UUID
 
 	services map[uuid.UUID]store.Service
 	checks   map[uuid.UUID]store.HealthCheck
@@ -151,6 +155,7 @@ func New() *Mem {
 		creds:                     map[uuid.UUID]credRec{},
 		credByHash:                map[string]uuid.UUID{},
 		access:                    map[string]store.HostAccess{},
+		enrolGrant:                map[uuid.UUID]uuid.UUID{},
 		services:                  map[uuid.UUID]store.Service{},
 		checks:                    map[uuid.UUID]store.HealthCheck{},
 		batches:                   map[string]time.Time{},

@@ -22,8 +22,9 @@ func (d *DB) CreateJoinToken(ctx context.Context, orgID uuid.UUID, hash []byte, 
 		}
 		grantProject, grantLevel = grant.ProjectID.String(), grant.Level
 	}
-	// project_id mirrors the grant for one release, so v0.2.29 still reads
-	// the row after the 0015 down script.
+	// project_id is a legacy column that still copies the grant project
+	// (null without a grant). The API reads grant_project_id; nothing reads
+	// project_id since 0016 made the 0015 down script unusable.
 	return scanJoin(d.pool.QueryRow(ctx, `
 INSERT INTO app.join_tokens (
     id, org_id, project_id, grant_project_id, grant_level, token_hash, host_name_hint,
@@ -176,25 +177,6 @@ SELECT EXISTS (SELECT 1 FROM app.projects WHERE id = $1::uuid AND org_id = $2::u
 			grant = &store.TokenGrant{ProjectID: pid, Level: *grantLevel}
 		}
 	}
-	// The deprecated project_id mirror (review A6): the grant project for a
-	// deploy grant, otherwise the org's oldest live project, or null.
-	var projectArg any
-	if grant != nil && grant.Level == "deploy" {
-		projectArg = grant.ProjectID.String()
-	} else {
-		var oldest *string
-		if err := tx.QueryRow(ctx, `
-SELECT (SELECT id::text FROM app.projects
-        WHERE org_id = $1::uuid AND deleted_at IS NULL
-        ORDER BY created_at, id LIMIT 1)
-`, tok.OrgID.String()).Scan(&oldest); err != nil {
-			return store.Host{}, mapErr(err)
-		}
-		if oldest != nil {
-			projectArg = *oldest
-		}
-	}
-
 	var takenErr error
 	name, err := store.Unique(in.Name, 63, func(candidate string) bool {
 		if takenErr != nil {
@@ -225,9 +207,9 @@ SELECT EXISTS (SELECT 1 FROM app.hosts WHERE org_id = $1::uuid AND name = $2)
 	for {
 		_, err = tx.Exec(ctx, `
 INSERT INTO app.hosts (
-    id, org_id, project_id, name, node_type, os, arch, always_on, agent_version, last_seen_at, enrolled_at
-) VALUES ($1::uuid, $2::uuid, CAST($3 AS uuid), $4, $5, $6, $7, $8, $9, $10, $10)
-`, hostID.String(), tok.OrgID.String(), projectArg, name, in.NodeType, in.OS, in.Arch, in.AlwaysOn, in.AgentVersion, at)
+    id, org_id, name, node_type, os, arch, always_on, agent_version, last_seen_at, enrolled_at
+) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $9)
+`, hostID.String(), tok.OrgID.String(), name, in.NodeType, in.OS, in.Arch, in.AlwaysOn, in.AgentVersion, at)
 		if err == nil {
 			break
 		}
@@ -280,17 +262,14 @@ WHERE id = $1::uuid
 		LastSeenAt:   &seen,
 		EnrolledAt:   at,
 	}
-	if s, ok := projectArg.(string); ok {
-		pid, err := parseID(s)
-		if err != nil {
-			return store.Host{}, err
-		}
-		host.ProjectID = &pid
+	if grant != nil {
+		pid := grant.ProjectID
+		host.GrantProjectID = &pid
 	}
 	return host, nil
 }
 
-const hostCols = `h.id::text, h.org_id::text, h.project_id::text, h.name, h.node_type, h.os, h.arch,
+const hostCols = `h.id::text, h.org_id::text, h.name, h.node_type, h.os, h.arch,
        h.always_on, h.agent_version, h.last_seen_at, h.enrolled_at, h.revoked_at, h.programs`
 
 func (d *DB) GetHost(ctx context.Context, id uuid.UUID) (store.Host, error) {
@@ -538,10 +517,9 @@ func scanHost(row pgx.Row) (store.Host, error) {
 func scanHostRow(row pgx.Row, extra ...any) (store.Host, error) {
 	var h store.Host
 	var id, orgID string
-	var projectID *string
 	var programs []byte
 	dest := []any{
-		&id, &orgID, &projectID, &h.Name, &h.NodeType, &h.OS, &h.Arch, &h.AlwaysOn,
+		&id, &orgID, &h.Name, &h.NodeType, &h.OS, &h.Arch, &h.AlwaysOn,
 		&h.AgentVersion, &h.LastSeenAt, &h.EnrolledAt, &h.RevokedAt, &programs,
 	}
 	if err := row.Scan(append(dest, extra...)...); err != nil {
@@ -555,9 +533,6 @@ func scanHostRow(row pgx.Row, extra ...any) (store.Host, error) {
 		return store.Host{}, err
 	}
 	if h.OrgID, err = parseID(orgID); err != nil {
-		return store.Host{}, err
-	}
-	if h.ProjectID, err = parseOptID(projectID); err != nil {
 		return store.Host{}, err
 	}
 	return h, nil

@@ -26,17 +26,9 @@ func idemKey(userID uuid.UUID, key string) string {
 
 func cloneHost(h store.Host) store.Host {
 	h.Programs = clonePrograms(h.Programs)
-	if h.ShareLevel != nil {
-		level := *h.ShareLevel
-		h.ShareLevel = &level
-	}
 	if h.AccessLevel != nil {
 		level := *h.AccessLevel
 		h.AccessLevel = &level
-	}
-	if h.ProjectID != nil {
-		id := *h.ProjectID
-		h.ProjectID = &id
 	}
 	if h.Access != nil {
 		cp := append([]store.HostAccess{}, (*h.Access)...)

@@ -88,7 +88,6 @@ TRUNCATE TABLE
     app.service_confirmations,
     app.catalog_write_confirmations,
     app.catalog_confirmations,
-    app.catalog_host_approvals,
     app.catalog_grants,
     app.idempotency_keys,
     app.catalog_entries,
@@ -104,7 +103,6 @@ TRUNCATE TABLE
     metrics.health_results,
     app.audit_log,
     app.health_checks,
-    app.host_shares,
     app.host_access,
     app.services,
     app.agent_credentials,
@@ -148,7 +146,7 @@ TRUNCATE TABLE
 		t.Fatalf("migrations: %v", err)
 	}
 	rows.Close()
-	if !names["0001_app.sql"] || !names["0002_metrics.sql"] || !names["0003_shared_hosts.sql"] || !names["0004_service_names.sql"] || !names["0005_mcp_oauth.sql"] || !names["0006_invites.sql"] || !names["0007_catalog.sql"] || !names["0008_service_gone.sql"] || !names["0009_catalog_images.sql"] || !names["0010_project_files.sql"] || !names["0011_service_confirmations.sql"] || !names["0012_revoked_host_rows.sql"] || !names["0013_catalog_write_confirmations.sql"] || !names["0014_auto_actions.sql"] || !names["0015_orgs.sql"] || names["0015_orgs.down.sql"] || names["0003_shared_hosts.down.sql"] || names["0004_service_names.down.sql"] || names["0005_mcp_oauth.down.sql"] || names["0006_invites.down.sql"] || names["0007_catalog.down.sql"] || names["0008_service_gone.down.sql"] || names["0009_catalog_images.down.sql"] || names["0010_project_files.down.sql"] || names["0011_service_confirmations.down.sql"] || names["0012_revoked_host_rows.down.sql"] || names["0013_catalog_write_confirmations.down.sql"] || names["0014_auto_actions.down.sql"] {
+	if !names["0001_app.sql"] || !names["0002_metrics.sql"] || !names["0003_shared_hosts.sql"] || !names["0004_service_names.sql"] || !names["0005_mcp_oauth.sql"] || !names["0006_invites.sql"] || !names["0007_catalog.sql"] || !names["0008_service_gone.sql"] || !names["0009_catalog_images.sql"] || !names["0010_project_files.sql"] || !names["0011_service_confirmations.sql"] || !names["0012_revoked_host_rows.sql"] || !names["0013_catalog_write_confirmations.sql"] || !names["0014_auto_actions.sql"] || !names["0015_orgs.sql"] || !names["0016_orgs_phase2.sql"] || names["0015_orgs.down.sql"] || names["0003_shared_hosts.down.sql"] || names["0004_service_names.down.sql"] || names["0005_mcp_oauth.down.sql"] || names["0006_invites.down.sql"] || names["0007_catalog.down.sql"] || names["0008_service_gone.down.sql"] || names["0009_catalog_images.down.sql"] || names["0010_project_files.down.sql"] || names["0011_service_confirmations.down.sql"] || names["0012_revoked_host_rows.down.sql"] || names["0013_catalog_write_confirmations.down.sql"] || names["0014_auto_actions.down.sql"] {
 		t.Fatalf("schema_migrations = %v", names)
 	}
 

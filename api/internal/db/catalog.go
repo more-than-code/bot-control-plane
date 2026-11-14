@@ -104,12 +104,6 @@ FOR UPDATE
 	if err != nil {
 		return "", store.CatalogEntry{}, mapErr(err)
 	}
-	if old != in.SpecHash {
-		// Kept so a rollback to v0.2.29 sees no stale approvals; removed in phase 2.
-		if err := exec(ctx, tx, `DELETE FROM app.catalog_host_approvals WHERE entry_id = $1::uuid`, id); err != nil {
-			return "", store.CatalogEntry{}, mapErr(err)
-		}
-	}
 	entry, err := scanCatalog(tx.QueryRow(ctx, `
 UPDATE app.catalog_entries
 SET spec = $2::jsonb, spec_hash = $3, command_display = $4, updated_at = $5
@@ -139,8 +133,8 @@ func (d *DB) DeleteCatalogEntry(ctx context.Context, projectID uuid.UUID, name s
 	return entry, nil
 }
 
-// deleteCatalogEntry removes the entry. Grants, the unused phase-1
-// approval rows, and action confirmations cascade. Service rows are not touched.
+// deleteCatalogEntry removes the entry. Grants and action confirmations
+// cascade. Service rows are not touched.
 func deleteCatalogEntry(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name string) (store.CatalogEntry, error) {
 	return scanCatalog(tx.QueryRow(ctx, `
 DELETE FROM app.catalog_entries

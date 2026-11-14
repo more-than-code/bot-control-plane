@@ -265,17 +265,12 @@ function isAccessLevel(value: unknown): value is AccessLevel {
 }
 
 /**
- * `access_level` (api-v1 v1.24), or null in an org-scoped view. Without the key, the deprecated v1.1 mirrors
- * say the same thing: `relation` owner is deploy, a share is its `share_level`. A bad value fails the host.
+ * `access_level` (api-v1 v1.24), or null in an org-scoped view or when the key is missing. The v1.24
+ * mirrors `relation` and `share_level` were removed in v1.26 and are not read. A bad value fails the host.
  */
 function hostAccessLevel(value: Record<string, unknown>): AccessLevel | null | undefined {
-	if (Object.hasOwn(value, 'access_level')) {
-		if (value.access_level === null) return null;
-		return isAccessLevel(value.access_level) ? value.access_level : undefined;
-	}
-	if (value.relation === 'owner') return 'deploy';
-	if (value.relation === 'shared') return isAccessLevel(value.share_level) ? value.share_level : undefined;
-	return null;
+	if (value.access_level == null) return null;
+	return isAccessLevel(value.access_level) ? value.access_level : undefined;
 }
 
 /** At most this many access rows per host are kept; more is not a list the console can show. */

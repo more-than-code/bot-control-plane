@@ -356,7 +356,7 @@ func TestTools(t *testing.T) {
 	if owned["id"] != hostID || owned["access_level"] != "deploy" || owned["org_id"] != orgID {
 		t.Fatalf("owned host %#v", owned)
 	}
-	if shared["id"] != sharedHostID || shared["access_level"] != "metrics" || shared["relation"] != "shared" {
+	if shared["id"] != sharedHostID || shared["access_level"] != "metrics" {
 		t.Fatalf("shared host %#v", shared)
 	}
 
@@ -1663,11 +1663,11 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 			"items": []any{
 				map[string]any{
 					"id": hostID, "name": "pi1", "status": "online", "org_id": orgID,
-					"access_level": "deploy", "project_id": projectID, "relation": "owner", "share_level": "deploy",
+					"access_level": "deploy",
 				},
 				map[string]any{
 					"id": sharedHostID, "name": "pi2", "status": "online", "org_id": orgID,
-					"access_level": "metrics", "project_id": nil, "relation": "shared", "share_level": "metrics",
+					"access_level": "metrics",
 				},
 			},
 			"next_cursor": nil,
