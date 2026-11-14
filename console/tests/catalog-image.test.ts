@@ -1475,8 +1475,7 @@ describe('catalog images', { concurrency: false }, () => {
 				truncated: false,
 				message: null,
 				hosts: [host()],
-				members: [],
-				permissions: { name: 'web', grants: [], message: null, loaded: true }
+				members: []
 			}
 		}).body;
 		assert.equal(shown.includes('Deploy web'), true);
@@ -1558,6 +1557,37 @@ describe('catalog images', { concurrency: false }, () => {
 		const found = renderCopies({ rows: [discovered], entries: [imageEntry([])], hosts: [host()] });
 		assert.equal(found.includes('web-1'), false);
 		assert.equal(found.includes('port 80'), false);
+	});
+
+	test('a duplicate image entry name on create reads as a sentence, not the bare conflict', async () => {
+		const calls = installFetch(() => envelope(null, 409, 'conflict', 'conflict'));
+		const form = {
+			entry_kind: 'image',
+			name: 'web',
+			workload: 'service',
+			image: 'ghcr.io/acme/web:1',
+			restart: 'unless-stopped',
+			healthy_after_sec: '40',
+			command: ''
+		};
+		const base = { session: TOKEN, user: USER, projects: [PROJECT], params: { id: PROJECT.id } };
+		const refused = await projectActions.catalogCreate(
+			fakeEvent({ ...base, url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogCreate`, form }).event as never
+		);
+		assert.equal((refused as { status: number }).status, 409);
+		assert.equal(actionData(refused).imageEditor?.message, 'An image entry named web already exists in this project.');
+		assert.equal(calls.filter((call) => call.method === 'POST').length, 1);
+
+		// Edit keeps the entry's name (it is in the path), so another refusal keeps the API's message.
+		installFetch(() => envelope(null, 409, 'conflict', 'spec changed'));
+		const edited = await projectActions.catalogUpdate(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogUpdate`,
+				form: { ...form, entry_name: 'web', editor_mode: 'edit' }
+			}).event as never
+		);
+		assert.equal(actionData(edited).imageEditor?.message, 'spec changed');
 	});
 
 	test('the catalog create action posts an image spec', async () => {

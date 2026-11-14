@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -17,7 +16,7 @@
 	import { formatAgo, formatWhen } from '$lib/format';
 	import type { CatalogEditorState, ImageDeployState, ImageEditorState } from '$lib/project-action';
 	import { catalogEntryMenuId, entryMenuItems, type MenuKey } from '$lib/row-menu';
-	import { actionUrlFrom, permissionsOpenHref } from '$lib/url';
+	import { actionUrlFrom } from '$lib/url';
 	import CatalogDeployDialog from './CatalogDeployDialog.svelte';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
 	import CatalogImageDialog from './CatalogImageDialog.svelte';
@@ -38,6 +37,7 @@
 		imageEditor = null,
 		imageDeploy = null,
 		onImageSaved,
+		onPermissions,
 		now,
 		timeZone
 	}: {
@@ -60,6 +60,8 @@
 		imageEditor?: ImageEditorState | null;
 		imageDeploy?: ImageDeployState | null;
 		onImageSaved?: (name: string) => void;
+		/** The ⋯ menu's Permissions item: the section opens the drawer, which reads the grants itself. */
+		onPermissions?: () => void;
 		/** One clock for every row. */
 		now: number;
 		timeZone?: string;
@@ -84,8 +86,8 @@
 
 	function onMenu(key: MenuKey) {
 		if (key === 'permissions') {
-			// Focus and scroll stay, so the drawer takes focus and closes back to the ⋯ button.
-			void goto(permissionsOpenHref(page.url, entry.name), { keepFocus: true, noScroll: true });
+			// The drawer takes focus and closes back to the ⋯ button.
+			onPermissions?.();
 			return;
 		}
 		if (key === 'deploy' || key === 'edit' || key === 'delete') requests[key] += 1;

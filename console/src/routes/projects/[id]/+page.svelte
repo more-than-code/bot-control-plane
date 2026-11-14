@@ -31,11 +31,8 @@
 	const serviceRun = $derived(action?.scope === 'catalog' ? (action.catalogAction ?? null) : null);
 	const imageEditor = $derived(action?.scope === 'catalog' ? (action.imageEditor ?? null) : null);
 	const imageDeploy = $derived(action?.scope === 'catalog' ? (action.imageDeploy ?? null) : null);
-	const catalogPermissions = $derived(
-		action?.scope === 'catalog' && action.permissions ? action.permissions : (data.permissions ?? null)
-	);
 	const catalogMessage = $derived.by(() => {
-		if (catalogEditor || imageEditor || imageDeploy || (action?.scope === 'catalog' && action.permissions)) return data.catalogMessage ?? null;
+		if (catalogEditor || imageEditor || imageDeploy) return data.catalogMessage ?? null;
 		return sectionMessage ?? data.catalogMessage ?? null;
 	});
 
@@ -115,6 +112,7 @@
 					hosts={data.hosts}
 					created={action?.scope === 'hosts' ? (action.created ?? null) : null}
 					slug={data.project.slug}
+					grant="{data.project.name} (deploy)"
 					open={data.hosts.length === 0 && !data.hostsMessage}
 					message={createTokenMessage}
 					tokensMessage={data.tokensMessage ?? null}
@@ -134,7 +132,6 @@
 			hosts={data.hosts ?? []}
 			members={data.members ?? []}
 			editor={catalogEditor?.mode === 'edit' ? catalogEditor : null}
-			permissions={catalogPermissions}
 			imageEditor={imageEditor?.mode === 'edit' ? imageEditor : null}
 			imageDeploy={imageDeploy}
 			onImageSaved={toastImageSaved}

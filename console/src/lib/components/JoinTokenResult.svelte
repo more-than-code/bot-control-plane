@@ -9,6 +9,7 @@
 	let {
 		created,
 		slug,
+		grant = null,
 		enrolment,
 		message = null,
 		copyId
@@ -17,6 +18,8 @@
 		created: CreatedJoin;
 		/** The granted project's slug, or null when the token names no project. */
 		slug: string | null;
+		/** The project access the token gives, as "<project> (<level>)". Null when it gives none. */
+		grant?: string | null;
 		enrolment: EnrolStatus | null;
 		/** A note that came with the created token, such as a server URL that could not be shown. */
 		message?: string | null;
@@ -44,6 +47,9 @@
 	<div>
 		<CopyButton value={created.token} label="Copy token" />
 	</div>
+	{#if grant}
+		<p class="text-sm">The host gets access to {grant} when it enrols.</p>
+	{/if}
 	<p class="text-muted-foreground text-sm">Or enrol the host yourself:</p>
 	<CommandBlock command={enrol} label="Copy enrol command" ariaLabel="Enrol command" />
 	<p class="text-sm">Paste the join token at the hidden prompt. Do not put it on the command line.</p>

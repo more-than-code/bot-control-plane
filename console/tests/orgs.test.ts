@@ -170,10 +170,13 @@ describe('org routes', { concurrency: false }, () => {
 		assert.equal(calls[0]?.body, JSON.stringify({ grant: { project_id: PROJECT.id, level: 'metrics' } }));
 		if (!granted || isActionFailure(granted)) assert.fail('expected a token');
 		assert.equal(granted.createdSlug, PROJECT.slug);
+		assert.deepEqual(granted.createdGrant, { project_id: PROJECT.id, level: 'metrics' });
 
 		const plain = installFetch(() => envelope(join));
-		await orgActions.createToken(orgEvent(`http://console.example/orgs/${ORG.id}?tab=hosts`, { host_name_hint: 'pi9', expires_in_sec: '' }));
+		const ungranted = await orgActions.createToken(orgEvent(`http://console.example/orgs/${ORG.id}?tab=hosts`, { host_name_hint: 'pi9', expires_in_sec: '' }));
 		assert.equal(plain[0]?.body, JSON.stringify({ host_name_hint: 'pi9' }));
+		if (!ungranted || isActionFailure(ungranted)) assert.fail('expected a token');
+		assert.equal(ungranted.createdGrant, null);
 
 		const none = installFetch(() => envelope(null, 500, 'error', 'unexpected'));
 		const bad = await orgActions.createToken(

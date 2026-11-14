@@ -33,6 +33,7 @@
 		hosts,
 		created,
 		slug,
+		grant = null,
 		open,
 		message = null,
 		tokensMessage = null,
@@ -47,6 +48,8 @@
 		created: CreatedJoin | null;
 		/** The project the host is for (its runner.toml slug). Null on the org page until a grant names one. */
 		slug: string | null;
+		/** The project access the created token gives, as "<project> (<level>)". Null when it gives none. */
+		grant?: string | null;
 		/** Initial state of the guide. */
 		open: boolean;
 		/** The createToken action's message: a failure, or a note with the created token. */
@@ -166,7 +169,7 @@
 							</div>
 						</div>
 					{:else if shown}
-						<JoinTokenResult created={shown} {slug} {enrolment} {message} copyId={FOCUS_IDS['copy-instructions']} />
+						<JoinTokenResult created={shown} {slug} {grant} {enrolment} {message} copyId={FOCUS_IDS['copy-instructions']} />
 						<div class="mt-3">
 							<Dialog.Close type="button" id={FOCUS_IDS.close} class={buttonVariants({ variant: 'outline' })}>Close</Dialog.Close>
 						</div>

@@ -116,6 +116,7 @@ export const actions: Actions = {
 				field: 'createToken' as const,
 				created,
 				createdSlug,
+				createdGrant: body.grant ?? null,
 				message: created.server ? null : 'Server URL not shown: unexpected format'
 			});
 		} catch (err) {

@@ -197,6 +197,7 @@
 								id="delete-file-{file.name}"
 								action={actionUrlFrom(page.url, 'deleteProjectFile')}
 								label="Delete"
+								triggerLabel="Delete file {file.name}"
 								confirmLabel="Delete"
 								message="Delete file {file.name}?"
 								messageClass="max-w-full min-w-0 break-all"
@@ -263,6 +264,7 @@
 						id="delete-registry-{row.host}"
 						action={actionUrlFrom(page.url, 'deleteRegistry')}
 						label="Delete"
+						triggerLabel="Delete registry {row.host}"
 						confirmLabel="Delete"
 						message="Delete registry {row.host}?"
 						hidden={[{ name: 'host', value: row.host }]}

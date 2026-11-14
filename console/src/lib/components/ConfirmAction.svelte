@@ -34,7 +34,8 @@
 		onSuccess,
 		openRequest = 0,
 		fallbackFocusId = null,
-		showTrigger = true
+		showTrigger = true,
+		triggerLabel = null
 	}: {
 		id: string;
 		action: string;
@@ -66,6 +67,8 @@
 		fallbackFocusId?: string | null;
 		/** False: no trigger of its own (a menu item opens it). */
 		showTrigger?: boolean;
+		/** The text trigger's accessible name when `label` alone is ambiguous (it should start with `label`). */
+		triggerLabel?: string | null;
 	} = $props();
 
 	let open = $state(false);
@@ -139,7 +142,11 @@
 			{/snippet}
 		</RowAction>
 	{:else}
-		<AlertDialog.Trigger class={buttonVariants({ variant: destructive ? 'destructive' : 'outline', size: 'sm' })} disabled={disabled}>
+		<AlertDialog.Trigger
+			class={buttonVariants({ variant: destructive ? 'destructive' : 'outline', size: 'sm' })}
+			disabled={disabled}
+			aria-label={triggerLabel ?? undefined}
+		>
 			<Icon class="size-4" />
 			{label}
 		</AlertDialog.Trigger>

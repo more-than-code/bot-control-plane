@@ -6,7 +6,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { accessFailureOf } from '$lib/host-access';
-	import type { OrgActionData, OrgScope } from '$lib/org-view';
+	import { joinGrantText, type OrgActionData, type OrgScope } from '$lib/org-view';
 	import { actionUrlFrom } from '$lib/url';
 	import OrgHostsSection from './OrgHostsSection.svelte';
 	import OrgMembersSection from './OrgMembersSection.svelte';
@@ -89,6 +89,7 @@
 				hosts={data.hosts.items}
 				created={action?.field === 'createToken' ? (action.created ?? null) : null}
 				slug={action?.field === 'createToken' ? (action.createdSlug ?? null) : null}
+				grant={action?.field === 'createToken' ? joinGrantText(action.createdGrant ?? null, projectNames) : null}
 				open={data.hosts.items.length === 0 && !data.hosts.message}
 				message={fieldMessage('createToken')}
 				tokensMessage={data.tokens.message}
