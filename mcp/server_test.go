@@ -28,6 +28,7 @@ const (
 	manyProjectID  = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	hostID         = "22222222-2222-4222-8222-222222222222"
 	sharedHostID   = "66666666-6666-4666-8666-666666666666"
+	orgID          = "77777777-7777-4777-8777-777777777777"
 	serviceID      = "33333333-3333-4333-8333-333333333333"
 	checkID        = "44444444-4444-4444-8444-444444444444"
 	userToken      = "session-token.abc~def"
@@ -165,7 +166,7 @@ func TestTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	closed := map[string]bool{
-		"list_projects": true, "list_hosts": true, "list_services": true,
+		"list_orgs": true, "list_projects": true, "list_hosts": true, "list_services": true,
 		"query_metrics": true, "list_processes": true, "service_health_history": true,
 		"get_health_checks": true, "list_catalog": true,
 	}
@@ -298,7 +299,7 @@ func TestTools(t *testing.T) {
 		}
 	}
 	for _, name := range []string{
-		"list_projects", "list_hosts", "list_services", "query_metrics",
+		"list_orgs", "list_projects", "list_hosts", "list_services", "query_metrics",
 		"list_processes", "service_health_history", "get_health_checks", "host_snapshot", "probe_service",
 		"list_catalog", "run_entry", "stop_entry", "restart_entry",
 		"deploy_entry", "rollback_entry", "set_health_checks",
@@ -309,19 +310,41 @@ func TestTools(t *testing.T) {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	if len(seen) != 22 {
+	if len(seen) != 23 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
 	res := mustCall(t, cs, "list_projects", map[string]any{})
 	assertTool(t, fake, res, http.MethodGet, "/v1/me", "", "")
-	if !strings.Contains(textOf(t, res), "1 projects: lab (owner)") {
+	if textOf(t, res) != "1 projects: lab (owner) in Home Lab" {
 		t.Fatalf("list_projects text %q", textOf(t, res))
+	}
+	if p := structuredMap(t, res)["projects"].([]any)[0].(map[string]any); p["org_id"] != orgID || p["via"] != "member" {
+		t.Fatalf("list_projects project %#v", p)
+	}
+
+	res = mustCall(t, cs, "list_orgs", map[string]any{})
+	assertLast(t, fake, http.MethodGet, "/v1/me", "", "")
+	if textOf(t, res) != "1 orgs: Home Lab (owner)" {
+		t.Fatalf("list_orgs text %q", textOf(t, res))
+	}
+	orgBody := structuredMap(t, res)
+	if _, ok := orgBody["user"]; ok || len(orgBody) != 1 {
+		t.Fatalf("list_orgs returned more than orgs: %#v", orgBody)
+	}
+	if o := orgBody["orgs"].([]any)[0].(map[string]any); o["id"] != orgID || o["slug"] != "home-lab" || o["role"] != "owner" {
+		t.Fatalf("list_orgs org %#v", o)
+	}
+
+	res = mustCall(t, cs, "list_hosts", map[string]any{"org_id": orgID})
+	assertTool(t, fake, res, http.MethodGet, "/v1/orgs/"+orgID+"/hosts", "", "")
+	if textOf(t, res) != "2 hosts: pi1 online (access: lab deploy), pi2 online (access: lab metrics)" {
+		t.Fatalf("list_hosts org text %q", textOf(t, res))
 	}
 
 	res = mustCall(t, cs, "list_hosts", map[string]any{"project_id": projectID})
 	assertTool(t, fake, res, http.MethodGet, "/v1/projects/"+projectID+"/hosts", "", "")
-	if textOf(t, res) != "2 hosts: pi1 online, pi2 online (shared: metrics)" {
+	if textOf(t, res) != "2 hosts: pi1 online (deploy), pi2 online (metrics)" {
 		t.Fatalf("list_hosts text %q", textOf(t, res))
 	}
 	hostItems, ok := structuredMap(t, res)["items"].([]any)
@@ -330,10 +353,10 @@ func TestTools(t *testing.T) {
 	}
 	owned, _ := hostItems[0].(map[string]any)
 	shared, _ := hostItems[1].(map[string]any)
-	if owned["id"] != hostID || owned["relation"] != "owner" || owned["share_level"] != nil {
+	if owned["id"] != hostID || owned["access_level"] != "deploy" || owned["org_id"] != orgID {
 		t.Fatalf("owned host %#v", owned)
 	}
-	if shared["id"] != sharedHostID || shared["relation"] != "shared" || shared["share_level"] != "metrics" {
+	if shared["id"] != sharedHostID || shared["access_level"] != "metrics" || shared["relation"] != "shared" {
 		t.Fatalf("shared host %#v", shared)
 	}
 
@@ -713,6 +736,10 @@ func TestInputValidationSkipsAPI(t *testing.T) {
 	}{
 		{name: "bad uuid", tool: "list_hosts", args: map[string]any{"project_id": "not-a-uuid"}},
 		{name: "unknown field", tool: "list_hosts", args: map[string]any{"project_id": projectID, "extra": true}},
+		{name: "hosts neither id", tool: "list_hosts", args: map[string]any{}},
+		{name: "hosts both ids", tool: "list_hosts", args: map[string]any{"project_id": projectID, "org_id": orgID}},
+		{name: "hosts bad org uuid", tool: "list_hosts", args: map[string]any{"org_id": "not-a-uuid"}},
+		{name: "orgs unknown field", tool: "list_orgs", args: map[string]any{"org_id": orgID}},
 		{name: "bad metric", tool: "query_metrics", args: map[string]any{"host_id": hostID, "metric": "load"}},
 		{name: "step low", tool: "query_metrics", args: map[string]any{"host_id": hostID, "metric": "cpu", "step": 9}},
 		{name: "step high", tool: "query_metrics", args: map[string]any{"host_id": hostID, "metric": "cpu", "step": 3601}},
@@ -1592,8 +1619,12 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 		return http.StatusOK, "ok", "", map[string]any{
 			"user":       map[string]any{"id": "55555555-5555-4555-8555-555555555555", "email": "ada@example", "name": "Ada", "avatar_url": nil},
 			"identities": []any{map[string]any{"provider": "google", "email": "ada@example"}},
+			"orgs": []any{map[string]any{
+				"id": orgID, "name": "Home Lab", "slug": "home-lab", "role": "owner", "created_at": "2026-10-01T00:00:00Z",
+			}},
 			"projects": []any{map[string]any{
 				"id": projectID, "name": "lab", "slug": "lab", "role": "owner", "created_at": "2026-10-01T00:00:00Z",
+				"org_id": orgID, "via": "member",
 			}},
 		}
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+manyProjectID+"/hosts":
@@ -1608,12 +1639,26 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 		return http.StatusOK, "ok", "", map[string]any{
 			"items": []any{
 				map[string]any{
-					"id": hostID, "name": "pi1", "status": "online",
-					"relation": "owner", "share_level": nil,
+					"id": hostID, "name": "pi1", "status": "online", "org_id": orgID,
+					"access_level": "deploy", "project_id": projectID, "relation": "owner", "share_level": "deploy",
 				},
 				map[string]any{
-					"id": sharedHostID, "name": "pi2", "status": "online",
-					"relation": "shared", "share_level": "metrics",
+					"id": sharedHostID, "name": "pi2", "status": "online", "org_id": orgID,
+					"access_level": "metrics", "project_id": nil, "relation": "shared", "share_level": "metrics",
+				},
+			},
+			"next_cursor": nil,
+		}
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/orgs/"+orgID+"/hosts":
+		return http.StatusOK, "ok", "", map[string]any{
+			"items": []any{
+				map[string]any{
+					"id": hostID, "name": "pi1", "status": "online", "org_id": orgID, "access_level": nil,
+					"access": []any{map[string]any{"project_id": projectID, "project_name": "lab", "level": "deploy"}},
+				},
+				map[string]any{
+					"id": sharedHostID, "name": "pi2", "status": "online", "org_id": orgID, "access_level": nil,
+					"access": []any{map[string]any{"project_id": projectID, "project_name": "lab", "level": "metrics"}},
 				},
 			},
 			"next_cursor": nil,

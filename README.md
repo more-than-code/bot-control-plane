@@ -6,12 +6,14 @@ The server side of [Deploybot](https://deploybot.dev): the API, the MCP gateway 
 
 | Path | What it is |
 |------|------------|
-| `api/` | The API: Google sign-in and sessions, projects and members, join tokens and host credentials, the agent WebSocket, metrics ingest into Postgres, the catalog, audit, and the OAuth server for MCP clients. The only part that writes the database or decides permissions. [README](api/README.md), [design](api/docs/design.md). |
+| `api/` | The API: Google sign-in and sessions, organizations and projects with their members, join tokens, host credentials and host access, the agent WebSocket, metrics ingest into Postgres, the catalog, audit, and the OAuth server for MCP clients. The only part that writes the database or decides permissions. [README](api/README.md), [design](api/docs/design.md). |
 | `mcp/` | The stateless MCP gateway (Streamable HTTP at `/mcp`), acting as the signed-in user, and the `deploybot login` and `deploybot logout` CLI logic (`mcp/cli`). [README](mcp/README.md), [design](mcp/docs/design.md). |
 | `console/` | The SvelteKit web console (adapter-node), a BFF that reads and writes only through the API; it also serves the public site pages. [README](console/README.md), [design](console/docs/design.md). |
 | `cmd/deploybot-server/` | The server binary: `deploybot-server api [--migrate]` or `deploybot-server mcp`. Called as `bot-api-server` or `bot-mcp-server` (for example through a symlink), it runs that mode. |
 | `cmd/deploybot/` | The user CLI: `deploybot login`, `deploybot logout`. |
 | `docs/contracts/` | The frozen contracts: `api-v1.md`, `oauth-v1.md`, `agent-protocol-v1.md`. |
+
+An organization owns hosts and contains projects. Its owners and admins manage the hosts, join tokens and each project's access to a host (`metrics` or `deploy`), and act as admin on every project in it. A project reaches only the hosts it has access to. The agent knows nothing of organizations: it sees project slugs only.
 
 One Go module, `github.com/more-than-code/bot-control-plane`, covers `api/`, `mcp/` and `cmd/`. Flags, environment variables, ports and log lines of each server are described in its part's README.
 

@@ -165,22 +165,26 @@ func TestSummariesReplaceSeparators(t *testing.T) {
 	}
 
 	projects, err := json.Marshal(map[string]any{
-		"projects": []any{map[string]any{"name": dirty, "role": dirty}},
+		"orgs":     []any{map[string]any{"id": "o1", "name": dirty, "role": dirty}},
+		"projects": []any{map[string]any{"name": dirty, "role": dirty, "org_id": "o1", "via": "org"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustSummary(t, "projects", summarizeProjects(projects), "1 projects: "+clean+" ("+clean+")", 1)
+	mustSummary(t, "projects", summarizeProjects(projects), "1 projects: "+clean+" ("+clean+" via org) in "+clean, 1)
+	mustSummary(t, "orgs", summarizeOrgs(projects), "1 orgs: "+clean+" ("+clean+")", 1)
 
 	hosts, err := json.Marshal(map[string]any{
 		"items": []any{map[string]any{
-			"name": dirty, "status": dirty, "relation": "shared", "share_level": dirty,
+			"name": dirty, "status": dirty, "access_level": dirty,
+			"access": []any{map[string]any{"project_name": dirty, "level": dirty}},
 		}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustSummary(t, "hosts", summarizeHosts(hosts), "1 hosts: "+clean+" "+clean+" (shared: "+clean+")", 1)
+	mustSummary(t, "hosts", summarizeHosts(hosts, false), "1 hosts: "+clean+" "+clean+" ("+clean+")", 1)
+	mustSummary(t, "org hosts", summarizeHosts(hosts, true), "1 hosts: "+clean+" "+clean+" (access: "+clean+" "+clean+")", 1)
 
 	processes, err := json.Marshal(map[string]any{
 		"sampled_at": dirty,
@@ -383,4 +387,62 @@ func structuredNames(t *testing.T, res *mcp.CallToolResult) []string {
 		names[i] = item.Name
 	}
 	return names
+}
+
+// v1.24: a project's host list shows access_level, not the deprecated
+// relation; an org's host list shows each host's project access.
+func TestSummarizeHostsAccess(t *testing.T) {
+	project := []byte(`{"items":[
+		{"name":"pi1","status":"online","access_level":"deploy","relation":"owner","share_level":"deploy"},
+		{"name":"pi2","status":"offline","access_level":"metrics","relation":"shared","share_level":"metrics"},
+		{"name":"pi3","status":"online"}
+	]}`)
+	if got, want := summarizeHosts(project, false), "3 hosts: pi1 online (deploy), pi2 offline (metrics), pi3 online"; got != want {
+		t.Fatalf("project hosts\n got %q\nwant %q", got, want)
+	}
+	org := []byte(`{"items":[
+		{"name":"pi1","status":"online","access_level":null,"access":[
+			{"project_id":"a","project_name":"lab","level":"deploy"},
+			{"project_id":"b","project_name":"web","level":"metrics"},
+			{"project_id":"c","project_name":"ops","level":"deploy"},
+			{"project_id":"d","project_name":"qa","level":"metrics"},
+			{"project_id":"e","project_name":"ml","level":"metrics"}
+		]},
+		{"name":"pi2","status":"online","access_level":null,"access":[]}
+	]}`)
+	want := "2 hosts: pi1 online (access: lab deploy, web metrics, ops deploy, 2 more), pi2 online (no project access)"
+	if got := summarizeHosts(org, true); got != want {
+		t.Fatalf("org hosts\n got %q\nwant %q", got, want)
+	}
+}
+
+// A project the caller reaches as a member shows its role; one reached through
+// the org says so. An org the caller is not in (no orgs entry) is not named.
+func TestSummarizeProjectsOrg(t *testing.T) {
+	payload := []byte(`{
+		"orgs":[{"id":"o1","name":"More Than Code","slug":"more-than-code","role":"owner"}],
+		"projects":[
+			{"id":"p1","name":"Deploybot","role":"owner","org_id":"o1","via":"member"},
+			{"id":"p2","name":"Daikou","role":"admin","org_id":"o1","via":"org"},
+			{"id":"p3","name":"AI Hub UAT","role":"admin","org_id":"o2","via":"member"},
+			{"id":"p4","name":"Old","role":"viewer"}
+		]}`)
+	want := "4 projects: Deploybot (owner) in More Than Code, Daikou (admin via org) in More Than Code, AI Hub UAT (admin), Old (viewer)"
+	if got := summarizeProjects(payload); got != want {
+		t.Fatalf("projects\n got %q\nwant %q", got, want)
+	}
+}
+
+// list_orgs returns only the orgs array from /v1/me.
+func TestProjectOrgs(t *testing.T) {
+	got := string(projectOrgs([]byte(`{"user":{"id":"u","email":"a@example"},"orgs":[{"id":"o1","name":"Lab","slug":"lab","role":"admin","created_at":"2026-11-14T00:00:00Z"}],"projects":[{"id":"p"}]}`)))
+	if got != `{"orgs":[{"id":"o1","name":"Lab","slug":"lab","role":"admin","created_at":"2026-11-14T00:00:00Z"}]}` {
+		t.Fatalf("projectOrgs %s", got)
+	}
+	if got := string(projectOrgs([]byte(`{"user":{},"projects":[]}`))); got != `{"orgs":[]}` {
+		t.Fatalf("projectOrgs without orgs %s", got)
+	}
+	if got := summarizeOrgs(projectOrgs([]byte(`{"projects":[]}`))); got != "0 orgs" {
+		t.Fatalf("empty orgs summary %q", got)
+	}
 }

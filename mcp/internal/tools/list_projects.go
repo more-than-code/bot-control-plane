@@ -14,7 +14,7 @@ const listProjectsSchema = `{"type":"object","additionalProperties":false}`
 func registerListProjects(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "list_projects",
-		Description: "List the projects the signed-in user belongs to. Reads the caller's profile and project memberships (id, name, slug, role) from stored API data. Does not contact any host.",
+		Description: "List the projects the signed-in user can reach, with the organization each belongs to. Reads the caller's profile, organizations (id, name, slug, role) and projects (id, name, slug, role, org_id, via) from stored API data. via is member for a project membership, or org when the caller reaches the project only as an owner or admin of its organization (role is then admin). Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(listProjectsSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
