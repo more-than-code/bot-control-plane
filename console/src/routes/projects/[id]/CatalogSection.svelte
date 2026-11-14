@@ -634,7 +634,6 @@
 		{now}
 		shared={{
 			projectId,
-			hosts,
 			canAdmin,
 			message,
 			renameServiceId,

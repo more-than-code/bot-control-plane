@@ -13,14 +13,22 @@
 		omitted,
 		truncated,
 		canAdmin,
-		message
+		message,
+		projectNames = {}
 	}: {
 		tokens: JoinToken[];
 		omitted: number;
 		truncated: boolean;
 		canAdmin: boolean;
 		message: string | null;
+		/** Org project names by id, for the Grant column. */
+		projectNames?: Record<string, string>;
 	} = $props();
+
+	function grantText(token: JoinToken): string {
+		if (!token.grant) return 'none';
+		return `${projectNames[token.grant.project_id] ?? 'a project'} (${token.grant.level})`;
+	}
 
 	function stateOf(token: JoinToken): string {
 		if (token.revoked_at) return 'revoked';
@@ -30,6 +38,7 @@
 
 	const columns = $derived<Column<JoinToken>[]>([
 		{ key: 'hint', label: 'Hint' },
+		{ key: 'grant', label: 'Grant' },
 		{ key: 'state', label: 'State' },
 		{ key: 'created', label: 'Created' },
 		{ key: 'expires', label: 'Expires' },
@@ -41,7 +50,7 @@
 	<Notice kind="error">{message}</Notice>
 {/if}
 <p class="text-muted-foreground mb-4 text-sm">
-	Create join tokens from <a class="text-primary underline underline-offset-4" href="?tab=hosts#new-host">Hosts → Add a host</a>.
+	Create join tokens from <a class="text-primary underline underline-offset-4" href="?tab=hosts#new-host">Hosts → Add a host</a>, or from a project's Hosts tab.
 </p>
 {#if omitted > 0}
 	<p class="text-muted-foreground mb-2 text-sm">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
@@ -54,6 +63,7 @@
 	{#snippet row(token)}
 		<tr>
 			<td class="p-2 align-middle">{token.host_name_hint ?? 'n/a'}</td>
+			<td class="p-2 align-middle">{grantText(token)}</td>
 			<td class="p-2 align-middle">{stateOf(token)}</td>
 			<td class="p-2 align-middle"><LocalTime iso={token.created_at} /></td>
 			<td class="p-2 align-middle"><LocalTime iso={token.expires_at} /></td>

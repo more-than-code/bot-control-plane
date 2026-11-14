@@ -1,5 +1,4 @@
 import type {
-	Approval,
 	CatalogAction,
 	CatalogEntry,
 	CatalogGrant,
@@ -31,7 +30,13 @@ import type {
 	ImageStatus,
 	ImageVolume,
 	ImageWorkload,
-	ShareLevel,
+	AccessLevel,
+	HostAccess,
+	HostAccessSummary,
+	JoinGrant,
+	Org,
+	OrgMember,
+	OrgRole,
 	Invite,
 	InviteLookup,
 	JoinToken,
@@ -150,20 +155,57 @@ export function parseProject(value: unknown): Project | null {
 	const created_at = timestamp(value.created_at);
 	if (!id || !isUuid(id) || !name || !slug || !created_at || !isRole(value.role)) return null;
 	if (!/^[a-z0-9-]+$/.test(slug)) return null;
+	// api-v1 v1.24: an older API sends neither key. A present bad value drops the project.
+	const org_id = value.org_id == null ? null : text(value.org_id, 36);
+	if (org_id === null && value.org_id != null) return null;
+	if (org_id !== null && !isUuid(org_id)) return null;
+	if (value.via != null && value.via !== 'member' && value.via !== 'org') return null;
+	const via = value.via === 'org' ? 'org' : 'member';
+	return { id, name, slug, role: value.role, created_at, org_id, via };
+}
+
+const ORG_ROLES = new Set<OrgRole>(['owner', 'admin', 'member']);
+
+export function isOrgRole(value: unknown): value is OrgRole {
+	return typeof value === 'string' && ORG_ROLES.has(value as OrgRole);
+}
+
+/** The agent slug grammar (api-v1 v1.24 item 1). */
+const ORG_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+export function parseOrg(value: unknown): Org | null {
+	if (!isRecord(value)) return null;
+	const id = text(value.id, 36);
+	const name = text(value.name, 80);
+	const slug = text(value.slug, 64);
+	const created_at = timestamp(value.created_at);
+	if (!id || !isUuid(id) || !name || !slug || !ORG_SLUG.test(slug) || !created_at || !isOrgRole(value.role)) return null;
 	return { id, name, slug, role: value.role, created_at };
 }
 
-export function parseMe(payload: unknown): { user: User; projects: Project[] } | null {
+export function parseOrgMember(value: unknown): OrgMember | null {
+	if (!isRecord(value)) return null;
+	const user_id = text(value.user_id, 36);
+	const email = text(value.email, 254);
+	const name = text(value.name, 200);
+	const added_at = timestamp(value.added_at);
+	if (!user_id || !isUuid(user_id) || !email || name === null || !added_at || !isOrgRole(value.role)) return null;
+	return { user_id, email, name, role: value.role, added_at };
+}
+
+/**
+ * The session. A project or org that does not parse (an unknown role, a bad id) is left out: one bad
+ * item must not sign the user out of everything. A missing `orgs` (an API before v1.24) is no orgs.
+ */
+export function parseMe(payload: unknown): { user: User; projects: Project[]; orgs: Org[] } | null {
 	if (!isRecord(payload)) return null;
 	const user = parseUser(payload.user);
 	if (!user || !Array.isArray(payload.projects)) return null;
-	const projects: Project[] = [];
-	for (const item of payload.projects) {
-		const project = parseProject(item);
-		if (!project) return null;
-		projects.push(project);
-	}
-	return { user, projects };
+	if (payload.orgs != null && !Array.isArray(payload.orgs)) return null;
+	const projects = payload.projects.map(parseProject).filter((project): project is Project => project != null);
+	const rawOrgs: unknown[] = Array.isArray(payload.orgs) ? payload.orgs : [];
+	const orgs = rawOrgs.map(parseOrg).filter((org): org is Org => org != null);
+	return { user, projects, orgs };
 }
 
 export function parseMember(value: unknown): Member | null {
@@ -181,7 +223,6 @@ const HOST_STATUS = new Set<HostStatus>(['online', 'offline', 'asleep', 'revoked
 export function parseHost(value: unknown): Host | null {
 	if (!isRecord(value)) return null;
 	const id = text(value.id, 36);
-	const project_id = text(value.project_id, 36);
 	const name = text(value.name, 80);
 	const node_type = text(value.node_type, 80);
 	const os = text(value.os, 80);
@@ -190,19 +231,22 @@ export function parseHost(value: unknown): Host | null {
 	const agent_version = optionalText(value.agent_version, 80);
 	const last_seen_at = optionalText(value.last_seen_at, 64);
 	const revoked_at = optionalText(value.revoked_at, 64);
-	if (!id || !isUuid(id) || !project_id || !isUuid(project_id) || !name || !enrolled_at) return null;
+	const org_id = optionalUuid(value.org_id);
+	if (!id || !isUuid(id) || !name || !enrolled_at || org_id === undefined) return null;
 	if (node_type === null || os === null || arch === null) return null;
 	if (typeof value.always_on !== 'boolean') return null;
 	if (typeof value.status !== 'string' || !HOST_STATUS.has(value.status as HostStatus)) return null;
 	if (agent_version === undefined || last_seen_at === undefined || revoked_at === undefined) return null;
-	const share = parseHostShare(value);
-	if (!share) return null;
-	const parsed = parseProgramsField(value);
-	// The allowlist names other projects; only members of the owning project may see it (api-v1 v1.23 item 1).
-	const programs = parsed && share.relation !== 'owner' ? { ...parsed, projects: null } : parsed;
+	const access_level = hostAccessLevel(value);
+	if (access_level === undefined) return null;
+	const access = hostAccessList(value.access);
+	if (access === undefined) return null;
+	// `programs.projects` names other projects: the API sends it to org owners and admins only and null to
+	// everyone else (api-v1 v1.24 item 1, amended), so the console shows it whenever it is present.
+	const programs = parseProgramsField(value);
 	return {
 		id,
-		project_id,
+		org_id,
 		name,
 		node_type,
 		os,
@@ -213,10 +257,56 @@ export function parseHost(value: unknown): Host | null {
 		last_seen_at,
 		enrolled_at,
 		revoked_at,
-		relation: share.relation,
-		share_level: share.share_level,
+		access_level,
+		access,
 		programs
 	};
+}
+
+function isAccessLevel(value: unknown): value is AccessLevel {
+	return value === 'metrics' || value === 'deploy';
+}
+
+/**
+ * `access_level` (api-v1 v1.24), or null in an org-scoped view. Without the key, the deprecated v1.1 mirrors
+ * say the same thing: `relation` owner is deploy, a share is its `share_level`. A bad value fails the host.
+ */
+function hostAccessLevel(value: Record<string, unknown>): AccessLevel | null | undefined {
+	if (Object.hasOwn(value, 'access_level')) {
+		if (value.access_level === null) return null;
+		return isAccessLevel(value.access_level) ? value.access_level : undefined;
+	}
+	if (value.relation === 'owner') return 'deploy';
+	if (value.relation === 'shared') return isAccessLevel(value.share_level) ? value.share_level : undefined;
+	return null;
+}
+
+/** At most this many access rows per host are kept; more is not a list the console can show. */
+const ACCESS_CAP = 500;
+
+function parseAccessSummary(value: unknown): HostAccessSummary | null {
+	if (!isRecord(value)) return null;
+	const project_id = text(value.project_id, 36);
+	const project_name = text(value.project_name, 80);
+	if (!project_id || !isUuid(project_id) || !project_name || !isAccessLevel(value.level)) return null;
+	return { project_id, project_name, level: value.level };
+}
+
+/** Missing or null: not an org admin's view (null). A present list that is not one fails the host. A bad row is left out. */
+function hostAccessList(value: unknown): HostAccessSummary[] | null | undefined {
+	if (value == null) return null;
+	if (!Array.isArray(value) || value.length > ACCESS_CAP) return undefined;
+	return value.map(parseAccessSummary).filter((row): row is HostAccessSummary => row != null);
+}
+
+/** `GET /v1/hosts/{id}/access` row. */
+export function parseHostAccess(value: unknown): HostAccess | null {
+	const summary = parseAccessSummary(value);
+	if (!summary || !isRecord(value)) return null;
+	const granted_by = optionalUuid(value.granted_by);
+	const granted_at = optionalText(value.granted_at, 64);
+	if (granted_by === undefined || granted_at === undefined) return null;
+	return { ...summary, granted_by, granted_at };
 }
 
 /**
@@ -292,17 +382,6 @@ function reportedBool(value: Record<string, unknown>, key: string): boolean | nu
 	return typeof value[key] === 'boolean' ? value[key] : null;
 }
 
-/** Owner carries a null level. A share must name metrics or deploy. */
-function parseHostShare(value: Record<string, unknown>): { relation: 'owner' | 'shared'; share_level: ShareLevel | null } | null {
-	if (value.relation === 'owner') {
-		if (value.share_level != null) return null;
-		return { relation: 'owner', share_level: null };
-	}
-	if (value.relation !== 'shared') return null;
-	if (value.share_level !== 'metrics' && value.share_level !== 'deploy') return null;
-	return { relation: 'shared', share_level: value.share_level };
-}
-
 export function parseJoinToken(value: unknown): JoinToken | null {
 	if (!isRecord(value)) return null;
 	const id = text(value.id, 36);
@@ -319,7 +398,18 @@ export function parseJoinToken(value: unknown): JoinToken | null {
 	}
 	if (used_by_host_id === undefined) return null;
 	if (used_by_host_id !== null && !isUuid(used_by_host_id)) return null;
-	return { id, host_name_hint, created_by, created_at, expires_at, used_at, used_by_host_id, revoked_at };
+	const grant = parseJoinGrant(value.grant);
+	if (grant === undefined) return null;
+	return { id, host_name_hint, created_by, created_at, expires_at, used_at, used_by_host_id, revoked_at, grant };
+}
+
+/** Missing or null: no grant. A present grant must name a project and a level. */
+export function parseJoinGrant(value: unknown): JoinGrant | null | undefined {
+	if (value == null) return null;
+	if (!isRecord(value)) return undefined;
+	const project_id = text(value.project_id, 36);
+	if (!project_id || !isUuid(project_id) || !isAccessLevel(value.level)) return undefined;
+	return { project_id, level: value.level };
 }
 
 function inviteRole(value: unknown): Invite['role'] | null {
@@ -914,40 +1004,6 @@ export function parseProgramSpec(value: unknown): ProgramSpec | null {
  * Program `env_sets` and `secret_env` (api-v1 v1.22). Missing or null is none, as from an API before
  * v1.22. A present value that does not parse rejects the row, as for images.
  */
-/**
- * Approval `env_sets` and `secret_env`. Unlike a ProgramSpec, missing or null is "not reported" (null), so the
- * host owner never reads an approval from an older API as having no secrets. A present bad value rejects the row.
- */
-function parseApprovalSources(
-	value: Record<string, unknown>
-): {
-	env_sets: string[] | null;
-	secret_env: Record<string, string> | null;
-	env_set_values: Record<string, Record<string, string>> | null;
-} | null {
-	const env_sets = value.env_sets == null ? null : parseNameList(value.env_sets);
-	const secret_env = value.secret_env == null ? null : parseSecretEnv(value.secret_env);
-	const env_set_values = value.env_set_values == null ? null : parseSetValues(value.env_set_values);
-	if ((value.env_sets != null && !env_sets) || (value.secret_env != null && !secret_env)) return null;
-	if (value.env_set_values != null && !env_set_values) return null;
-	return { env_sets, secret_env, env_set_values };
-}
-
-/** `{<set>: {KEY: value}}`: at most 8 sets, each an env map (64 keys, values up to 4096 bytes, one line). */
-function parseSetValues(value: unknown): Record<string, Record<string, string>> | null {
-	if (!isRecord(value)) return null;
-	const names = Object.keys(value);
-	if (names.length > 8) return null;
-	const sets: Record<string, Record<string, string>> = {};
-	for (const name of names) {
-		if (!isSetName(name)) return null;
-		const env = parseEnv(value[name]);
-		if (!env) return null;
-		sets[name] = env;
-	}
-	return sets;
-}
-
 function parseEnvSources(value: Record<string, unknown>): { env_sets: string[]; secret_env: Record<string, string> } | null {
 	const env_sets = value.env_sets == null ? [] : parseNameList(value.env_sets);
 	const secret_env = value.secret_env == null ? {} : parseSecretEnv(value.secret_env);
@@ -1068,56 +1124,6 @@ export function parseCatalogPreview(value: unknown): CatalogPreview | null {
 	const command_display = commandDisplay(value.command_display);
 	if (!exec || !args || !env || !command_display) return null;
 	return { exec, args, env, command_display };
-}
-
-export function parseApproval(value: unknown): Approval | null {
-	if (!isRecord(value) || typeof value.shell !== 'boolean') return null;
-	if (!requireKey(value, 'approved_by') || !requireKey(value, 'approved_at')) return null;
-	if (!requireKey(value, 'exec') || !requireKey(value, 'args') || !requireKey(value, 'env')) return null;
-	const entry_id = text(value.entry_id, 36);
-	const entry_name = text(value.entry_name, 48);
-	const project_id = text(value.project_id, 36);
-	const project_name = text(value.project_name, 80);
-	const host_id = text(value.host_id, 36);
-	const spec_hash = text(value.spec_hash, 64);
-	const command_display = commandDisplay(value.command_display);
-	const exec = text(value.exec, 256);
-	const args = parseArgs(value.args);
-	const env = parseEnv(value.env);
-	const sources = parseApprovalSources(value);
-	const dir = parseDir(value.dir);
-	const run_as = text(value.run_as, 32);
-	const requested_by = text(value.requested_by, 36);
-	const requested_at = timestamp(value.requested_at);
-	const approved_by = optionalUuid(value.approved_by);
-	const approved_at = optionalText(value.approved_at, 64);
-	if (!entry_id || !isUuid(entry_id) || !entry_name || !CATALOG_NAME.test(entry_name)) return null;
-	if (!project_id || !isUuid(project_id) || !project_name || !host_id || !isUuid(host_id)) return null;
-	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !command_display || !exec || !args || !env || !sources || !dir) return null;
-	if (!run_as || run_as === 'root' || !RUN_AS.test(run_as) || !requested_by || !isUuid(requested_by) || !requested_at) return null;
-	if (approved_by === undefined || approved_at === undefined) return null;
-	if (value.status !== 'pending' && value.status !== 'approved') return null;
-	return {
-		entry_id,
-		entry_name,
-		project_id,
-		project_name,
-		host_id,
-		spec_hash,
-		command_display,
-		exec,
-		args,
-		env,
-		...sources,
-		dir,
-		run_as,
-		shell: value.shell,
-		status: value.status,
-		requested_by,
-		requested_at,
-		approved_by,
-		approved_at
-	};
 }
 
 export function parseProgramStatus(value: unknown): ProgramStatus | null {
@@ -1763,14 +1769,6 @@ export function parseCatalogList(payload: unknown): CatalogList | null {
 	const page = parseListPayload(payload);
 	if (!page) return null;
 	return collectRows(page.raw, page.next != null, parseCatalogEntry);
-}
-
-export type ApprovalList = { items: Approval[]; omitted: number; truncated: boolean };
-
-export function parseApprovalList(payload: unknown): ApprovalList | null {
-	const page = parseListPayload(payload);
-	if (!page) return null;
-	return collectRows(page.raw, page.next != null, parseApproval);
 }
 
 function collectRows<T>(raw: unknown[], truncated: boolean, parse: (value: unknown) => T | null): { items: T[]; omitted: number; truncated: boolean } {

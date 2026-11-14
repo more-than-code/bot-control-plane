@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 import { env } from '$env/dynamic/private';
 import { fail, isHttpError, isRedirect, redirect, type RequestEvent } from '@sveltejs/kit';
-import type { User, Project } from '../api-types';
+import type { Org, User, Project } from '../api-types';
 import { present } from './redact';
 import { clearSession, SESSION_COOKIE, signinLocation } from './session';
 import { isRecord, parseListPayload, parseMe } from './shape';
@@ -68,7 +68,7 @@ export type SessionResult =
 	| { kind: 'anonymous' }
 	| { kind: 'unauthorized' }
 	| { kind: 'unavailable' }
-	| { kind: 'ready'; user: User; projects: Project[] };
+	| { kind: 'ready'; user: User; projects: Project[]; orgs: Org[] };
 
 type CallOptions = {
 	bearer: string | null;
@@ -148,7 +148,7 @@ export async function loadSession(event: RequestEvent): Promise<SessionResult> {
 		const payload = await callApi(event, '/v1/me', undefined, { bearer: raw, on401: 'throw', clearOn401: true });
 		const session = parseMe(payload);
 		if (!session) return { kind: 'unavailable' };
-		return { kind: 'ready', user: session.user, projects: session.projects };
+		return { kind: 'ready', user: session.user, projects: session.projects, orgs: session.orgs };
 	} catch (err) {
 		if (isRedirect(err)) throw err;
 		if (err instanceof ApiError && err.status === 401) return { kind: 'unauthorized' };

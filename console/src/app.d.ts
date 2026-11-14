@@ -1,4 +1,4 @@
-import type { Project, User } from '$lib/api-types';
+import type { Org, Project, User } from '$lib/api-types';
 
 declare global {
 	namespace App {
@@ -6,6 +6,8 @@ declare global {
 		interface Locals {
 			user: User | null;
 			projects: Project[];
+			/** The caller's organizations from `/v1/me` (api-v1 v1.24). */
+			orgs: Org[];
 			sessionUnavailable: boolean;
 		}
 		// interface PageData {}

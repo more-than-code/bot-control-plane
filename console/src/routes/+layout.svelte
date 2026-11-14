@@ -4,6 +4,8 @@
 	import { page } from '$app/state';
 	import { onMount, untrack } from 'svelte';
 	import AppWindow from '@lucide/svelte/icons/app-window';
+	import Building2 from '@lucide/svelte/icons/building-2';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import FolderKanban from '@lucide/svelte/icons/folder-kanban';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
@@ -46,6 +48,10 @@
 	const onProjects = $derived(
 		path === '/projects' || path.startsWith('/projects/') || path.startsWith('/hosts/')
 	);
+	// The org switcher names the org whose page is open.
+	const currentOrg = $derived(
+		path.startsWith('/orgs/') ? (data.orgs?.find((org) => path.startsWith(`/orgs/${org.id}`)) ?? null) : null
+	);
 </script>
 
 {#if sitePage}
@@ -70,6 +76,31 @@
 							: 'text-muted-foreground'}"
 						aria-current={onProjects ? 'page' : undefined}><FolderKanban class="size-4" />Projects</a
 					>
+					{#if data.user && (data.orgs?.length ?? 0) > 0}
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger
+								class={cn(
+									buttonVariants({ variant: 'ghost', size: 'sm' }),
+									'max-w-48 min-w-0 font-normal',
+									currentOrg ? 'bg-muted text-foreground' : 'text-muted-foreground'
+								)}
+								aria-label="Switch organization"
+							>
+								<Building2 class="size-4" />
+								<span class="min-w-0 truncate">{currentOrg?.name ?? 'Organizations'}</span>
+								<ChevronDown class="size-4" />
+							</DropdownMenu.Trigger>
+							<DropdownMenu.Content align="start">
+								{#each data.orgs ?? [] as org (org.id)}
+									<DropdownMenu.Item>
+										{#snippet child({ props })}
+											<a href="/orgs/{org.id}" aria-current={currentOrg?.id === org.id ? 'page' : undefined} {...props}>{org.name}</a>
+										{/snippet}
+									</DropdownMenu.Item>
+								{/each}
+							</DropdownMenu.Content>
+						</DropdownMenu.Root>
+					{/if}
 				</nav>
 				{#if data.user}
 					<div class="ml-auto flex min-w-0 max-w-full items-center gap-2 sm:order-2 sm:ml-0">

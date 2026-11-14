@@ -312,7 +312,7 @@ describe('auth session', { concurrency: false }, () => {
 			'src/routes/projects/+page.svelte',
 			'src/routes/projects/[id]/HostsSection.svelte',
 			'src/routes/projects/[id]/MembersSection.svelte',
-			'src/routes/projects/[id]/TokensSection.svelte'
+			'src/routes/orgs/[id]/TokensSection.svelte'
 		]) {
 			const text = readFileSync(resolve(root, file), 'utf8');
 			assert.equal(text.includes('More items not shown'), true, file);

@@ -5,8 +5,8 @@
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
 	import { page } from '$app/state';
-	import AddHostGuide from './AddHostGuide.svelte';
-	import JoinTokenResult from './JoinTokenResult.svelte';
+	import AddHostGuide from '$lib/components/AddHostGuide.svelte';
+	import JoinTokenResult from '$lib/components/JoinTokenResult.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import {
 		JOIN_DIALOG_CLOSED,
@@ -25,6 +25,8 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import * as Select from '$lib/components/ui/select';
+	import type { AccessProject } from '$lib/host-access';
 
 	let {
 		tokens,
@@ -32,18 +34,32 @@
 		created,
 		slug,
 		open,
-		message = null
+		message = null,
+		action = null,
+		pollKey = 'project:enrol',
+		grantProjects = null,
+		description = 'The host joins the organization with deploy access for this project.'
 	}: {
 		/** Join tokens, read only to see whether the created token was used. */
 		tokens: JoinToken[];
 		hosts: Host[];
 		created: CreatedJoin | null;
-		slug: string;
+		/** The project the host is for (its runner.toml slug). Null on the org page until a grant names one. */
+		slug: string | null;
 		/** Initial state of the guide. */
 		open: boolean;
 		/** The createToken action's message: a failure, or a note with the created token. */
 		message?: string | null;
+		/** The createToken action URL. Defaults to `createToken` on this page. */
+		action?: string | null;
+		/** The load dependency the enrolment poll invalidates. */
+		pollKey?: string;
+		/** Org page: the org's projects, for the token's optional grant (api-v1 v1.24 item 3). */
+		grantProjects?: AccessProject[] | null;
+		description?: string;
 	} = $props();
+
+	let grantProject = $state('');
 
 	const TRIGGER_ID = 'create-join-token';
 	const FOCUS_IDS: Record<Exclude<JoinDialogFocus, null>, string> = {
@@ -96,7 +112,7 @@
 		const poller = createEnrolPoller({
 			isWaiting: () => untrack(() => enrolment?.kind === 'waiting'),
 			refresh: async () => {
-				await invalidate('project:enrol');
+				await invalidate(pollKey);
 				now = Date.now();
 			},
 			doc: document,
@@ -128,7 +144,7 @@
 				<Dialog.Header class="shrink-0 pr-8">
 					<Dialog.Title>{shown || dialog.confirming ? 'Join token created' : 'Create join token'}</Dialog.Title>
 					<Dialog.Description>
-						{shown || dialog.confirming ? 'Enrol the host with this token. It is not shown again.' : 'A host enrols into this project with a join token.'}
+						{shown || dialog.confirming ? 'Enrol the host with this token. It is not shown again.' : description}
 					</Dialog.Description>
 				</Dialog.Header>
 				<div class="min-h-0 overflow-y-auto">
@@ -148,7 +164,7 @@
 					{:else}
 						<form
 							method="POST"
-							action={actionUrlFrom(page.url, 'createToken')}
+							action={action ?? actionUrlFrom(page.url, 'createToken')}
 							class="grid gap-3"
 							use:enhance={() => {
 								dispatch({ type: 'submit' });
@@ -172,6 +188,36 @@
 								<Input id="token-expiry" name="expires_in_sec" inputmode="numeric" min="300" max="604800" />
 							</Label>
 							<p class="text-muted-foreground text-sm">Leave expiry blank for 24 hours. The minimum is 300 and the maximum is 604800.</p>
+							{#if grantProjects}
+								<Label class="grid gap-1.5" for="token-grant-project">
+									Give a project access (optional)
+									<Select.Root type="single" name="grant_project_id" bind:value={grantProject}>
+										<Select.Trigger id="token-grant-project" class="w-full">
+											{grantProjects.find((project) => project.id === grantProject)?.name ?? 'No project'}
+										</Select.Trigger>
+										<Select.Content>
+											<Select.Item value="" label="No project">No project</Select.Item>
+											{#each grantProjects as project (project.id)}
+												<Select.Item value={project.id} label={project.name}>{project.name}</Select.Item>
+											{/each}
+										</Select.Content>
+									</Select.Root>
+								</Label>
+								{#if grantProject !== ''}
+									<Label class="grid gap-1.5" for="token-grant-level">
+										Access level
+										<Select.Root type="single" name="grant_level" value="deploy">
+											<Select.Trigger id="token-grant-level" class="w-full">
+												<Select.Value />
+											</Select.Trigger>
+											<Select.Content>
+												<Select.Item value="deploy">deploy</Select.Item>
+												<Select.Item value="metrics">metrics</Select.Item>
+											</Select.Content>
+										</Select.Root>
+									</Label>
+								{/if}
+							{/if}
 							<div class="flex flex-wrap items-center gap-2">
 								<Button type="submit">Create join token</Button>
 								<Dialog.Close type="button" class={buttonVariants({ variant: 'outline' })}>Cancel</Dialog.Close>

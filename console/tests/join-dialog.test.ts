@@ -17,9 +17,9 @@ import {
 } from '../src/lib/add-host.ts';
 import type { CreatedJoin } from '../src/lib/api-types.ts';
 import { acceptedInstallServer, acceptedServerUrl } from '../src/lib/server/validate.ts';
-import AddHostGuide from '../src/routes/projects/[id]/AddHostGuide.svelte';
-import AddHostSection from '../src/routes/projects/[id]/AddHostSection.svelte';
-import JoinTokenResult from '../src/routes/projects/[id]/JoinTokenResult.svelte';
+import AddHostGuide from '../src/lib/components/AddHostGuide.svelte';
+import AddHostSection from '../src/lib/components/AddHostSection.svelte';
+import JoinTokenResult from '../src/lib/components/JoinTokenResult.svelte';
 import { JOIN, PROJECT } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 

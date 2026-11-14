@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { render } from 'svelte/server';
-import NewProject from '../src/routes/projects/NewProject.svelte';
+import NewProject from '../src/lib/components/NewProject.svelte';
 
 test('new project is a button that opens a dialog, not an inline form', () => {
 	const body = render(NewProject, { props: { action: '?/create', failed: false } }).body;

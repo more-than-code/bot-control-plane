@@ -935,7 +935,7 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		const services = renderCopies({
 			rows: [row],
 			entries: [imageEntry(null)],
-			hosts: [{ id: HOST_ID, name: 'pi1', relation: 'owner', share_level: null } as Host],
+			hosts: [{ id: HOST_ID, name: 'pi1', access_level: 'deploy', access: null } as Host],
 			canAdmin: true
 		});
 		assert.equal(services.includes('Docker health check'), true);

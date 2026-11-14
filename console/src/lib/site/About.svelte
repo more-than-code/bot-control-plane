@@ -131,13 +131,14 @@
 		{
 			title: 'Teams',
 			icon: UsersIcon,
-			body: 'Share projects and hosts with the right level of access.',
+			body: 'An organization owns the hosts; its projects get the access they need.',
 			items: [
+				{ text: 'Organizations own hosts; org admins manage them' },
 				{ text: 'Owner, admin and viewer roles per project' },
 				{ text: 'Invite links that expire (single-use by default)' },
 				{ text: 'Per-entry rights to run, stop, restart or deploy' },
-				{ text: 'Share a host with other projects (metrics or deploy)' },
-				{ text: 'One-time join tokens for adding hosts (admins)' }
+				{ text: 'Project access per host (metrics or deploy)' },
+				{ text: 'One-time join tokens for adding hosts (org admins)' }
 			]
 		}
 	];
@@ -174,7 +175,7 @@
 	];
 
 	const steps = [
-		{ title: 'Enrol a host', body: 'Install the agent and join the host to a project.' },
+		{ title: 'Enrol a host', body: 'Install the agent and join the host to your organization.' },
 		{ title: 'Add a catalog entry', body: 'Describe the program or container you want to run.' },
 		{ title: 'Deploy and watch', body: 'Deploy it to your hosts and view its health and logs.' }
 	];

@@ -49,7 +49,7 @@ function program(actions: CatalogAction[] = [...ALL], name = 'api'): ServiceEntr
 function host(id = HOST_ID, name = 'pi1', overrides: Partial<Host> = {}): Host {
 	return {
 		id,
-		project_id: PROJECT.id,
+		org_id: PROJECT.id,
 		name,
 		node_type: 'pi',
 		os: 'linux',
@@ -60,8 +60,8 @@ function host(id = HOST_ID, name = 'pi1', overrides: Partial<Host> = {}): Host {
 		last_seen_at: '2026-10-14T00:00:00Z',
 		enrolled_at: '2026-10-13T00:00:00Z',
 		revoked_at: null,
-		relation: 'owner',
-		share_level: null,
+		access_level: 'deploy',
+		access: null,
 		programs: { enabled: true, run_as: ['joe'], allow_shell: false, policy_hash: 'p', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null },
 		...overrides
 	};
@@ -246,7 +246,7 @@ test('the not-running list covers programs on hosts that can run them and have n
 		host(),
 		host(OTHER_HOST, 'pi2'),
 		host('00000000-0000-4000-8000-0000000000ac', 'bare', { programs: null }),
-		host('00000000-0000-4000-8000-0000000000ad', 'metrics', { relation: 'shared', share_level: 'metrics' })
+		host('00000000-0000-4000-8000-0000000000ad', 'metrics', { access_level: 'metrics' })
 	];
 	const pairs = notRunningPairs([program(), image(), program(['logs'], 'quiet')], hosts, index);
 	assert.deepEqual(

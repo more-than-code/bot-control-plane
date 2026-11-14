@@ -9,5 +9,7 @@ export const load: LayoutServerLoad = (event) => {
 		? { id: event.locals.user.id, name: event.locals.user.name, avatarUrl: avatarSrc(event.locals.user.avatar_url) }
 		: null;
 	const timeZone = parseTimeZone(event.cookies.get(TIME_ZONE_COOKIE)) ?? systemTimeZone();
-	return present(event, { user, theme: parseTheme(event.cookies.get(THEME_COOKIE)), timeZone });
+	// The org switcher in the header (api-v1 v1.24 `/v1/me` orgs): names only.
+	const orgs = event.locals.user ? event.locals.orgs.map((org) => ({ id: org.id, name: org.name })) : [];
+	return present(event, { user, orgs, theme: parseTheme(event.cookies.get(THEME_COOKIE)), timeZone });
 };

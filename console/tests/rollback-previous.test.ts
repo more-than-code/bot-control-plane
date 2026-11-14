@@ -60,7 +60,7 @@ function imageEntry(): ImageEntry {
 function host(): Host {
 	return {
 		id: HOST_ID,
-		project_id: PROJECT.id,
+		org_id: PROJECT.id,
 		name: 'pi1',
 		node_type: 'pi',
 		os: 'linux',
@@ -71,8 +71,8 @@ function host(): Host {
 		last_seen_at: '2026-10-14T00:00:00Z',
 		enrolled_at: '2026-10-13T00:00:00Z',
 		revoked_at: null,
-		relation: 'owner',
-		share_level: null,
+		access_level: 'deploy',
+		access: null,
 		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null }
 	};
 }

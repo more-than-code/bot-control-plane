@@ -79,6 +79,7 @@ async function renderPage(
 export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.user = null;
 	event.locals.projects = [];
+	event.locals.orgs = [];
 	event.locals.sessionUnavailable = false;
 
 	const logical = logicalPath(event.url.pathname);
@@ -102,6 +103,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (session.kind === 'ready') {
 		event.locals.user = session.user;
 		event.locals.projects = session.projects;
+		event.locals.orgs = session.orgs;
 	} else if (session.kind === 'unavailable') {
 		event.locals.sessionUnavailable = true;
 	}

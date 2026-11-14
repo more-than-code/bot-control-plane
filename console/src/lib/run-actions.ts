@@ -2,7 +2,6 @@ import Play from '@lucide/svelte/icons/play';
 import RotateCw from '@lucide/svelte/icons/rotate-cw';
 import ScrollText from '@lucide/svelte/icons/scroll-text';
 import Square from '@lucide/svelte/icons/square';
-import { APPROVAL_WAIT } from '$lib/catalog';
 import type { CatalogRunKind, CatalogRunState } from '$lib/project-action';
 
 /** Button and form label for each catalog action on a copy row. `run` is shown as Start. */
@@ -34,7 +33,6 @@ export const RUN_FORM_ACTION: Record<CatalogRunKind, string> = {
 /** Title of a result view: what ran, and whether it worked. */
 export function runResultTitle(state: CatalogRunState, fallbackName: string): string {
 	const name = state.name || fallbackName;
-	if (state.message === APPROVAL_WAIT) return `${RUN_LABEL[state.kind]} ${name}: waiting for approval`;
 	if (state.message) return `${RUN_LABEL[state.kind]} ${name} failed`;
 	return `${RUN_DONE[state.kind]} ${name}`;
 }

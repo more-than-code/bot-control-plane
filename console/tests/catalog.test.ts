@@ -6,7 +6,6 @@ import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import type { CatalogGrant, Host, Member, ProgramEntry } from '../src/lib/api-types.ts';
 import {
-	APPROVAL_WAIT,
 	hoistPreviewEnv,
 	previewToken,
 	reuseIdempotencyKey,
@@ -16,7 +15,6 @@ import {
 	submitCatalogPreview
 } from '../src/lib/catalog.ts';
 import type { CatalogEditorState, CatalogRunState } from '../src/lib/project-action.ts';
-import CatalogApprovals from '../src/routes/hosts/[id]/CatalogApprovals.svelte';
 import HostPage from '../src/routes/hosts/[id]/+page.svelte';
 import { actions as hostActions } from '../src/routes/hosts/[id]/+page.server.ts';
 import CatalogEntryForm from '../src/routes/projects/[id]/CatalogEntryForm.svelte';
@@ -28,7 +26,6 @@ import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import {
-	parseApproval,
 	parseCatalogEntry,
 	parseCatalogGrants,
 	parseCatalogPreview,
@@ -57,7 +54,7 @@ const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_has
 function host(overrides: Partial<Host> = {}): Host {
 	return {
 		id: HOST_ID,
-		project_id: PROJECT.id,
+		org_id: PROJECT.id,
 		name: 'pi1',
 		node_type: 'pi',
 		os: 'linux',
@@ -68,8 +65,8 @@ function host(overrides: Partial<Host> = {}): Host {
 		last_seen_at: '2026-10-14T00:00:00Z',
 		enrolled_at: '2026-10-13T00:00:00Z',
 		revoked_at: null,
-		relation: 'owner',
-		share_level: null,
+		access_level: 'deploy',
+		access: null,
 		programs,
 		...overrides
 	};
@@ -273,14 +270,6 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(logsHtml.includes('Log lines'), false);
 	});
 
-	test('a forbidden approval wait is the info notice', () => {
-		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
-		const html = render(CatalogRunResult, { props: { close: closeSnippet, result: runState('run', APPROVAL_WAIT) } }).body;
-		assert.equal(html.includes(APPROVAL_WAIT), true);
-		assert.equal(html.includes('role="status"'), true);
-		assert.equal(html.includes('role="alert"'), false);
-	});
-
 	test('parse preview shows argv or the refusal, and the shell box shows the risk', async () => {
 		const calls = installFetch(() =>
 			envelope({ exec: 'npm', args: ['run', 'dev'], env: {}, command_display: 'npm run dev' })
@@ -410,57 +399,47 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(unloaded.includes('>Save<'), false);
 	});
 
-	test('approvals stay hidden for non-admins, and approve posts the shown spec hash', async () => {
+	test('the Access section shows to org admins only, and its grant posts the level for that project', async () => {
 		setPageUrl(`http://console.example/hosts/${HOST_ID}?tab=overview`);
 		const hidden = render(HostPage, { props: { data: hostPageData(false) as never, form: null } }).body;
+		assert.equal(hidden.includes('id="access"'), false);
 		assert.equal(hidden.includes('Catalog approvals'), false);
 		const shown = render(HostPage, { props: { data: hostPageData(true) as never, form: null } }).body;
-		assert.equal(shown.includes('Catalog approvals'), true);
-		const queue = render(CatalogApprovals, {
-			props: {
-				approvals: [approval()],
-				omitted: 0,
-				truncated: false,
-				message: null
-			}
-		}).body;
-		assert.equal(queue.includes(`value="${HASH}"`), true);
-		assert.equal(queue.includes('/usr/bin/npm'), true);
-		assert.equal(queue.includes('PORT=3031'), true);
-		assert.equal(labels(queue).includes('Approve web'), true);
-		assert.equal(labels(queue).includes('Revoke web'), true);
+		assert.equal(shown.includes('id="access"'), true);
+		assert.equal(labels(shown).includes('Remove access Lab'), true);
+		assert.equal(labels(shown).includes('Change level Lab'), true);
 
 		const calls = installFetch((call) => {
-			assert.equal(call.method, 'POST');
-			assert.equal(call.url.pathname, `/v1/hosts/${HOST_ID}/catalog-approvals`);
-			return envelope(approval());
+			assert.equal(call.method, 'PUT');
+			assert.equal(call.url.pathname, `/v1/hosts/${HOST_ID}/access/${PROJECT.id}`);
+			return envelope({ project_id: PROJECT.id, project_name: 'Lab', level: 'metrics', granted_by: USER.id, granted_at: '2026-11-14T00:00:00Z' });
 		});
 		await assert.rejects(
 			async () => {
-				await hostActions.approveCatalog(
+				await hostActions.setAccess(
 					fakeEvent({
-						url: `http://console.example/hosts/${HOST_ID}?tab=overview&/approveCatalog`,
+						url: `http://console.example/hosts/${HOST_ID}?tab=overview&/setAccess`,
 						session: TOKEN,
 						user: USER,
 						projects: [PROJECT],
 						params: { id: HOST_ID },
-						form: { entry_id: ENTRY_ID, spec_hash: HASH }
+						form: { host_id: HOST_ID, project_id: PROJECT.id, level: 'metrics' }
 					}).event as never
 				);
 			},
 			(err: unknown) => isRedirect(err) && err.status === 303
 		);
-		assert.equal(calls[0]?.body, JSON.stringify({ entry_id: ENTRY_ID, spec_hash: HASH }));
+		assert.equal(calls[0]?.body, JSON.stringify({ level: 'metrics' }));
 
-		const skipped = installFetch(() => envelope(null, 500, 'error', 'should not approve'));
-		const bad = await hostActions.approveCatalog(
+		const skipped = installFetch(() => envelope(null, 500, 'error', 'should not grant'));
+		const bad = await hostActions.setAccess(
 			fakeEvent({
-				url: `http://console.example/hosts/${HOST_ID}?/approveCatalog`,
+				url: `http://console.example/hosts/${HOST_ID}?/setAccess`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
 				params: { id: HOST_ID },
-				form: { entry_id: ENTRY_ID, spec_hash: 'not-a-hash' }
+				form: { host_id: HOST_ID, project_id: PROJECT.id, level: 'owner' }
 			}).event as never
 		);
 		assert.equal(isActionFailure(bad), true);
@@ -529,10 +508,6 @@ describe('catalog', { concurrency: false }, () => {
 		);
 		assert.equal(parseProgramLogs({ unit: 'unit', lines: ['ok', 1], truncated: false }), null);
 		assert.equal(parseProgramLogs({ unit: 'unit', lines: ['bell\u0007'], truncated: false })?.lines[0], 'bell\uFFFD');
-		assert.equal(parseApproval({ ...approval(), spec_hash: 'nope' }), null);
-		const { env: _env, ...approvalWithoutEnv } = approval();
-		assert.equal(parseApproval(approvalWithoutEnv), null);
-		assert.equal(parseApproval({ ...approval(), args: 'npm' }), null);
 		assert.equal(parseCatalogPreview({ exec: 'npm', args: ['run'], env: {}, command_display: '' }), null);
 		const raw: Record<string, unknown> = { ...host() };
 		delete raw.programs;
@@ -956,36 +931,10 @@ function dialogProps(editor: CatalogEditorState | null) {
 	};
 }
 
-function approval() {
-	return {
-		entry_id: ENTRY_ID,
-		entry_name: 'web',
-		project_id: PROJECT.id,
-		project_name: 'Lab',
-		host_id: HOST_ID,
-		spec_hash: HASH,
-		command_display: 'npm run dev',
-		exec: '/usr/bin/npm',
-		args: ['run', 'dev'],
-		env: { PORT: '3031' },
-		env_sets: [],
-		secret_env: {},
-		env_set_values: {},
-		dir: '/srv/app',
-		run_as: 'joe',
-		shell: false,
-		status: 'pending' as const,
-		requested_by: USER.id,
-		requested_at: '2026-10-14T00:00:00Z',
-		approved_by: null,
-		approved_at: null
-	};
-}
-
-function hostPageData(canApproveCatalog: boolean) {
+function hostPageData(canManageAccess: boolean) {
 	return {
 		host: host(),
-		projectName: 'Lab',
+		org: { id: PROJECT.org_id, name: 'Home Lab', role: canManageAccess ? 'admin' : 'member' },
 		tab: 'overview' as const,
 		range: '1h' as const,
 		processSort: 'cpu' as const,
@@ -994,11 +943,12 @@ function hostPageData(canApproveCatalog: boolean) {
 		metrics: [],
 		processes: null,
 		processesMessage: null,
-		canApproveCatalog,
-		approvals: canApproveCatalog ? [approval()] : [],
-		approvalsOmitted: 0,
-		approvalsTruncated: false,
-		approvalsMessage: null
+		canManageAccess,
+		access: canManageAccess
+			? [{ project_id: PROJECT.id, project_name: 'Lab', level: 'deploy', granted_by: USER.id, granted_at: '2026-11-14T00:00:00Z' }]
+			: [],
+		accessProjects: canManageAccess ? [PROJECT] : [],
+		accessMessage: null
 	};
 }
 

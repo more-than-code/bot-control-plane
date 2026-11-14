@@ -100,7 +100,7 @@ const EXPECT_ORDER = 'Expected status min must be at most the max.';
 const BAD_PROTOCOL = 'Choose TCP or HTTP.';
 const BAD_FORM = UNREAD_HEALTH_CHECKS;
 
-/** Same gate as Rename: admin+, and a deploy share only for its own project's services. */
+/** Same gate as Rename: admin+ of this project, for its own services. */
 export function canEditHealthChecks(input: Parameters<typeof canRenameService>[0]): boolean {
 	return canRenameService(input);
 }

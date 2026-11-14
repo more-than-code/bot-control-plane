@@ -20,27 +20,12 @@ test('serviceLabel prefers display_name, then name, then a port label', () => {
 	assert.equal(serviceLabel({ name: 'port-80', owner_user: 'root', kind: 'process', container_name: 'caddy' }), 'port 80 \u00b7 root');
 });
 
-test('rename is offered to an admin of this project when the host owner is unknown or local', () => {
-	assert.equal(
-		canRenameService({ canAdmin: false, projectId: PROJECT, serviceProjectId: PROJECT, hostOwnerProjectId: PROJECT }),
-		false
-	);
-	assert.equal(
-		canRenameService({ canAdmin: true, projectId: PROJECT, serviceProjectId: OTHER, hostOwnerProjectId: null }),
-		true
-	);
-	assert.equal(
-		canRenameService({ canAdmin: true, projectId: PROJECT, serviceProjectId: OTHER, hostOwnerProjectId: PROJECT }),
-		true
-	);
-	assert.equal(
-		canRenameService({ canAdmin: true, projectId: PROJECT, serviceProjectId: OTHER, hostOwnerProjectId: OTHER }),
-		false
-	);
-	assert.equal(
-		canRenameService({ canAdmin: true, projectId: PROJECT, serviceProjectId: PROJECT, hostOwnerProjectId: OTHER }),
-		true
-	);
+test('rename is offered to an admin of this project for its own services only', () => {
+	assert.equal(canRenameService({ canAdmin: false, projectId: PROJECT, serviceProjectId: PROJECT }), false);
+	assert.equal(canRenameService({ canAdmin: true, projectId: PROJECT, serviceProjectId: PROJECT }), true);
+	assert.equal(canRenameService({ canAdmin: true, projectId: PROJECT, serviceProjectId: OTHER }), false);
+	// An org-level service (no project) is never this project's to rename.
+	assert.equal(canRenameService({ canAdmin: true, projectId: PROJECT, serviceProjectId: null }), false);
 });
 
 test('a process service link goes to the entry on Catalog & services and caps catalog.q at 100 code points', () => {

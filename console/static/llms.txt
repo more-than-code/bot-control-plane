@@ -38,7 +38,7 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 
 ## Add a host
 
-- The user needs a project in the console first. Creating a project and creating a join token are console-only; there is no MCP tool for either, so tell the user before you prepare the host.
+- The user needs a project in the console first. Hosts belong to the user's organization, and an org owner or admin gives each project metrics or deploy access to a host. Creating a project and creating a join token are console-only; there is no MCP tool for either, so tell the user before you prepare the host.
 - AI agents: follow "Enrol with an AI agent" in the install guide below. The user gives you access to the host (their SSH, a shell on the host, their cloud console, or commands they paste); you run the download, checks and install with the policy flags they agree to, then hand them the enrol command from the install output. The user creates the join token in the console, which gives them instructions for you that include the server URL; put exactly that URL into the enrol command, never a guessed one. The user types the token at the enrol prompt themselves. Never ask for, read or handle the join token.
 - [Install bot-agent](https://github.com/more-than-code/bot-agent/blob/main/docs/install.md): `install.sh`, enrolling with a one-time join token, the optional root runner for catalog entries, and the host allowlist (`/etc/bot-agent/runner.toml`).
 - [bot-agent README](https://github.com/more-than-code/bot-agent/blob/main/README.md): what the agent collects, how it deploys images and programs, and health checks.
@@ -47,7 +47,7 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 
 - Resilience: deploys wait for health (Docker health status or HTTP/TCP checks); an unhealthy deploy rolls back to the previous container automatically; one-step rollback to an earlier image digest; a health failure policy per service; programs run as systemd units and survive reboot.
 - Visibility: host metrics with history, running processes and discovered services, health check history per service, container logs with secrets redacted, container logs capped at 10 MB × 3 by default.
-- Teams: owner, admin and viewer roles per project, invite links that expire (single-use by default), per-entry rights to run, stop, restart or deploy for a role or a user, a host shared with other projects at metrics or deploy level, and one-time join tokens for adding hosts.
+- Teams: organizations that own the hosts, with owner, admin and member roles; owner, admin and viewer roles per project; invite links that expire (single-use by default); per-entry rights to run, stop, restart or deploy for a role or a user; project access to each host at metrics or deploy level, set by org admins; and one-time join tokens for adding hosts.
 
 ## Self-hosting from source
 

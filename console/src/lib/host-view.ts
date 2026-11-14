@@ -1,4 +1,4 @@
-import type { Approval, Host, ProcessItem, ProcessSample } from './api-types';
+import type { Host, HostAccess, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
 import { parseRange, type RangeKey } from './ranges';
 import type { Column } from './table';
 
@@ -109,7 +109,6 @@ export type ServiceLink = {
 
 export type HostPage = {
 	host: Host | null;
-	projectName: string | null;
 	tab: HostTab;
 	range: RangeKey;
 	processSort: ProcessSort;
@@ -118,12 +117,14 @@ export type HostPage = {
 	metrics: MetricChart[];
 	processes: ProcessSample | null;
 	processesMessage: string | null;
-	/** Owning-project admin+. The approvals queue stays hidden for everyone else. */
-	canApproveCatalog: boolean;
-	approvals: Approval[];
-	approvalsOmitted: number;
-	approvalsTruncated: boolean;
-	approvalsMessage: string | null;
+	/** The host's org, when the caller is in it: the breadcrumb and the access section. */
+	org: { id: string; name: string; role: OrgRole } | null;
+	/** Org owner or admin: the Access section (api-v1 v1.24 item 2). Hidden for everyone else. */
+	canManageAccess: boolean;
+	access: HostAccess[];
+	/** The org's projects the access form may grant (it needs their slugs for the runner.toml note). */
+	accessProjects: Project[];
+	accessMessage: string | null;
 };
 
 export function parseHostTab(value: string | null): HostTab {
@@ -164,10 +165,9 @@ export function hasProcessSample(sample: ProcessSample | null): sample is Proces
 	return sample != null && sample.sampled_at != null && (sample.items.length > 0 || sample.skipped > 0);
 }
 
-/** Hosts the Catalog & services host filter offers: owned hosts and deploy shares. */
-export function serviceHostReachable(host: Pick<Host, 'relation' | 'share_level'>): boolean {
-	if (host.relation === 'owner') return true;
-	return host.relation === 'shared' && host.share_level === 'deploy';
+/** Hosts the Catalog & services host filter offers: hosts this project has `deploy` access to. */
+export function serviceHostReachable(host: Pick<Host, 'access_level'>): boolean {
+	return host.access_level === 'deploy';
 }
 
 /** Label shown in the Service column. Empty when the process has no service. */
@@ -228,12 +228,13 @@ export function alignSeries(series: ReadonlyArray<{ points: readonly MetricPoint
 }
 
 /**
- * The host page "Host policy" line (spec-projects-gate-programs §3.4), for members of the owning project only:
- * `Programs on, Images off, Projects: a, b`. Null for any other caller. The list comes from the agent's hello;
- * an older agent does not send it ("not reported").
+ * The host page "Host policy" line (spec-projects-gate-programs §3.4): `Programs on, Images off, Projects: a, b`.
+ * The project list is present only for org owners and admins (api-v1 v1.24 item 1, amended); the line shows when
+ * it is, or when the API sent the caller `access` (an org admin whose agent did not report a list: "not reported").
+ * Null for any other caller.
  */
-export function hostPolicyLine(host: Pick<Host, 'relation' | 'programs'>): string | null {
-	if (host.relation !== 'owner') return null;
+export function hostPolicyLine(host: Pick<Host, 'access' | 'programs'>): string | null {
+	if (host.programs?.projects == null && host.access == null) return null;
 	const programs = host.programs;
 	const onOff = (value: boolean) => (value ? 'on' : 'off');
 	const projects = programs?.projects == null ? 'not reported' : programs.projects.length === 0 ? 'none' : programs.projects.join(', ');

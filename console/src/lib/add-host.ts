@@ -8,16 +8,19 @@ export const ENROL_WAIT_MS = 15 * 60 * 1000;
  * Instructions an admin pastes into their own AI agent. Never the join token: the user types it at the enrol prompt.
  * With `server` (already checked by `acceptedServerUrl`) the agent fills it into the enrol command; the URL sits on
  * its own line so it cannot run into the sentence. Without it the user fills in the server URL from the Deploybot console.
- * `slug` is interpolated as is: `parseProject` accepts only `^[a-z0-9-]+$`.
+ * `slug` is interpolated as is: `parseProject` accepts only `^[a-z0-9-]+$`. Null (an org token with no grant) asks
+ * for the organization and leaves the project slug for the admin to fill in.
  */
-export function agentPrompt(slug: string, server?: string | null): string {
+export function agentPrompt(slug: string | null, server?: string | null): string {
 	const enrol = server
 		? `Stop before enrolment. Give me the enrol command from the "next:" line of the install output with <server URL> replaced by the URL on the next line. I will run it myself and type the join token.\n${server}`
 		: 'Stop before enrolment. Give me the enrol command from the "next:" line of the install output, with <server URL> left as is. I will fill in the server URL from the Deploybot console and run it myself.';
+	const target = slug ? `project "${slug}"` : 'organization';
+	const flag = slug ?? '<project slug>';
 	return [
-		`Help me add a host to my Deploybot project "${slug}". Run the steps on <host> with the access I give you (my SSH, a shell on the host, my cloud console, or commands I paste).`,
+		`Help me add a host to my Deploybot ${target}. Run the steps on <host> with the access I give you (my SSH, a shell on the host, my cloud console, or commands I paste).`,
 		'Follow https://deploybot.dev/llms.txt and the section "Enrol with an AI agent" in the bot-agent install guide it links.',
-		`Before you install, show me the install command and stop until I agree. If this host only runs catalog images, it uses the policy flags (--project ${slug}, the --image patterns, --enable).`,
+		`Before you install, show me the install command and stop until I agree. If this host only runs catalog images, it uses the policy flags (--project ${flag}, the --image patterns, --enable).`,
 		enrol,
 		'Never ask for, read, or handle the join token.'
 	].join('\n');

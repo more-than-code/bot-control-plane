@@ -37,7 +37,7 @@ const INTERVAL_MESSAGE = 'Interval must be between 30 and 300 seconds.';
 
 const HOST: Host = {
 	id: HOST_ID,
-	project_id: PROJECT.id,
+	org_id: PROJECT.id,
 	name: 'pi1',
 	node_type: 'pi',
 	os: 'linux',
@@ -48,8 +48,8 @@ const HOST: Host = {
 	last_seen_at: '2026-10-14T00:00:00Z',
 	enrolled_at: '2026-10-13T00:00:00Z',
 	revoked_at: null,
-	relation: 'owner',
-	share_level: null,
+	access_level: 'deploy',
+	access: null,
 	programs: null
 };
 

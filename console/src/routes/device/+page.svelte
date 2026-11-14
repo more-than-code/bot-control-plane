@@ -30,7 +30,7 @@
 
 {#if data.device}
 	<p>
-		<strong>{data.device.client_name}</strong> acts as you, with your project roles.
+		<strong>{data.device.client_name}</strong> acts as you, with your project roles (as an organization admin, admin on your organization's projects).
 	</p>
 	<p class="text-muted-foreground text-sm">Code <span class="text-foreground font-mono">{data.device.user_code}</span>. Expires <LocalTime iso={data.device.expires_at} />.</p>
 	<p class="text-muted-foreground mb-4 text-sm">{statusText[data.device.status] ?? 'This code cannot be used.'}</p>

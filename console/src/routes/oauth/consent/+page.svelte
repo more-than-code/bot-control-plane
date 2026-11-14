@@ -30,7 +30,7 @@
 		{/if}
 	</p>
 	<p class="mb-2 font-mono text-sm break-all">{data.request.redirect_host}</p>
-	<p class="mb-4">acts as you, with your role in each of your {data.request.projects_count} projects</p>
+	<p class="mb-4">acts as you, with your role in each of your {data.request.projects_count} projects (as an organization admin, that includes your organization's projects). It cannot change organizations, members, join tokens or host access.</p>
 	<form method="POST" class="flex flex-wrap gap-2" use:enhance>
 		<Input type="hidden" name="request" value={data.request.id} />
 		<Button type="submit" formaction={approveAction}>Allow</Button>
