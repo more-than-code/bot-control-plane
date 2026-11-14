@@ -647,3 +647,29 @@ func auditViaForName(t *testing.T, rows []store.AuditEntry, action, name string)
 	t.Fatalf("no %s for %s", action, name)
 	return ""
 }
+
+// api-v1 v1.24.1: a delegated GET → PUT → confirm of a stored service spec,
+// which carries timeout_sec 0, applies with no field changes.
+func TestDelegatedCatalogGetPutRoundTrip(t *testing.T) {
+	c := newCatalogCast(t)
+	_ = createImage(t, c.w, c.console, c.sc.project.ID, "web", nginxSpec)
+	got := createImageGet(t, c.w, c.tok, c.sc.project.ID, "web")
+	spec, err := json.Marshal(got["spec"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(spec), `"timeout_sec":0`) {
+		t.Fatalf("stored spec %s", spec)
+	}
+	status, env, _ := mustCall(t, c.w, c.tok, http.MethodPut, catalogItem(c.sc.project.ID, "web"), catalogImagePutBody(string(spec), "rt-1"))
+	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
+	id, plan, _ := healthPlanOf(t, env)
+	if plan != "will update image entry web: no field changes" {
+		t.Fatalf("plan %q", plan)
+	}
+	status, env = c.w.do(c.tok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("rt-1"))
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if objectPayload(t, env)["spec_hash"] != got["spec_hash"] {
+		t.Fatalf("spec_hash %v -> %v", got["spec_hash"], objectPayload(t, env)["spec_hash"])
+	}
+}

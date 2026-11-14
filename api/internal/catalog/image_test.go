@@ -229,3 +229,60 @@ func TestImageNameOldSuffix(t *testing.T) {
 		}
 	}
 }
+
+// api-v1 v1.24.1: the other kind's field is accepted at 0 and ignored, so a
+// stored spec (which carries both fields) parses back unchanged.
+func TestBuildImageOtherKindFieldZero(t *testing.T) {
+	build := func(spec string) (Image, error) {
+		return BuildImage("web", []byte(spec), nil, nil)
+	}
+	svc, err := build(`{"kind":"service","image":"nginx","timeout_sec":0}`)
+	if err != nil || svc.TimeoutSec != 0 || svc.HealthyAfterSec != 30 {
+		t.Fatalf("service timeout_sec 0 %+v %v", svc, err)
+	}
+	job, err := build(`{"kind":"job","image":"nginx","healthy_after_sec":0}`)
+	if err != nil || job.HealthyAfterSec != 0 || job.TimeoutSec != 600 {
+		t.Fatalf("job healthy_after_sec 0 %+v %v", job, err)
+	}
+	if _, err := build(`{"kind":"service","image":"nginx","timeout_sec":5}`); err == nil || err.Error() != "invalid timeout_sec" {
+		t.Fatalf("service timeout_sec 5 %v", err)
+	}
+	if _, err := build(`{"kind":"job","image":"nginx","healthy_after_sec":5}`); err == nil || err.Error() != "invalid healthy_after_sec" {
+		t.Fatalf("job healthy_after_sec 5 %v", err)
+	}
+	if _, err := build(`{"kind":"service","image":"nginx","timeout_sec":-1}`); err == nil || err.Error() != "invalid timeout_sec" {
+		t.Fatalf("service timeout_sec -1 %v", err)
+	}
+	if _, err := build(`{"kind":"job","image":"nginx","healthy_after_sec":-1}`); err == nil || err.Error() != "invalid healthy_after_sec" {
+		t.Fatalf("job healthy_after_sec -1 %v", err)
+	}
+	// The kind's own field at 0 keeps its range error.
+	if _, err := build(`{"kind":"service","image":"nginx","healthy_after_sec":0}`); err == nil || err.Error() != "invalid healthy_after_sec" {
+		t.Fatalf("service healthy_after_sec 0 %v", err)
+	}
+	if _, err := build(`{"kind":"job","image":"nginx","timeout_sec":0}`); err == nil || err.Error() != "invalid timeout_sec" {
+		t.Fatalf("job timeout_sec 0 %v", err)
+	}
+	// The stored spec, which carries both fields, parses back to the same
+	// stored body and spec_hash.
+	for _, raw := range []string{
+		`{"kind":"service","image":"nginx","healthy_after_sec":45}`,
+		`{"kind":"job","image":"nginx","timeout_sec":120}`,
+	} {
+		img, err := build(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored := SpecJSON(img)
+		if !strings.Contains(stored, `"healthy_after_sec":`) || !strings.Contains(stored, `"timeout_sec":`) {
+			t.Fatalf("stored spec lacks a field: %s", stored)
+		}
+		again, err := build(stored)
+		if err != nil {
+			t.Fatalf("round trip %s: %v", img.Kind, err)
+		}
+		if SpecJSON(again) != stored || ImageHash(again, nil) != ImageHash(img, nil) {
+			t.Fatalf("round trip %s changed\n%s\n%s", img.Kind, stored, SpecJSON(again))
+		}
+	}
+}

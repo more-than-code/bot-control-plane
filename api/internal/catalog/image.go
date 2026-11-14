@@ -243,10 +243,12 @@ func BuildImage(name string, raw []byte, sets SetKeys, files map[string]struct{}
 	if err != nil {
 		return Image{}, err
 	}
-	if kind == "job" && healthySet {
+	// The other kind's field is accepted at 0 and ignored, because a stored
+	// spec carries both (api-v1 v1.24.1).
+	if kind == "job" && healthySet && healthy != 0 {
 		return Image{}, fieldErr("invalid healthy_after_sec")
 	}
-	if kind == "service" && timeoutSet {
+	if kind == "service" && timeoutSet && timeout != 0 {
 		return Image{}, fieldErr("invalid timeout_sec")
 	}
 	if kind == "service" {

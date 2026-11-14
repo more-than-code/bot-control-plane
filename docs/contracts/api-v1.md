@@ -804,3 +804,7 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
     - new `list_orgs` (reads `/v1/me`);
     - `list_hosts` takes `project_id` or `org_id`.
     No write tool for orgs, members, tokens or access. Delegated sessions are refused on every route in item 3 except `GET /v1/me`, `GET /v1/orgs/{id}`, `GET /v1/orgs/{id}/projects` and `GET /v1/orgs/{id}/hosts`, which are `delegatedAllow` reads.
+
+## v1.24.1 image entries round-trip (2026-11-14, approved spec `docs/spec-release-v0231.md` rev 1 §2.7; no migration)
+
+1. **The other kind's wait field may be sent as 0 (amends v1.8 item 11).** An image entry stores both `healthy_after_sec` and `timeout_sec`, and GET returns both, with the field that does not apply to the entry's kind set to `0`. On create and replace (`POST`/`PUT …/catalog[/{name}]`), a `service` may now carry `"timeout_sec":0` and a `job` may carry `"healthy_after_sec":0`; the value is ignored and stored as `0`, as before. Any other value of the other kind's field is still `bad_request` with the same message (`invalid timeout_sec`, `invalid healthy_after_sec`). The kind's own field keeps its range and default. `spec_hash` is unchanged for every entry. So GET then PUT of an unedited image entry succeeds. `healthcheck.timeout_sec` is a different field and is unaffected.
