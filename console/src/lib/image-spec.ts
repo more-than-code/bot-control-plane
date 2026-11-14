@@ -88,6 +88,8 @@ export type ImageDraft = {
 	healthOnUnhealthy: HealthUnhealthyAction;
 	healthUnhealthyAfter: string;
 	healthMaxActions: string;
+	/** Shared networks (api-v1 v1.25), comma-separated as typed. Blank means none. */
+	networks: string;
 	/** Keys the stored entry had that an edit must keep (see storedHealthKeys). */
 	healthKeepKeys: HealthKeepKey[];
 	/** Stored numbers, sent under Do nothing when a keep key names them. The visible fields may have been edited. */
@@ -108,6 +110,36 @@ export type DockerPrefill =
 
 function fail(field: string, message: string): { ok: false; field: string; message: string } {
 	return { ok: false, field, message };
+}
+
+/** Shared network name rule (api-v1 v1.25 item 1). */
+const SHARED_NETWORK_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/** At most this many shared networks per entry. */
+export const SHARED_NETWORKS_MAX = 4;
+/** Docker network name the agent uses for a shared network. */
+export const SHARED_NETWORK_PREFIX = 'deploybot-shared-';
+
+export function isSharedNetworkName(value: string): boolean {
+	return SHARED_NETWORK_NAME.test(value);
+}
+
+/** The comma-separated field as names: trimmed, blanks dropped, order kept. */
+export function sharedNetworkNames(text: string): string[] {
+	return text
+		.split(',')
+		.map((item) => item.trim())
+		.filter((item) => item !== '');
+}
+
+/** Blank is none. Otherwise 1–4 unique names, as the API checks them. */
+function cleanNetworks(text: string): { ok: true; networks: string[] } | { ok: false; field: string; message: string } {
+	const names = sharedNetworkNames(text);
+	if (names.length > SHARED_NETWORKS_MAX) return fail('networks', `At most ${SHARED_NETWORKS_MAX} shared networks.`);
+	if (names.some((name) => !isSharedNetworkName(name))) {
+		return fail('networks', 'A shared network name starts with a lowercase letter or digit and uses up to 32 lowercase letters, digits, and hyphens.');
+	}
+	if (new Set(names).size !== names.length) return fail('networks', 'List each shared network once.');
+	return { ok: true, networks: names };
 }
 
 function deniedEnvKey(key: string): boolean {
@@ -587,6 +619,8 @@ export function imageSpecFromDraft(
 	}
 	const logs = cleanLogging(draft);
 	if (!logs.ok) return logs;
+	const networks = cleanNetworks(draft.networks);
+	if (!networks.ok) return networks;
 	let healthPolicy: ImageHealthPolicy | null = null;
 	if (workload === 'service') {
 		const policy = cleanHealthPolicy(draft, healthcheck);
@@ -613,6 +647,7 @@ export function imageSpecFromDraft(
 		logging: logs.logging,
 		health_policy: healthPolicy
 	};
+	if (networks.networks.length > 0) spec.networks = networks.networks;
 	return { ok: true, spec, name };
 }
 
@@ -725,12 +760,15 @@ export function dockerRunPreview(input: {
 	memoryMb: number | null;
 	/** Set only when both values are in range. Otherwise the preview uses 10m and 3. */
 	logging?: ImageLogging | null;
+	/** Shared network names; each becomes `--network deploybot-shared-<name>`. */
+	networks?: readonly string[];
 }): string {
 	const parts = ['docker run'];
 	if (input.name) parts.push('--name', shellQuote(input.name));
 	if (input.restart) parts.push('--restart', input.restart);
 	const logs = previewLogOpts(input.logging);
 	parts.push('--log-opt', `max-size=${logs.size}m`, '--log-opt', `max-file=${logs.files}`);
+	for (const network of input.networks ?? []) parts.push('--network', shellQuote(`${SHARED_NETWORK_PREFIX}${network}`));
 	for (const port of input.ports) {
 		const binding = port.public === true ? `${port.host}:${port.container}` : `127.0.0.1:${port.host}:${port.container}`;
 		parts.push('-p', binding);
@@ -924,6 +962,7 @@ function readLogOpt(value: string): { key: 'max-size' | 'max-file'; amount: numb
  * Detach, name, tty, interactive, and `--rm` are ignored and listed. `--rm` is quiet on a job.
  * Any other unknown flag refuses the whole paste and names that flag.
  * Privileged, capabilities, devices, env files, host network, host pid, and root are refused.
+ * `--network deploybot-shared-<name>` (or `--net`) adds that shared network; any other network is refused.
  * `--log-opt` keeps max-size and max-file only when both are in range. `--log-driver` is refused.
  */
 export function parseDockerRun(line: string, workload: ImageWorkload = 'service'): DockerPrefill {
@@ -947,6 +986,7 @@ export function parseDockerRun(line: string, workload: ImageWorkload = 'service'
 	const command: string[] = [];
 	let logSize: number | null = null;
 	let logFiles: number | null = null;
+	const networks: string[] = [];
 	for (let index = 2; index < words.length; index += 1) {
 		const word = words[index] ?? '';
 		if (image) {
@@ -969,6 +1009,12 @@ export function parseDockerRun(line: string, workload: ImageWorkload = 'service'
 		if (OUTRIGHT.has(flag.name)) return { ok: false, message: `${flag.name} is not supported.` };
 		if ((flag.name === '--network' || flag.name === '--net') && value === 'host') {
 			return { ok: false, message: 'Host networking is not supported.' };
+		}
+		if ((flag.name === '--network' || flag.name === '--net') && value != null && value.startsWith(SHARED_NETWORK_PREFIX)) {
+			const network = value.slice(SHARED_NETWORK_PREFIX.length);
+			if (!isSharedNetworkName(network)) return { ok: false, message: `${flag.name} is not supported.` };
+			if (!networks.includes(network)) networks.push(network);
+			continue;
 		}
 		if (flag.name === '--pid' && value === 'host') return { ok: false, message: 'Host pid is not supported.' };
 		if ((flag.name === '-u' || flag.name === '--user') && value != null && (value === 'root' || value === '0' || value.startsWith('0:') || value.endsWith(':0') || value.includes('root'))) {
@@ -1051,6 +1097,7 @@ export function parseDockerRun(line: string, workload: ImageWorkload = 'service'
 	draft.ports = ports;
 	draft.env = env;
 	draft.volumes = volumes;
+	if (networks.length > 0) draft.networks = networks.join(', ');
 	return { ok: true, draft, unsupported };
 }
 
@@ -1077,6 +1124,7 @@ export function applyDockerPaste(draft: ImageDraft, parsed: Extract<DockerPrefil
 		volumes: next.volumes ?? [],
 		restart: next.restart ? next.restart : draft.restart,
 		user: next.user != null ? next.user : draft.user,
+		networks: next.networks ?? '',
 		logMaxSizeMb,
 		logMaxFiles
 	};
@@ -1252,6 +1300,7 @@ export function blankImageDraft(): ImageDraft {
 		healthStart: '',
 		logMaxSizeMb: '',
 		logMaxFiles: '',
+		networks: '',
 		healthOnDeployFailure: 'rollback',
 		healthOnUnhealthy: 'none',
 		healthUnhealthyAfter: '',
@@ -1282,6 +1331,7 @@ export function imageRequestBody(spec: ImageSpec, name: string | null): Record<s
 	else payload.timeout_sec = spec.timeout_sec;
 	if (spec.kind === 'service' && spec.healthcheck) payload.healthcheck = spec.healthcheck;
 	if (spec.logging) payload.logging = spec.logging;
+	if (spec.networks && spec.networks.length > 0) payload.networks = spec.networks;
 	if (spec.kind === 'service' && spec.health_policy && Object.keys(spec.health_policy).length > 0) payload.health_policy = spec.health_policy;
 	const body: Record<string, unknown> = { kind: 'image', spec: payload };
 	if (name) body.name = name;
@@ -1360,6 +1410,7 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	draft.healthStart = formText(form, 'health_start').slice(0, 4);
 	draft.logMaxSizeMb = cappedDigits(formText(form, 'log_max_size_mb'), 6);
 	draft.logMaxFiles = cappedDigits(formText(form, 'log_max_files'), 4);
+	draft.networks = formText(form, 'networks').slice(0, 200);
 	const onDeployFailure = formText(form, 'health_on_deploy_failure');
 	const onUnhealthy = formText(form, 'health_on_unhealthy');
 	draft.healthOnDeployFailure = isDeployFailureAction(onDeployFailure) ? onDeployFailure : 'rollback';

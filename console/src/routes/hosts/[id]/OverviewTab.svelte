@@ -9,7 +9,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { Host, SnapshotView } from '$lib/api-types';
 	import { formatBytes, formatCapacity, formatLoad, formatPercent, formatRate, formatTemp, formatUptime } from '$lib/format';
-	import { alignSeries, hostPolicyLine, METRIC_SPECS, type MetricChart, type MetricFormat } from '$lib/host-view';
+	import { alignSeries, hostPolicyLine, hostSharedNetworks, METRIC_SPECS, type MetricChart, type MetricFormat } from '$lib/host-view';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import { RANGES, type RangeKey } from '$lib/ranges';
@@ -72,6 +72,7 @@
 	}
 
 	const policyLine = $derived(hostPolicyLine(host));
+	const sharedNetworks = $derived(hostSharedNetworks(host));
 </script>
 
 <dl class="mb-4 grid gap-3 sm:grid-cols-2">
@@ -82,6 +83,22 @@
 	<div><dt class="text-muted-foreground text-sm">Always on</dt><dd>{host.always_on ? 'yes' : 'no'}</dd></div>
 	{#if policyLine}
 		<div><dt class="text-muted-foreground text-sm">Host policy</dt><dd class="break-words">{policyLine}</dd></div>
+	{/if}
+	{#if sharedNetworks}
+		<div>
+			<dt class="text-muted-foreground text-sm">Shared networks</dt>
+			<dd class="break-words">
+				{#if 'networks' in sharedNetworks}
+					<ul class="grid gap-0.5">
+						{#each sharedNetworks.networks as line (line)}
+							<li>{line}</li>
+						{/each}
+					</ul>
+				{:else}
+					{sharedNetworks.status}
+				{/if}
+			</dd>
+		</div>
 	{/if}
 </dl>
 

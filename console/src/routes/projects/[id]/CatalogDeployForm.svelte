@@ -14,7 +14,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
-	import { imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, isCatalogHost, projectListedBlockReason, reuseIdempotencyKey } from '$lib/catalog';
+	import { imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, imageNetworksBlockReason, isCatalogHost, projectListedBlockReason, reuseIdempotencyKey } from '$lib/catalog';
 	import { blockInFlightSubmit, deployProgressNote, flightFocusTarget, flightLabel } from '$lib/catalog-flight';
 	import {
 		applyHistoryResponse,
@@ -51,6 +51,7 @@
 		onBusy,
 		cancel,
 		projectId = null,
+		projectSlug = null,
 		onViewLogs
 	}: {
 		entry: ImageEntry;
@@ -72,6 +73,8 @@
 		cancel?: Snippet;
 		/** A finished deploy or rollback on a host links to that copy on this tab, with its logs open. */
 		projectId?: string | null;
+		/** For the shared-network hint: an org admin's host view lists each network's member slugs. */
+		projectSlug?: string | null;
 		/** The link was clicked: the drawer closes while the page navigates. */
 		onViewLogs?: () => void;
 	} = $props();
@@ -120,13 +123,17 @@
 	const hasHealthPolicy = $derived(entry.spec.kind === 'service' && !isDefaultHealthPolicy(entry.spec.health_policy));
 	const healthPolicyBlocked = $derived(selectedHost != null && imageHealthPolicyBlockReason(selectedHost, hasHealthPolicy) != null);
 	const projectBlocked = $derived(selectedHost != null && projectListedBlockReason(selectedHost) != null);
+	const networksBlocked = $derived(selectedHost != null && imageNetworksBlockReason(selectedHost, entry.spec.networks, projectSlug) != null);
+	/** Any host reason refuses Deploy for the chosen host; the button is then described by the reasons list. */
+	const deployBlocked = $derived(containerBlocked || filesBlocked || loggingBlocked || healthPolicyBlocked || projectBlocked || networksBlocked);
 
 	/** The reasons a Roll back button is disabled for the chosen host, for its aria-describedby. */
 	function rollbackBlockedBy(rollingThis: boolean): string | undefined {
 		if (rollingThis) return undefined;
 		const ids = [
 			...(healthPolicyBlocked ? [`rollback-${entry.name}-blocked`] : []),
-			...(projectBlocked ? [`rollback-${entry.name}-project`] : [])
+			...(projectBlocked ? [`rollback-${entry.name}-project`] : []),
+			...(networksBlocked ? [`rollback-${entry.name}-networks`] : [])
 		];
 		return ids.length > 0 ? ids.join(' ') : undefined;
 	}
@@ -369,28 +376,34 @@
 					{/each}
 				</div>
 				<Input type="hidden" name="host_id" value={hostId} />
-				{#each eligible as host (host.id)}
-					{@const reason = imageHostBlockReason(host)}
-					{@const filesReason = imageFilesBlockReason(host, entry.spec.files.length > 0)}
-					{@const loggingReason = imageLoggingBlockReason(host, entry.spec.logging != null)}
-					{@const policyReason = imageHealthPolicyBlockReason(host, hasHealthPolicy)}
-					{@const projectReason = projectListedBlockReason(host)}
-					{#if projectReason}
-						<p class="text-muted-foreground text-sm">{host.name}: {projectReason}</p>
-					{/if}
-					{#if reason}
-						<p class="text-muted-foreground text-sm">{host.name}: {reason}</p>
-					{/if}
-					{#if filesReason}
-						<p class="text-muted-foreground text-sm">{host.name}: {filesReason}</p>
-					{/if}
-					{#if loggingReason}
-						<p class="text-muted-foreground text-sm">{host.name}: {loggingReason}</p>
-					{/if}
-					{#if policyReason}
-						<p class="text-muted-foreground text-sm">{host.name}: {policyReason}</p>
-					{/if}
-				{/each}
+				<div id="deploy-{entry.name}-reasons" class="contents">
+					{#each eligible as host (host.id)}
+						{@const reason = imageHostBlockReason(host)}
+						{@const filesReason = imageFilesBlockReason(host, entry.spec.files.length > 0)}
+						{@const loggingReason = imageLoggingBlockReason(host, entry.spec.logging != null)}
+						{@const policyReason = imageHealthPolicyBlockReason(host, hasHealthPolicy)}
+						{@const projectReason = projectListedBlockReason(host)}
+						{@const networksReason = imageNetworksBlockReason(host, entry.spec.networks, projectSlug)}
+						{#if projectReason}
+							<p class="text-muted-foreground text-sm">{host.name}: {projectReason}</p>
+						{/if}
+						{#if reason}
+							<p class="text-muted-foreground text-sm">{host.name}: {reason}</p>
+						{/if}
+						{#if filesReason}
+							<p class="text-muted-foreground text-sm">{host.name}: {filesReason}</p>
+						{/if}
+						{#if loggingReason}
+							<p class="text-muted-foreground text-sm">{host.name}: {loggingReason}</p>
+						{/if}
+						{#if policyReason}
+							<p class="text-muted-foreground text-sm">{host.name}: {policyReason}</p>
+						{/if}
+						{#if networksReason}
+							<p class="text-muted-foreground text-sm">{host.name}: {networksReason}</p>
+						{/if}
+					{/each}
+				</div>
 			</div>
 			{#if entry.spec.kind === 'service'}
 				<p class="text-sm">{healthPolicyRule(entry.spec.health_policy)}</p>
@@ -515,6 +528,11 @@
 					{selectedHost.name}: {projectListedBlockReason(selectedHost)}
 				</p>
 			{/if}
+			{#if historyReady && targets.length > 0 && networksBlocked && selectedHost}
+				<p id="rollback-{entry.name}-networks" class="text-muted-foreground text-sm">
+					{selectedHost.name}: {imageNetworksBlockReason(selectedHost, entry.spec.networks, projectSlug)}
+				</p>
+			{/if}
 			{#if historyReady}
 				{#each targets as item (item.digest)}
 					{@const rollingThis = activeFlight === 'rollback' && shownDigest === item.digest}
@@ -529,7 +547,7 @@
 								<Button
 									type="submit"
 									variant="outline"
-									disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked || healthPolicyBlocked || projectBlocked}
+									disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked || healthPolicyBlocked || projectBlocked || networksBlocked}
 									aria-describedby={rollbackBlockedBy(rollingThis)}
 									aria-disabled={rollingThis ? 'true' : undefined}
 									aria-busy={rollingThis ? 'true' : undefined}
@@ -585,7 +603,8 @@
 				type="submit"
 				form={deployFormId}
 				bind:ref={deploySubmitEl}
-				disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked || loggingBlocked || healthPolicyBlocked || projectBlocked}
+				disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || deployBlocked}
+				aria-describedby={activeFlight !== 'deploy' && deployBlocked ? `deploy-${entry.name}-reasons` : undefined}
 				aria-disabled={activeFlight === 'deploy' ? 'true' : undefined}
 				aria-busy={activeFlight === 'deploy' ? 'true' : undefined}
 				onclick={(event) => {

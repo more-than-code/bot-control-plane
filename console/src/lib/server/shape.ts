@@ -54,6 +54,7 @@ import type {
 	ProjectService,
 	Registry,
 	ServiceSummary,
+	SharedNetwork,
 	OauthRequest,
 	SnapshotView,
 	User
@@ -69,8 +70,10 @@ import {
 	isFileName,
 	isRegistryHost,
 	isSetName,
+	isSharedNetworkName,
 	isUnhealthyAction,
-	redactAssignments
+	redactAssignments,
+	SHARED_NETWORKS_MAX
 } from '../image-spec';
 import { DIGEST_PATTERN, TAG_PATTERN } from '../image-tags';
 import { stripAnsi } from '../ansi';
@@ -335,6 +338,8 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 	if (images === null || docker === null || files === null || logging === null || health_policy === null || secrets === null) return null;
 	const projects = parseAllowlist(value);
 	if (projects === undefined) return null;
+	const shared_networks = parseSharedNetworks(value);
+	if (shared_networks === undefined) return null;
 	const listed = Object.hasOwn(value, 'project_listed') ? value.project_listed : null;
 	if (listed !== null && typeof listed !== 'boolean') return null;
 	return {
@@ -349,8 +354,49 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 		health_policy,
 		secrets,
 		projects,
-		project_listed: listed
+		project_listed: listed,
+		shared_networks
 	};
+}
+
+/** api-v1 v1.25 item 2: at most 8 shared networks per host (an entry joins at most SHARED_NETWORKS_MAX). */
+const HOST_SHARED_NETWORKS_CAP = 8;
+const IPV4_CIDR = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
+
+/**
+ * Shape check only: the subnet is display text here. It is looser than the API's own check (host bits, private
+ * ranges and prefix length are the API's and agent's business), so a value the API sent is never refused for those.
+ */
+function isIpv4Cidr(value: string): boolean {
+	const match = IPV4_CIDR.exec(value);
+	if (!match) return false;
+	const octets = match.slice(1, 5).map(Number);
+	return octets.every((octet) => octet <= 255) && Number(match[5]) <= 32;
+}
+
+/**
+ * `programs.shared_networks` (api-v1 v1.25). Missing or null: the agent did not send it (null).
+ * A present value that is not a valid list is not a policy (undefined), like the other `programs` keys.
+ * `projects` is kept only when present (org owners and admins); a repeated slug is dropped, as in the allowlist.
+ */
+function parseSharedNetworks(value: Record<string, unknown>): SharedNetwork[] | null | undefined {
+	if (!Object.hasOwn(value, 'shared_networks') || value.shared_networks == null) return null;
+	const raw = value.shared_networks;
+	if (!Array.isArray(raw) || raw.length > HOST_SHARED_NETWORKS_CAP) return undefined;
+	const networks: SharedNetwork[] = [];
+	for (const item of raw) {
+		if (!isRecord(item) || typeof item.name !== 'string' || !isSharedNetworkName(item.name)) return undefined;
+		if (typeof item.subnet !== 'string' || !isIpv4Cidr(item.subnet)) return undefined;
+		if (networks.some((network) => network.name === item.name)) return undefined;
+		const network: SharedNetwork = { name: item.name, subnet: item.subnet };
+		if (Object.hasOwn(item, 'projects') && item.projects != null) {
+			const members = parseAllowlist({ projects: item.projects });
+			if (members == null) return undefined;
+			network.projects = members;
+		}
+		networks.push(network);
+	}
+	return networks;
 }
 
 /** The agent sends at most 32 slugs (agent-protocol v1.12). */
@@ -1378,7 +1424,9 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 	if (logging === undefined) return null;
 	const health_policy = parseHealthPolicy(Object.hasOwn(value, 'health_policy') ? value.health_policy : null, workload);
 	if (health_policy === undefined) return null;
-	return {
+	const networks = parseNetworks(Object.hasOwn(value, 'networks') ? value.networks : null);
+	if (networks === undefined) return null;
+	const spec: ImageSpec = {
 		kind: workload,
 		image,
 		command,
@@ -1398,6 +1446,20 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 		logging,
 		health_policy
 	};
+	if (networks.length > 0) spec.networks = networks;
+	return spec;
+}
+
+/** ImageSpec `networks` (api-v1 v1.25 item 1). Null or empty is none; anything not 1–4 unique valid names fails the spec. */
+function parseNetworks(value: unknown): string[] | undefined {
+	if (value == null) return [];
+	if (!Array.isArray(value) || value.length > SHARED_NETWORKS_MAX) return undefined;
+	const names: string[] = [];
+	for (const item of value) {
+		if (typeof item !== 'string' || !isSharedNetworkName(item) || names.includes(item)) return undefined;
+		names.push(item);
+	}
+	return names;
 }
 
 function parseLogLines(value: unknown): { lines: string[]; truncated: boolean } | null {

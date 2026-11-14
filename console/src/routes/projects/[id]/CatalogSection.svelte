@@ -117,6 +117,8 @@
 		imageDeploy = null,
 		onImageSaved,
 		projectId = '',
+		projectSlug = null,
+		hostsIncomplete = false,
 		copies = {},
 		copiesComplete = true,
 		copiesOmitted = 0,
@@ -154,6 +156,10 @@
 		onImageSaved?: (name: string) => void;
 		/** Copies of other projects never match it; also the Deploy drawer's "View logs" link. */
 		projectId?: string;
+		/** For the shared-network hints and block reasons. */
+		projectSlug?: string | null;
+		/** The host list was truncated or could not be read (the shared networks hint says so). */
+		hostsIncomplete?: boolean;
 		/** Running copies by entry name, in host-name order. */
 		copies?: Record<string, ProjectServiceRow[]>;
 		/** False when the copies could not be read: no entry then says it is not deployed. */
@@ -600,6 +606,8 @@
 			{canAdmin}
 			{hosts}
 			{projectId}
+			{projectSlug}
+			{hostsIncomplete}
 			{copiesComplete}
 			editor={editor?.mode === 'edit' && editor.name === entry.name ? editor : null}
 			imageEditor={imageEditor?.mode === 'edit' && imageEditor.name === entry.name ? imageEditor : null}
