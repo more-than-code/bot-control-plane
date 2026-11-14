@@ -70,8 +70,8 @@ func catalogCreatePlan(project, name string, img catalog.Image) string {
 }
 
 // catalogUpdatePlan lists only the fields whose phrases differ. A changed
-// inline env key shows the old value and the new value. Host approvals are
-// gone (api-v1 v1.24 item 4), so the plan no longer counts voided ones.
+// inline env key shows the old value and the new value (api-v1 v1.24 item 4:
+// plans name no approvals).
 func catalogUpdatePlan(name string, old, next catalog.Image) string {
 	var parts []string
 	add := func(field, before, after string) {

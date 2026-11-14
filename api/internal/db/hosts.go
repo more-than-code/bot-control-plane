@@ -111,7 +111,7 @@ func (d *DB) ConsumeJoinToken(ctx context.Context, tokenHash []byte, in store.En
 	defer tx.Rollback(ctx)
 
 	var tok store.JoinToken
-	var idText, orgText string
+	var idText, orgText, creatorText string
 	var grantText, grantLevel *string
 	var stored []byte
 	err = tx.QueryRow(ctx, `
@@ -119,7 +119,7 @@ SELECT id::text, org_id::text, grant_project_id::text, grant_level, token_hash, 
 FROM app.join_tokens
 WHERE token_hash = $1
 FOR UPDATE
-`, tokenHash).Scan(&idText, &orgText, &grantText, &grantLevel, &stored, &tok.UsedAt, &tok.RevokedAt, &tok.ExpiresAt, new(string))
+`, tokenHash).Scan(&idText, &orgText, &grantText, &grantLevel, &stored, &tok.UsedAt, &tok.RevokedAt, &tok.ExpiresAt, &creatorText)
 	if errors.Is(err, pgx.ErrNoRows) {
 		secret.Equal(tokenHash, missHash)
 		return store.Host{}, store.ErrUnauthorized
@@ -144,6 +144,20 @@ FOR UPDATE
 	if err != nil {
 		return store.Host{}, mapErr(err)
 	}
+	// The creator must still own or administer the org (review A7);
+	// otherwise the token is as good as unknown.
+	var creatorAdmin bool
+	if err := tx.QueryRow(ctx, `
+SELECT EXISTS (
+    SELECT 1 FROM app.org_members
+    WHERE org_id = $1::uuid AND user_id = $2::uuid AND role IN ('owner', 'admin')
+)
+`, tok.OrgID.String(), creatorText).Scan(&creatorAdmin); err != nil {
+		return store.Host{}, mapErr(err)
+	}
+	if !creatorAdmin {
+		return store.Host{}, store.ErrUnauthorized
+	}
 	// A grant whose project has since been deleted is dropped; the host
 	// still joins the org.
 	var grant *store.TokenGrant
@@ -162,9 +176,23 @@ SELECT EXISTS (SELECT 1 FROM app.projects WHERE id = $1::uuid AND org_id = $2::u
 			grant = &store.TokenGrant{ProjectID: pid, Level: *grantLevel}
 		}
 	}
+	// The deprecated project_id mirror (review A6): the grant project for a
+	// deploy grant, otherwise the org's oldest live project, or null.
 	var projectArg any
-	if grant != nil {
+	if grant != nil && grant.Level == "deploy" {
 		projectArg = grant.ProjectID.String()
+	} else {
+		var oldest *string
+		if err := tx.QueryRow(ctx, `
+SELECT (SELECT id::text FROM app.projects
+        WHERE org_id = $1::uuid AND deleted_at IS NULL
+        ORDER BY created_at, id LIMIT 1)
+`, tok.OrgID.String()).Scan(&oldest); err != nil {
+			return store.Host{}, mapErr(err)
+		}
+		if oldest != nil {
+			projectArg = *oldest
+		}
 	}
 
 	var takenErr error
@@ -218,9 +246,8 @@ INSERT INTO app.hosts (
 	if grant != nil {
 		if err := exec(ctx, tx, `
 INSERT INTO app.host_access (host_id, project_id, level, granted_by, granted_at)
-SELECT $1::uuid, $2::uuid, $3, t.created_by, $4
-FROM app.join_tokens t WHERE t.id = $5::uuid
-`, hostID.String(), grant.ProjectID.String(), grant.Level, at, tok.ID.String()); err != nil {
+VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5)
+`, hostID.String(), grant.ProjectID.String(), grant.Level, creatorText, at); err != nil {
 			return store.Host{}, mapErr(err)
 		}
 	}
@@ -253,8 +280,11 @@ WHERE id = $1::uuid
 		LastSeenAt:   &seen,
 		EnrolledAt:   at,
 	}
-	if grant != nil {
-		pid := grant.ProjectID
+	if s, ok := projectArg.(string); ok {
+		pid, err := parseID(s)
+		if err != nil {
+			return store.Host{}, err
+		}
 		host.ProjectID = &pid
 	}
 	return host, nil
@@ -292,10 +322,18 @@ func (d *DB) ListOrgHosts(ctx context.Context, orgID uuid.UUID, limit int, curso
 	if err != nil {
 		return nil, nil, err
 	}
+	ids := make([]string, len(items))
 	for i := range items {
-		access, err := d.ListHostAccess(ctx, items[i].ID)
-		if err != nil {
-			return nil, nil, err
+		ids[i] = items[i].ID.String()
+	}
+	byHost, err := d.accessForHosts(ctx, ids)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range items {
+		access := byHost[items[i].ID]
+		if access == nil {
+			access = []store.HostAccess{}
 		}
 		items[i].Access = &access
 	}
@@ -314,9 +352,10 @@ func (d *DB) listHosts(ctx context.Context, join, level string, id uuid.UUID, li
 SELECT `+hostCols+`, `+level+`
 FROM app.hosts h
 `+join+`
+-- Host cursors have rank 0 since v1.24. An old rank-1 cursor (shared hosts
+-- before v1.24) matches no branch, so it is past the last page.
 WHERE (
     CAST($2 AS int) IS NULL
-    OR CAST($2 AS int) < 0
     OR (CAST($2 AS int) = 0 AND (h.name COLLATE "C") > (CAST($3 AS text) COLLATE "C"))
     OR (
         CAST($2 AS int) = 0

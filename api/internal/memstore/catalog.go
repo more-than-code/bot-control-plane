@@ -441,7 +441,26 @@ func (m *Mem) lookupOwnerLocked(hostID uuid.UUID, slug, entry, kind string) (uui
 	if !ok || m.projects[id].OrgID != h.OrgID || m.accessLevelLocked(hostID, id) != "deploy" {
 		return uuid.Nil, false
 	}
+	// D-10: without a reported projects allowlist (agents before 0.2.8) a
+	// program is placed only for the host's single deploy project.
+	if kind == "program" && (h.Programs == nil || h.Programs.Projects == nil) && m.deployProjectsLocked(hostID) != 1 {
+		return uuid.Nil, false
+	}
 	return id, true
+}
+
+// deployProjectsLocked counts the live projects with deploy access to the host.
+func (m *Mem) deployProjectsLocked(hostID uuid.UUID) int {
+	n := 0
+	for _, a := range m.access {
+		if a.HostID != hostID || a.Level != "deploy" {
+			continue
+		}
+		if p, ok := m.projects[a.ProjectID]; ok && p.DeletedAt == nil {
+			n++
+		}
+	}
+	return n
 }
 
 func (m *Mem) lookupCatalogLocked(slug, entry, kind string) (uuid.UUID, bool) {

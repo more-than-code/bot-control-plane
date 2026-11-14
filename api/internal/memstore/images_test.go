@@ -13,7 +13,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-func TestImageRehashVoidsApproval(t *testing.T) {
+func TestImageRehashOnKeyChange(t *testing.T) {
 	ctx := context.Background()
 	m := New()
 	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)

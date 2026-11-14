@@ -160,7 +160,7 @@ func TestProjectServiceViewFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guest, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(guestUser.ID), guestUser.ID, "Guest", "viewguest", w.now)
+	guest, err := w.mem.CreateProject(ctx, home.OrgID, guestUser.ID, "Guest", "viewguest", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestProjectServiceViewFilters(t *testing.T) {
 	}
 	w.mem.SetServiceProject(api.ID, guest.ID)
 	w.mem.SetServiceProject(found.ID, guest.ID)
-	if _, _, err := w.share(ctx, host.ID, guest.ID, "deploy", homeUser.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, host.ID, guest.ID, "deploy", homeUser.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	homeTok := w.token(homeUser.ID)

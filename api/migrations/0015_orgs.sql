@@ -46,6 +46,10 @@ BEGIN
         RAISE EXCEPTION 'org mapping: invalid org name: %', bad;
     END IF;
 
+    IF (SELECT count(*) > count(DISTINCT project_slug) FROM app.org_migration_mapping) THEN
+        RAISE EXCEPTION 'org mapping: a project slug is listed more than once';
+    END IF;
+
     SELECT string_agg(m.project_slug, ', ') INTO bad
     FROM app.org_migration_mapping AS m
     WHERE NOT EXISTS (SELECT 1 FROM app.projects AS p WHERE p.slug = m.project_slug);
@@ -53,14 +57,15 @@ BEGIN
         RAISE EXCEPTION 'org mapping: unknown project slug: %', bad;
     END IF;
 
-    SELECT string_agg(DISTINCT m.owner_email, ', ') INTO bad
+    -- Name the org, never the owner email (review A8).
+    SELECT string_agg(DISTINCT m.org_slug, ', ') INTO bad
     FROM app.org_migration_mapping AS m
     WHERE NOT EXISTS (
         SELECT 1 FROM app.users AS u
         WHERE lower(u.email) = lower(m.owner_email) AND u.disabled_at IS NULL
     );
     IF bad IS NOT NULL THEN
-        RAISE EXCEPTION 'org mapping: unknown or disabled owner: %', bad;
+        RAISE EXCEPTION 'org mapping: unknown or disabled owner for org: %', bad;
     END IF;
 
     IF current_setting('deploybot.org_mapping_require_all', true) = 'true' THEN
@@ -179,7 +184,7 @@ SELECT 'system', h.org_id, h.project_id, h.id, 'host.migration_rename', 'allowed
        jsonb_build_object('from', h.name, 'to', left(h.name, 54) || '-' || left(h.id::text, 8), 'migration', '0015_orgs.sql')
 FROM app.hosts AS h
 JOIN (
-    SELECT id, row_number() OVER (PARTITION BY org_id, name ORDER BY enrolled_at, id) AS rn
+    SELECT id, row_number() OVER (PARTITION BY org_id, name ORDER BY (revoked_at IS NOT NULL), enrolled_at, id) AS rn
     FROM app.hosts
 ) AS d ON d.id = h.id
 WHERE d.rn > 1;
@@ -187,7 +192,7 @@ WHERE d.rn > 1;
 UPDATE app.hosts AS h
 SET name = left(h.name, 54) || '-' || left(h.id::text, 8)
 FROM (
-    SELECT id, row_number() OVER (PARTITION BY org_id, name ORDER BY enrolled_at, id) AS rn
+    SELECT id, row_number() OVER (PARTITION BY org_id, name ORDER BY (revoked_at IS NOT NULL), enrolled_at, id) AS rn
     FROM app.hosts
 ) AS d
 WHERE d.id = h.id AND d.rn > 1;
@@ -196,13 +201,14 @@ WHERE d.id = h.id AND d.rn > 1;
 -- and a share in the same org becomes an access row.
 INSERT INTO app.host_access (host_id, project_id, level, granted_by, granted_at)
 SELECT h.id, h.project_id, 'deploy', NULL, h.enrolled_at
-FROM app.hosts AS h;
+FROM app.hosts AS h
+JOIN app.projects AS p ON p.id = h.project_id AND p.deleted_at IS NULL;
 
 INSERT INTO app.host_access (host_id, project_id, level, granted_by, granted_at)
 SELECT s.host_id, s.project_id, s.level, s.created_by, s.created_at
 FROM app.host_shares AS s
 JOIN app.hosts AS h ON h.id = s.host_id
-JOIN app.projects AS p ON p.id = s.project_id
+JOIN app.projects AS p ON p.id = s.project_id AND p.deleted_at IS NULL
 WHERE p.org_id = h.org_id
 ON CONFLICT DO NOTHING;
 
@@ -210,15 +216,15 @@ ON CONFLICT DO NOTHING;
 -- and left in host_shares, which the new API does not read.
 DO $report$
 DECLARE
-    n integer;
+    rows text;
 BEGIN
-    SELECT count(*) INTO n
+    SELECT string_agg(s.host_id::text || ' -> ' || p.slug, ', ' ORDER BY s.host_id, p.slug) INTO rows
     FROM app.host_shares AS s
     JOIN app.hosts AS h ON h.id = s.host_id
     JOIN app.projects AS p ON p.id = s.project_id
     WHERE p.org_id <> h.org_id;
-    IF n > 0 THEN
-        RAISE NOTICE 'org migration: % cross-org host share(s) dropped from access', n;
+    IF rows IS NOT NULL THEN
+        RAISE NOTICE 'org migration: cross-org host shares kept in host_shares, no access granted: %', rows;
     END IF;
 END
 $report$;

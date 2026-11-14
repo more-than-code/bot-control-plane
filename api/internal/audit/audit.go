@@ -78,6 +78,9 @@ const (
 	ActionFilePut                  = "file.put"
 	ActionFileDelete               = "file.delete"
 	ActionDelegatedDenied          = "delegated.denied"
+	// ActionServiceOwnerConflict is an owned services report that would have
+	// moved a row of another project, or an org-level row (review A2).
+	ActionServiceOwnerConflict = "service.owner_conflict"
 
 	ViaConsole = "console"
 	ViaMCP     = "mcp"

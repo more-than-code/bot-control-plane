@@ -24,16 +24,17 @@ func assertServiceNamesLive(t *testing.T, d *DB, ctx context.Context, at time.Ti
 	deployUser := mustSvcUser(t, d, ctx, "svc-deploy", at)
 	metricsUser := mustSvcUser(t, d, ctx, "svc-metrics", at)
 	home := mustSvcProject(t, d, ctx, homeUser.ID, "SvcHome", "svc-home", at)
-	deploy := mustSvcProject(t, d, ctx, deployUser.ID, "SvcDeploy", "svc-deploy", at)
-	metrics := mustSvcProject(t, d, ctx, metricsUser.ID, "SvcMetrics", "svc-metrics", at)
+	deploy := projectIn(t, d, ctx, home.OrgID, deployUser.ID, "SvcDeploy", "svc-deploy", at)
+	metrics := projectIn(t, d, ctx, home.OrgID, metricsUser.ID, "SvcMetrics", "svc-metrics", at)
+	// Org tokens come from an org admin (review A7): home's owner.
 	homeHost := enrollHostDB(t, d, ctx, home.ID, homeUser.ID, "home-host", at)
-	deployHost := enrollHostDB(t, d, ctx, deploy.ID, deployUser.ID, "deploy-host", at)
-	tieHost := enrollHostDB(t, d, ctx, deploy.ID, deployUser.ID, "deploy-tie", at)
-	metricsHost := enrollHostDB(t, d, ctx, metrics.ID, metricsUser.ID, "metrics-host", at)
-	if _, _, err := shareDB(t, d, ctx, homeHost.ID, deploy.ID, "deploy", homeUser.ID, at); err != nil {
+	deployHost := enrollHostDB(t, d, ctx, deploy.ID, homeUser.ID, "deploy-host", at)
+	tieHost := enrollHostDB(t, d, ctx, deploy.ID, homeUser.ID, "deploy-tie", at)
+	metricsHost := enrollHostDB(t, d, ctx, metrics.ID, homeUser.ID, "metrics-host", at)
+	if _, _, err := grantDB(t, d, ctx, homeHost.ID, deploy.ID, "deploy", homeUser.ID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := shareDB(t, d, ctx, homeHost.ID, metrics.ID, "metrics", homeUser.ID, at); err != nil {
+	if _, _, err := grantDB(t, d, ctx, homeHost.ID, metrics.ID, "metrics", homeUser.ID, at); err != nil {
 		t.Fatal(err)
 	}
 

@@ -2,8 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
 	"io/fs"
+	"log/slog"
 	"sort"
 	"strings"
 	"unicode"
@@ -21,15 +24,41 @@ const migrateLockKey int64 = 0x6465706c6f79 // "deploy"
 // new objects are owned by that role. roles.sql.example must already have
 // created the role, the schemas, and the timescaledb extension.
 func Migrate(ctx context.Context, databaseURL string) error {
-	return MigrateWith(ctx, databaseURL, nil)
+	return MigrateWith(ctx, databaseURL, OrgSource{Chosen: true})
 }
+
+// OrgSource is the org mapping choice for migration 0015 (review B11).
+// Chosen false means BOT_API_ORG_MAPPING_FILE was not set: --migrate then
+// refuses to apply a pending 0015, so production never falls back to the
+// default rule by accident. Chosen with a nil Mapping is the default rule
+// (one org per project owner, BOT_API_ORG_MAPPING_FILE=none).
+type OrgSource struct {
+	Chosen  bool
+	Mapping *OrgMapping
+}
+
+// errNeedsOrgMapping is the refusal for a pending 0015 without a choice.
+var errNeedsOrgMapping = errors.New("migration 0015 needs BOT_API_ORG_MAPPING_FILE (a file, or none for one org per project owner)")
 
 // MigrateWith is Migrate with the org mapping that 0015 reads (nil: the
 // default rule only). Every file runs on this one connection: the mapping
 // lives in session settings (deploybot.org_mapping), which a pool would not
 // carry from one statement to the next. Do not switch this to a pool.
-func MigrateWith(ctx context.Context, databaseURL string, mapping *OrgMapping) error {
-	conn, err := pgx.Connect(ctx, databaseURL)
+func MigrateWith(ctx context.Context, databaseURL string, orgs OrgSource) error {
+	cfg, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		return fmt.Errorf("migrate: invalid database url")
+	}
+	// A migration's RAISE NOTICE (0015's cross-org share report) reaches the
+	// operator through the log (review B12).
+	cfg.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) {
+		msg := n.Message
+		if strings.Contains(msg, "://") {
+			msg = "redacted"
+		}
+		slog.Default().Warn("migration notice", "msg", msg)
+	}
+	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("migrate: connect failed")
 	}
@@ -50,7 +79,7 @@ func MigrateWith(ctx context.Context, databaseURL string, mapping *OrgMapping) e
 		return fmt.Errorf("migrate: cannot take the migration lock")
 	}
 
-	if err := loadMappingSettings(ctx, conn, mapping); err != nil {
+	if err := loadMappingSettings(ctx, conn, orgs.Mapping); err != nil {
 		return err
 	}
 
@@ -65,6 +94,9 @@ func MigrateWith(ctx context.Context, databaseURL string, mapping *OrgMapping) e
 	for _, name := range names {
 		if applied[name] {
 			continue
+		}
+		if name == "0015_orgs.sql" && !orgs.Chosen {
+			return errNeedsOrgMapping
 		}
 		body, err := migrations.FS.ReadFile(name)
 		if err != nil {

@@ -44,9 +44,12 @@ type Server struct {
 	imageBudget int
 }
 
-// delegatedPolicy says what an api_delegated session may do on a mutating route.
-// The zero value, delegatedDeny, refuses the call in the route wrapper, so a
-// route that sets nothing is refused.
+// delegatedPolicy says what an api_delegated session may do on a route.
+// The zero value, delegatedDeny, refuses a mutating call (POST, PUT, PATCH,
+// DELETE) in the route wrapper, so a write that sets nothing is refused.
+// delegatedDeny does not cover reads: a read is refused only by
+// delegatedDenyRead, and every read route declares delegatedAllow or
+// delegatedDenyRead explicitly (TestDelegatedReadPolicies).
 type delegatedPolicy int
 
 const (
@@ -67,24 +70,24 @@ type route struct {
 
 func contractRoutes() []route {
 	return []route{
-		{"GET /health", true, (*Server).handleHealth, delegatedDeny},
-		{"GET /.well-known/oauth-authorization-server", true, (*Server).handleOAuthMetadata, delegatedDeny},
+		{"GET /health", true, (*Server).handleHealth, delegatedAllow},
+		{"GET /.well-known/oauth-authorization-server", true, (*Server).handleOAuthMetadata, delegatedAllow},
 		{"POST /oauth/register", true, (*Server).handleOAuthRegister, delegatedAllow},
-		{"GET /oauth/authorize", true, (*Server).handleOAuthAuthorize, delegatedDeny},
+		{"GET /oauth/authorize", true, (*Server).handleOAuthAuthorize, delegatedAllow},
 		{"POST /oauth/token", true, (*Server).handleOAuthToken, delegatedAllow},
 		{"POST /oauth/revoke", true, (*Server).handleOAuthRevoke, delegatedAllow},
-		{"GET /v1/auth/google/start", true, (*Server).handleGoogleStart, delegatedDeny},
+		{"GET /v1/auth/google/start", true, (*Server).handleGoogleStart, delegatedAllow},
 		{"POST /v1/auth/google/callback", true, (*Server).handleGoogleCallback, delegatedAllow},
 		{"POST /v1/auth/signout", false, (*Server).handleSignOut, delegatedAllow},
 		{"GET /v1/me", false, (*Server).handleMe, delegatedAllow},
-		{"GET /v1/oauth/requests/{id}", false, (*Server).handleOAuthRequestGet, delegatedDeny},
+		{"GET /v1/oauth/requests/{id}", false, (*Server).handleOAuthRequestGet, delegatedAllow},
 		{"POST /v1/oauth/requests/{id}/approve", false, (*Server).handleOAuthRequestApprove, delegatedHandler},
 		{"POST /v1/oauth/requests/{id}/deny", false, (*Server).handleOAuthRequestDeny, delegatedHandler},
-		{"GET /v1/me/grants", false, (*Server).handleGrantList, delegatedDeny},
+		{"GET /v1/me/grants", false, (*Server).handleGrantList, delegatedAllow},
 		{"DELETE /v1/me/grants/{id}", false, (*Server).handleGrantDelete, delegatedHandler},
 		{"POST /v1/auth/device/code", true, (*Server).handleDeviceCode, delegatedAllow},
 		{"POST /v1/auth/device/token", true, (*Server).handleDeviceToken, delegatedAllow},
-		{"GET /v1/auth/device/{user_code}", false, (*Server).handleDeviceGet, delegatedDeny},
+		{"GET /v1/auth/device/{user_code}", false, (*Server).handleDeviceGet, delegatedAllow},
 		{"POST /v1/auth/device/{user_code}/approve", false, (*Server).handleDeviceApprove, delegatedHandler},
 		{"POST /v1/auth/device/{user_code}/deny", false, (*Server).handleDeviceDeny, delegatedHandler},
 		{"POST /v1/orgs", false, (*Server).handleOrgCreate, delegatedDeny},
@@ -104,11 +107,11 @@ func contractRoutes() []route {
 		{"DELETE /v1/orgs/{id}/join-tokens/{token_id}", false, (*Server).handleOrgJoinRevoke, delegatedDeny},
 		{"GET /v1/orgs/{id}/audit", false, (*Server).handleOrgAudit, delegatedDenyRead},
 		{"POST /v1/projects", false, (*Server).handleProjectCreate, delegatedDeny},
-		{"GET /v1/projects", false, (*Server).handleProjectList, delegatedDeny},
-		{"GET /v1/projects/{id}", false, (*Server).handleProjectGet, delegatedDeny},
+		{"GET /v1/projects", false, (*Server).handleProjectList, delegatedAllow},
+		{"GET /v1/projects/{id}", false, (*Server).handleProjectGet, delegatedAllow},
 		{"PATCH /v1/projects/{id}", false, (*Server).handleProjectPatch, delegatedDeny},
 		{"DELETE /v1/projects/{id}", false, (*Server).handleProjectDelete, delegatedDeny},
-		{"GET /v1/projects/{id}/members", false, (*Server).handleMemberList, delegatedDeny},
+		{"GET /v1/projects/{id}/members", false, (*Server).handleMemberList, delegatedAllow},
 		{"POST /v1/projects/{id}/members", false, (*Server).handleMemberAdd, delegatedDeny},
 		{"PATCH /v1/projects/{id}/members/{user_id}", false, (*Server).handleMemberPatch, delegatedDeny},
 		{"DELETE /v1/projects/{id}/members/{user_id}", false, (*Server).handleMemberDelete, delegatedDeny},
@@ -117,17 +120,17 @@ func contractRoutes() []route {
 		{"GET /v1/projects/{id}/join-tokens", false, (*Server).handleJoinList, delegatedDenyRead},
 		{"DELETE /v1/projects/{id}/join-tokens/{token_id}", false, (*Server).handleJoinRevoke, delegatedDeny},
 		{"POST /v1/projects/{id}/invites", false, (*Server).handleInviteCreate, delegatedDeny},
-		{"GET /v1/projects/{id}/invites", false, (*Server).handleInviteList, delegatedDeny},
+		{"GET /v1/projects/{id}/invites", false, (*Server).handleInviteList, delegatedAllow},
 		{"DELETE /v1/projects/{id}/invites/{invite_id}", false, (*Server).handleInviteRevoke, delegatedDeny},
 		{"POST /v1/invites/lookup", false, (*Server).handleInviteLookup, delegatedHandler},
 		{"POST /v1/invites/accept", false, (*Server).handleInviteAccept, delegatedHandler},
 		{"POST /v1/projects/{id}/catalog/parse", false, (*Server).handleCatalogParse, delegatedAllow},
-		{"GET /v1/projects/{id}/catalog", false, (*Server).handleCatalogList, delegatedDeny},
+		{"GET /v1/projects/{id}/catalog", false, (*Server).handleCatalogList, delegatedAllow},
 		{"POST /v1/projects/{id}/catalog", false, (*Server).handleCatalogCreate, delegatedHandler},
-		{"GET /v1/projects/{id}/catalog/{name}", false, (*Server).handleCatalogGet, delegatedDeny},
+		{"GET /v1/projects/{id}/catalog/{name}", false, (*Server).handleCatalogGet, delegatedAllow},
 		{"PUT /v1/projects/{id}/catalog/{name}", false, (*Server).handleCatalogPut, delegatedHandler},
 		{"DELETE /v1/projects/{id}/catalog/{name}", false, (*Server).handleCatalogDelete, delegatedHandler},
-		{"GET /v1/projects/{id}/catalog/{name}/permissions", false, (*Server).handleCatalogPermGet, delegatedDeny},
+		{"GET /v1/projects/{id}/catalog/{name}/permissions", false, (*Server).handleCatalogPermGet, delegatedAllow},
 		{"PUT /v1/projects/{id}/catalog/{name}/permissions", false, (*Server).handleCatalogPermPut, delegatedHandler},
 		{"POST /v1/projects/{id}/catalog/{name}/run", false, (*Server).handleCatalogRun, delegatedHandler},
 		{"POST /v1/projects/{id}/catalog/{name}/stop", false, (*Server).handleCatalogStop, delegatedHandler},
@@ -137,26 +140,26 @@ func contractRoutes() []route {
 		{"POST /v1/projects/{id}/catalog/{name}/deploy", false, (*Server).handleCatalogDeploy, delegatedHandler},
 		{"POST /v1/projects/{id}/catalog/{name}/rollback", false, (*Server).handleCatalogRollback, delegatedHandler},
 		{"POST /v1/projects/{id}/catalog/{name}/remove", false, (*Server).handleCatalogRemove, delegatedHandler},
-		{"GET /v1/projects/{id}/catalog/{name}/deploys", false, (*Server).handleCatalogDeploys, delegatedDeny},
-		{"GET /v1/projects/{id}/env-sets", false, (*Server).handleEnvSetList, delegatedDeny},
-		{"GET /v1/projects/{id}/env-sets/{set}", false, (*Server).handleEnvSetGet, delegatedDeny},
+		{"GET /v1/projects/{id}/catalog/{name}/deploys", false, (*Server).handleCatalogDeploys, delegatedAllow},
+		{"GET /v1/projects/{id}/env-sets", false, (*Server).handleEnvSetList, delegatedAllow},
+		{"GET /v1/projects/{id}/env-sets/{set}", false, (*Server).handleEnvSetGet, delegatedAllow},
 		{"PUT /v1/projects/{id}/env-sets/{set}", false, (*Server).handleEnvSetPut, delegatedHandler},
 		{"DELETE /v1/projects/{id}/env-sets/{set}", false, (*Server).handleEnvSetDelete, delegatedHandler},
 		{"PUT /v1/projects/{id}/env-sets/{set}/keys/{key}", false, (*Server).handleEnvKeyPut, delegatedDeny},
 		{"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}", false, (*Server).handleEnvKeyDelete, delegatedDeny},
 		{"POST /v1/projects/{id}/env-sets/{set}/secret", false, (*Server).handleEnvKeysSecret, delegatedDeny},
-		{"GET /v1/projects/{id}/registries", false, (*Server).handleRegistryList, delegatedDeny},
+		{"GET /v1/projects/{id}/registries", false, (*Server).handleRegistryList, delegatedAllow},
 		{"PUT /v1/projects/{id}/registries/{host}", false, (*Server).handleRegistryPut, delegatedHandler},
 		{"DELETE /v1/projects/{id}/registries/{host}", false, (*Server).handleRegistryDelete, delegatedHandler},
-		{"GET /v1/projects/{id}/image-tags", false, (*Server).handleImageTags, delegatedDeny},
-		{"GET /v1/projects/{id}/image-digest", false, (*Server).handleImageDigest, delegatedDeny},
-		{"GET /v1/projects/{id}/files", false, (*Server).handleFileList, delegatedDeny},
-		{"GET /v1/projects/{id}/files/{name}", false, (*Server).handleFileGet, delegatedDeny},
+		{"GET /v1/projects/{id}/image-tags", false, (*Server).handleImageTags, delegatedAllow},
+		{"GET /v1/projects/{id}/image-digest", false, (*Server).handleImageDigest, delegatedAllow},
+		{"GET /v1/projects/{id}/files", false, (*Server).handleFileList, delegatedAllow},
+		{"GET /v1/projects/{id}/files/{name}", false, (*Server).handleFileGet, delegatedAllow},
 		{"PUT /v1/projects/{id}/files/{name}", false, (*Server).handleFilePut, delegatedHandler},
 		{"DELETE /v1/projects/{id}/files/{name}", false, (*Server).handleFileDelete, delegatedHandler},
-		{"GET /v1/projects/{id}/hosts", false, (*Server).handleHostList, delegatedDeny},
-		{"GET /v1/projects/{id}/services", false, (*Server).handleProjectServices, delegatedDeny},
-		{"GET /v1/hosts/{id}", false, (*Server).handleHostGet, delegatedDeny},
+		{"GET /v1/projects/{id}/hosts", false, (*Server).handleHostList, delegatedAllow},
+		{"GET /v1/projects/{id}/services", false, (*Server).handleProjectServices, delegatedAllow},
+		{"GET /v1/hosts/{id}", false, (*Server).handleHostGet, delegatedAllow},
 		{"DELETE /v1/hosts/{id}/credential", false, (*Server).handleHostRevoke, delegatedDeny},
 		{"GET /v1/hosts/{id}/access", false, (*Server).handleAccessList, delegatedDenyRead},
 		{"PUT /v1/hosts/{id}/access/{project_id}", false, (*Server).handleAccessPut, delegatedDeny},
@@ -164,22 +167,22 @@ func contractRoutes() []route {
 		// api-v1 v1.24 items 3 and 4: removed routes answer 410 for one release.
 		{"GET /v1/hosts/{id}/shares", false, (*Server).handleSharesGone, delegatedAllow},
 		{"GET /v1/hosts/{id}/shares/{project_id}", false, (*Server).handleSharesGone, delegatedAllow},
-		{"PUT /v1/hosts/{id}/shares/{project_id}", false, (*Server).handleSharesGone, delegatedAllow},
-		{"DELETE /v1/hosts/{id}/shares/{project_id}", false, (*Server).handleSharesGone, delegatedAllow},
+		{"PUT /v1/hosts/{id}/shares/{project_id}", false, (*Server).handleSharesGone, delegatedDeny},
+		{"DELETE /v1/hosts/{id}/shares/{project_id}", false, (*Server).handleSharesGone, delegatedDeny},
 		{"GET /v1/hosts/{id}/catalog-approvals", false, (*Server).handleApprovalsGone, delegatedAllow},
-		{"POST /v1/hosts/{id}/catalog-approvals", false, (*Server).handleApprovalsGone, delegatedAllow},
-		{"DELETE /v1/hosts/{id}/catalog-approvals/{entry_id}", false, (*Server).handleApprovalsGone, delegatedAllow},
-		{"GET /v1/hosts/{id}/services", false, (*Server).handleServiceList, delegatedDeny},
-		{"GET /v1/services/{id}", false, (*Server).handleServiceGet, delegatedDeny},
+		{"POST /v1/hosts/{id}/catalog-approvals", false, (*Server).handleApprovalsGone, delegatedDeny},
+		{"DELETE /v1/hosts/{id}/catalog-approvals/{entry_id}", false, (*Server).handleApprovalsGone, delegatedDeny},
+		{"GET /v1/hosts/{id}/services", false, (*Server).handleServiceList, delegatedAllow},
+		{"GET /v1/services/{id}", false, (*Server).handleServiceGet, delegatedAllow},
 		{"PATCH /v1/services/{id}", false, (*Server).handleServicePatch, delegatedDeny},
 		{"PUT /v1/services/{id}/health-checks", false, (*Server).handleHealthPut, delegatedHandler},
-		{"GET /v1/hosts/{id}/metrics", false, (*Server).handleMetrics, delegatedDeny},
-		{"GET /v1/hosts/{id}/processes", false, (*Server).handleProcesses, delegatedDeny},
-		{"GET /v1/services/{id}/health", false, (*Server).handleHealthHistory, delegatedDeny},
+		{"GET /v1/hosts/{id}/metrics", false, (*Server).handleMetrics, delegatedAllow},
+		{"GET /v1/hosts/{id}/processes", false, (*Server).handleProcesses, delegatedAllow},
+		{"GET /v1/services/{id}/health", false, (*Server).handleHealthHistory, delegatedAllow},
 		{"POST /v1/hosts/{id}/snapshot", false, (*Server).handleSnapshot, delegatedAllow},
 		{"POST /v1/services/{id}/probe", false, (*Server).handleProbe, delegatedAllow},
 		{"POST /v1/confirmations/{confirmation_id}", false, (*Server).handleConfirmation, delegatedAllow},
-		{"GET /v1/projects/{id}/audit", false, (*Server).handleAudit, delegatedDeny},
+		{"GET /v1/projects/{id}/audit", false, (*Server).handleAudit, delegatedAllow},
 	}
 }
 
@@ -410,9 +413,26 @@ func (s *Server) deny(w http.ResponseWriter, r *http.Request, p principal, proje
 }
 
 // denyHost is deny for a host event: the audit row carries the host's org
-// (api-v1 v1.24 item 8) and projectID when one applies.
+// (api-v1 v1.24 item 8) and projectID when one applies. A caller who cannot
+// see the host (not_found) gets a row with no org, host, project or service
+// (review A4), as orgGate does, so it stays out of that org's audit; the
+// host id is kept in the detail.
 func (s *Server) denyHost(w http.ResponseWriter, r *http.Request, p principal, host store.Host, projectID, serviceID *uuid.UUID, action string, err error) {
-	s.denyRow(w, r, p, idPtr(host.OrgID), projectID, idPtr(host.ID), serviceID, action, nil, err)
+	s.denyHostDetail(w, r, p, host, projectID, serviceID, action, nil, err)
+}
+
+// denyHostDetail is denyHost with an audit detail.
+func (s *Server) denyHostDetail(w http.ResponseWriter, r *http.Request, p principal, host store.Host, projectID, serviceID *uuid.UUID, action string, detail map[string]any, err error) {
+	var denied *authz.Denied
+	if errors.As(err, &denied) && denied.Code == "not_found" {
+		hidden := map[string]any{"host_id": host.ID.String()}
+		for k, v := range detail {
+			hidden[k] = v
+		}
+		s.denyRow(w, r, p, nil, nil, nil, nil, action, hidden, err)
+		return
+	}
+	s.denyRow(w, r, p, idPtr(host.OrgID), projectID, idPtr(host.ID), serviceID, action, detail, err)
 }
 
 func (s *Server) denyDetail(w http.ResponseWriter, r *http.Request, p principal, projectID, hostID, serviceID *uuid.UUID, action string, detail map[string]any, err error) {
@@ -481,17 +501,15 @@ func (s *Server) writeErr(w http.ResponseWriter, err error, log bool) {
 }
 
 func (s *Server) ownerErr(w http.ResponseWriter, r *http.Request, p principal, projectID *uuid.UUID, action string, err error) {
+	s.ownerRefusal(w, r, p, nil, projectID, action, err)
+}
+
+// ownerRefusal maps ErrOwner (the owner's role cannot change, and the owner
+// cannot be removed) to an audited forbidden for a project or an org.
+// Anything else goes to fail.
+func (s *Server) ownerRefusal(w http.ResponseWriter, r *http.Request, p principal, orgID, projectID *uuid.UUID, action string, err error) {
 	if errors.Is(err, store.ErrOwner) {
-		code := "forbidden"
-		s.Audit.Record(r.Context(), store.AuditRow{
-			ActorUserID: idPtr(p.User.ID),
-			Via:         viaKind(p.Session.Kind),
-			ProjectID:   projectID,
-			Action:      action,
-			Decision:    audit.DecisionDenied,
-			ErrorCode:   &code,
-		})
-		writeCode(w, "forbidden", "forbidden")
+		s.denyRow(w, r, p, orgID, projectID, nil, nil, action, nil, &authz.Denied{Code: "forbidden"})
 		return
 	}
 	s.fail(w, err)

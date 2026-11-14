@@ -45,6 +45,10 @@ var delegatedDenyPatterns = []string{
 	"DELETE /v1/hosts/{id}/credential",
 	"PUT /v1/hosts/{id}/access/{project_id}",
 	"DELETE /v1/hosts/{id}/access/{project_id}",
+	"PUT /v1/hosts/{id}/shares/{project_id}",
+	"DELETE /v1/hosts/{id}/shares/{project_id}",
+	"POST /v1/hosts/{id}/catalog-approvals",
+	"DELETE /v1/hosts/{id}/catalog-approvals/{entry_id}",
 	"PATCH /v1/services/{id}",
 	"PUT /v1/projects/{id}/env-sets/{set}/keys/{key}",
 	"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}",
@@ -69,11 +73,11 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 	spare := w.user("spare@ex.com", "Spare")
 	extra := w.user("extra@ex.com", "Extra")
 	sc := w.scene(owner, admin, w.user("viewer@ex.com", "Viewer"), spare, extra)
-	other, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Other", "other", w.now)
+	other, err := w.mem.CreateProject(ctx, sc.host.OrgID, owner.ID, "Other", "other", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.share(ctx, sc.host.ID, other.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, other.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	_, inviteHash, err := secret.NewToken()
@@ -157,12 +161,24 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		}},
 		{"PUT /v1/hosts/{id}/access/{project_id}", http.MethodPut, "/v1/hosts/" + host + "/access/" + other.ID.String(),
 			`{"level":"deploy"}`, func(t *testing.T) string {
-				return shareState(t, w, sc.host.ID)
+				return accessState(t, w, sc.host.ID)
 			}},
 		{"DELETE /v1/hosts/{id}/access/{project_id}", http.MethodDelete, "/v1/hosts/" + host + "/access/" + other.ID.String(),
 			"", func(t *testing.T) string {
-				return shareState(t, w, sc.host.ID)
+				return accessState(t, w, sc.host.ID)
 			}},
+		{"PUT /v1/hosts/{id}/shares/{project_id}", http.MethodPut, "/v1/hosts/" + host + "/shares/" + other.ID.String(), `{"level":"deploy"}`, func(t *testing.T) string {
+			return accessState(t, w, sc.host.ID)
+		}},
+		{"DELETE /v1/hosts/{id}/shares/{project_id}", http.MethodDelete, "/v1/hosts/" + host + "/shares/" + other.ID.String(), "", func(t *testing.T) string {
+			return accessState(t, w, sc.host.ID)
+		}},
+		{"POST /v1/hosts/{id}/catalog-approvals", http.MethodPost, "/v1/hosts/" + host + "/catalog-approvals", `{}`, func(t *testing.T) string {
+			return accessState(t, w, sc.host.ID)
+		}},
+		{"DELETE /v1/hosts/{id}/catalog-approvals/{entry_id}", http.MethodDelete, "/v1/hosts/" + host + "/catalog-approvals/" + uuid.NewString(), "", func(t *testing.T) string {
+			return accessState(t, w, sc.host.ID)
+		}},
 		{"PATCH /v1/services/{id}", http.MethodPatch, "/v1/services/" + sc.svc.ID.String(), `{"display_name":"Renamed"}`, func(t *testing.T) string {
 			return displayName(t, w, sc.svc.ID)
 		}},
@@ -584,7 +600,7 @@ func credState(t *testing.T, w *world, sc scene) string {
 	return fmt.Sprintf("cred=%v host=%v", cred.RevokedAt != nil, host.RevokedAt != nil)
 }
 
-func shareState(t *testing.T, w *world, hostID uuid.UUID) string {
+func accessState(t *testing.T, w *world, hostID uuid.UUID) string {
 	t.Helper()
 	items, err := w.mem.ListHostAccess(context.Background(), hostID)
 	if err != nil {

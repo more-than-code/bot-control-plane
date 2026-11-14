@@ -197,3 +197,22 @@ func TestRunUnknownArgumentExitsOne(t *testing.T) {
 		t.Fatalf("Run(--bogus) = %d, want 1", code)
 	}
 }
+
+func TestOrgSource(t *testing.T) {
+	if got, err := orgSource(""); err != nil || got.Chosen {
+		t.Fatalf("unset %+v %v", got, err)
+	}
+	if got, err := orgSource("none"); err != nil || !got.Chosen || got.Mapping != nil {
+		t.Fatalf("none %+v %v", got, err)
+	}
+	if _, err := orgSource(filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Fatal("missing file accepted")
+	}
+	path := filepath.Join(t.TempDir(), "orgs.json")
+	if err := os.WriteFile(path, []byte(`{"orgs":[{"slug":"mtc","name":"MTC","owner_email":"o@example.com","projects":["p"]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := orgSource(path); err != nil || !got.Chosen || got.Mapping == nil {
+		t.Fatalf("file %+v %v", got, err)
+	}
+}

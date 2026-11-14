@@ -721,7 +721,14 @@ INSERT INTO app.audit_log (
     action, decision, task_id, result, error_code, detail, org_id
 ) VALUES (
     $1, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid,
-    $7, $8, $9::uuid, $10, $11, $12::jsonb, $13::uuid
+    $7, $8, $9::uuid, $10, $11, $12::jsonb,
+    -- A row with a host or project and no org takes the host's org, else
+    -- the project's (review A3).
+    COALESCE(
+        $13::uuid,
+        (SELECT org_id FROM app.hosts WHERE id = $5::uuid),
+        (SELECT org_id FROM app.projects WHERE id = $4::uuid)
+    )
 )
 `, row.At, optUUID(row.ActorUserID), row.Via, optUUID(row.ProjectID), optUUID(row.HostID), optUUID(row.ServiceID),
 		row.Action, row.Decision, optUUID(row.TaskID), optString(row.Result), optString(row.ErrorCode), auditDetail(row.Detail), optUUID(row.OrgID)); err != nil {

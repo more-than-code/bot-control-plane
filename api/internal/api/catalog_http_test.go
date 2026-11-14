@@ -610,13 +610,13 @@ func TestHelloProgramsAndOwnedIngest(t *testing.T) {
 	owner := w.user("owner@ex.com", "Owner")
 	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
 	appOwner := w.user("app@ex.com", "App")
-	app, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(appOwner.ID), appOwner.ID, "App", "appproj", w.now)
+	app, err := w.mem.CreateProject(ctx, sc.host.OrgID, appOwner.ID, "App", "appproj", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	createProgram(t, w, w.token(appOwner.ID), app.ID, "tra", "pnpm run dev", false)
 	// api-v1 v1.24 item 6: an owner maps only for a deploy project of the host's org.
-	if _, _, err := w.share(ctx, sc.host.ID, app.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, app.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	unit := "deploybot-missing-nope.service"
@@ -627,7 +627,11 @@ func TestHelloProgramsAndOwnedIngest(t *testing.T) {
 		map[string]any{"name": "imgd", "kind": "process", "ports": []int{1}, "owner": map[string]any{"kind": "image", "project": "appproj", "entry": "tra"}},
 		map[string]any{"name": "reported", "kind": "systemd", "ports": []int{4}, "systemd_unit": "deploybot-appproj-absent.service", "systemd_scope": scope, "owner": map[string]any{"kind": "program", "project": "appproj", "entry": "no-such"}},
 	}
-	conn := helloAgent(t, w, sc.host, sc.credPlain, sc.credID, allowPrograms(true), services)
+	// Two deploy projects on the host: placement needs the v0.2.8 projects
+	// allowlist in hello (D-10).
+	helloPrograms := allowPrograms(true)
+	helloPrograms["projects"] = []string{"proj", "appproj"}
+	conn := helloAgent(t, w, sc.host, sc.credPlain, sc.credID, helloPrograms, services)
 	tok := w.token(owner.ID)
 	status, env := w.do(tok, http.MethodGet, "/v1/hosts/"+sc.host.ID.String(), "")
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")

@@ -64,6 +64,7 @@ func TestServiceConfirmationsMigration(t *testing.T) {
 	if url == "" {
 		t.Skip()
 	}
+	lockMigrations(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	d, err := Open(ctx, url)

@@ -267,13 +267,8 @@ func answerTasks(c *websocket.Conn) {
 	}()
 }
 
-// share puts projectID in the host's org (D-3: no cross-org access) and
-// grants it level on the host. It replaces the v1.1 host shares in tests.
-func (w *world) share(ctx context.Context, hostID, projectID uuid.UUID, level string, by uuid.UUID, at time.Time) (store.HostAccess, bool, error) {
-	host, err := w.mem.GetHost(ctx, hostID)
-	if err != nil {
-		return store.HostAccess{}, false, err
-	}
-	w.mem.SetProjectOrg(projectID, host.OrgID)
+// grant gives projectID level on the host. The project must already be in
+// the host's org (D-3); tests create it there.
+func (w *world) grant(ctx context.Context, hostID, projectID uuid.UUID, level string, by uuid.UUID, at time.Time) (store.HostAccess, bool, error) {
 	return w.mem.PutHostAccess(ctx, hostID, projectID, level, by, at)
 }

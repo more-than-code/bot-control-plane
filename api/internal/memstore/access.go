@@ -49,9 +49,11 @@ func (m *Mem) hostAccessLocked(hostID uuid.UUID) []store.HostAccess {
 		if a.HostID != hostID {
 			continue
 		}
-		if p, ok := m.projects[a.ProjectID]; ok {
-			a.ProjectName = p.Name
+		p, ok := m.projects[a.ProjectID]
+		if !ok || p.DeletedAt != nil {
+			continue
 		}
+		a.ProjectName = p.Name
 		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -79,7 +81,8 @@ func (m *Mem) PutHostAccess(_ context.Context, hostID, projectID uuid.UUID, leve
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	h, ok := m.hosts[hostID]
-	if !ok {
+	// A revoked host, or a host of a deleted org, takes no new grants (review D22).
+	if _, live := m.liveOrgLocked(h.OrgID); !ok || h.RevokedAt != nil || !live {
 		return store.HostAccess{}, false, store.ErrNotFound
 	}
 	p, ok := m.projects[projectID]
@@ -123,10 +126,14 @@ func (m *Mem) DeleteHostAccess(_ context.Context, hostID, projectID uuid.UUID, r
 		return store.HostAccess{}, store.ErrConflict
 	}
 	for _, id := range ids {
+		// Same rule as Postgres: only an owned row becomes discovered; a
+		// declared row stays declared. catalog_entry is cleared.
 		svc := m.services[id]
 		svc.ProjectID = nil
 		svc.CatalogEntry = nil
-		svc.Source = "discovered"
+		if svc.Source == "owned" {
+			svc.Source = "discovered"
+		}
 		m.services[id] = svc
 	}
 	delete(m.access, key)

@@ -24,11 +24,11 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 
 	owner := catalogUser(t, d, ctx, "catalog-owner", at)
 	other := catalogUser(t, d, ctx, "catalog-other", at)
-	home := catalogProject(t, d, ctx, owner.ID, "Catalog", "catproj", at)
 	box := catalogProject(t, d, ctx, other.ID, "Box", "boxproj", at)
+	home := projectIn(t, d, ctx, box.OrgID, owner.ID, "Catalog", "catproj", at)
 	host := enrollHostDB(t, d, ctx, box.ID, other.ID, "cat-host", at)
 	// v1.24 item 6: an owner maps only for a deploy project of the host's org.
-	if _, _, err := shareDB(t, d, ctx, host.ID, home.ID, "deploy", other.ID, at); err != nil {
+	if _, _, err := grantDB(t, d, ctx, host.ID, home.ID, "deploy", other.ID, at); err != nil {
 		t.Fatal(err)
 	}
 
@@ -170,6 +170,8 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 		t.Fatalf("cleared programs %+v %v", loaded.Programs, err)
 	}
 
+	// Two deploy projects and no allowlist would refuse the program owner (D-10).
+	reportAllowlistDB(t, d, ctx, host.ID)
 	unit := "deploybot-missing-nope.service"
 	scope := "system"
 	if err := d.UpsertDiscovered(ctx, host.ID, []store.Discovered{{

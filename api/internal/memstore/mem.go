@@ -207,6 +207,12 @@ func (m *Mem) UpsertGoogleUser(_ context.Context, in store.GoogleSignIn) (store.
 			user.AvatarURL = in.AvatarURL
 		}
 		m.users[user.ID] = user
+		// D-8 for users from before orgs who own no project (review B16).
+		if !m.inAnyOrgLocked(user.ID) {
+			if _, err := m.createOrgLocked(user.ID, store.PersonalOrgName(user.Name, user.Email), store.PersonalOrgSlug(user.ID), in.At); err != nil {
+				return store.User{}, err
+			}
+		}
 		return user, nil
 	}
 	if _, taken := m.byEmail[in.Email]; taken {

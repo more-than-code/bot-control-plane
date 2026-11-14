@@ -384,11 +384,11 @@ func TestDelegatedHealthShareRules(t *testing.T) {
 	deployOwner := w.user("deploy-owner@ex.com", "DO")
 	deployAdmin := w.user("deploy-admin@ex.com", "DA")
 	deployViewer := w.user("deploy-viewer@ex.com", "DV")
-	metrics, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(metricsOwner.ID), metricsOwner.ID, "Metrics", "hcmetrics", w.now)
+	metrics, err := w.mem.CreateProject(ctx, sc.host.OrgID, metricsOwner.ID, "Metrics", "hcmetrics", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deploy, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(deployOwner.ID), deployOwner.ID, "Deploy", "hcdeploy", w.now)
+	deploy, err := w.mem.CreateProject(ctx, sc.host.OrgID, deployOwner.ID, "Deploy", "hcdeploy", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,10 +401,10 @@ func TestDelegatedHealthShareRules(t *testing.T) {
 	if _, err := w.mem.AddMember(ctx, deploy.ID, deployViewer.ID, "viewer", deployOwner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.share(ctx, sc.host.ID, metrics.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, metrics.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.share(ctx, sc.host.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	own := w.mem.PutDeclared(sc.host.ID, "swag", "process", []int{443, 8080}, w.now)
@@ -433,7 +433,7 @@ func TestDelegatedHealthShareRules(t *testing.T) {
 	if len(storedChecks(t, w, own.ID)) != 0 {
 		t.Fatal("share plan replaced checks")
 	}
-	if _, _, err := w.share(ctx, sc.host.ID, deploy.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, deploy.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	status, env = w.do(deployTok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("share-own"))
@@ -441,7 +441,7 @@ func TestDelegatedHealthShareRules(t *testing.T) {
 	if len(storedChecks(t, w, own.ID)) != 0 {
 		t.Fatal("forbidden confirm replaced checks")
 	}
-	if _, _, err := w.share(ctx, sc.host.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, sc.host.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	status, env = w.do(deployTok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("share-own"))

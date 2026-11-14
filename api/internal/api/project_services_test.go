@@ -480,7 +480,7 @@ func newProjectServiceFixture(t *testing.T) *projectServiceFixture {
 	if _, err := w.mem.AddMember(ctx, home.ID, viewer.ID, "viewer", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	deploy, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(deployOwner.ID), deployOwner.ID, "Deploy", "deploy", w.now)
+	deploy, err := w.mem.CreateProject(ctx, home.OrgID, deployOwner.ID, "Deploy", "deploy", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,18 +490,18 @@ func newProjectServiceFixture(t *testing.T) *projectServiceFixture {
 	if _, err := w.mem.AddMember(ctx, deploy.ID, deployViewer.ID, "viewer", deployOwner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	metrics, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(metricsOwner.ID), metricsOwner.ID, "Metrics", "metrics", w.now)
+	metrics, err := w.mem.CreateProject(ctx, home.OrgID, metricsOwner.ID, "Metrics", "metrics", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	homeHost := enrollAPIHost(t, w, home.ID, owner.ID, "pi-home", true)
 	asleepHost := enrollAPIHost(t, w, home.ID, owner.ID, "pi-asleep", false)
-	deployHost := enrollAPIHost(t, w, deploy.ID, deployOwner.ID, "pi-deploy", true)
-	metricsHost := enrollAPIHost(t, w, metrics.ID, metricsOwner.ID, "pi-metrics", true)
-	if _, _, err := w.share(ctx, homeHost.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
+	deployHost := enrollAPIHost(t, w, deploy.ID, owner.ID, "pi-deploy", true) // org tokens come from an org admin (review A7)
+	metricsHost := enrollAPIHost(t, w, metrics.ID, owner.ID, "pi-metrics", true)
+	if _, _, err := w.grant(ctx, homeHost.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.share(ctx, homeHost.ID, metrics.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(ctx, homeHost.ID, metrics.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	api := putProjectService(t, w, homeHost.ID, home.ID, "api", "process", []int{8080}, strPtr("root"), strPtr("Alpha"), w.now)

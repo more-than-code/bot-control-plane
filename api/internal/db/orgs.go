@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -161,15 +162,21 @@ func (d *DB) DeleteOrg(ctx context.Context, id uuid.UUID, at time.Time) ([]uuid.
 			return nil, err
 		}
 	}
+	// Every statement takes ($1 org, $2 time); the services one does not use
+	// $2 (gone_at is the host's revoke time), so it runs with only $1.
 	for _, q := range []string{
 		`UPDATE app.hosts SET revoked_at = $2 WHERE org_id = $1::uuid AND revoked_at IS NULL`,
 		`UPDATE app.agent_credentials c SET revoked_at = $2 FROM app.hosts h
 		 WHERE c.host_id = h.id AND h.org_id = $1::uuid AND c.revoked_at IS NULL`,
 		`UPDATE app.services s SET gone_at = h.revoked_at FROM app.hosts h
-		 WHERE s.host_id = h.id AND h.org_id = $1::uuid AND h.revoked_at IS NOT NULL AND s.gone_at IS NULL AND $2::timestamptz IS NOT NULL`,
+		 WHERE s.host_id = h.id AND h.org_id = $1::uuid AND h.revoked_at IS NOT NULL AND s.gone_at IS NULL`,
 		`UPDATE app.join_tokens SET revoked_at = $2 WHERE org_id = $1::uuid AND revoked_at IS NULL`,
 	} {
-		if err := exec(ctx, tx, q, id.String(), at); err != nil {
+		args := []any{id.String(), at}
+		if !strings.Contains(q, "$2") {
+			args = args[:1]
+		}
+		if err := exec(ctx, tx, q, args...); err != nil {
 			return nil, mapErr(err)
 		}
 	}

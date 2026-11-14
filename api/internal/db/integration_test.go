@@ -324,6 +324,15 @@ func enrollHostDB(t *testing.T, d *DB, ctx context.Context, projectID, ownerID u
 	return host
 }
 
+// reportAllowlistDB gives a host an agent 0.2.8 allowlist (empty is enough),
+// so owners of any of its deploy projects map (spec D-10).
+func reportAllowlistDB(t *testing.T, d *DB, ctx context.Context, hostID uuid.UUID) {
+	t.Helper()
+	if err := d.SetHostPrograms(ctx, hostID, &store.HostPrograms{Enabled: true, RunAs: []string{"joe"}, Projects: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func deniedCode(err error) string {
 	var denied *authz.Denied
 	if errors.As(err, &denied) {

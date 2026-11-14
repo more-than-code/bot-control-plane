@@ -438,7 +438,7 @@ func assertServiceViewFilters(t *testing.T, d *DB, ctx context.Context) {
 	homeUser := mustSvcUser(t, d, ctx, "vhome-"+tag, at)
 	guestUser := mustSvcUser(t, d, ctx, "vguest-"+tag, at)
 	home := mustSvcProject(t, d, ctx, homeUser.ID, "Home", "vhome-"+tag, at)
-	guest := mustSvcProject(t, d, ctx, guestUser.ID, "Guest", "vguest-"+tag, at)
+	guest := projectIn(t, d, ctx, home.OrgID, guestUser.ID, "Guest", "vguest-"+tag, at)
 	host := enrollHostDB(t, d, ctx, home.ID, homeUser.ID, "vhost-"+tag, at)
 	other := enrollHostDB(t, d, ctx, home.ID, homeUser.ID, "vother-"+tag, at)
 	gone := at
@@ -447,7 +447,7 @@ func assertServiceViewFilters(t *testing.T, d *DB, ctx context.Context) {
 	insertPresenceRow(t, d, ctx, host.ID, guest.ID, "found", "discovered", nil, at)
 	insertPresenceRow(t, d, ctx, host.ID, home.ID, "found-old", "discovered", &gone, at)
 	insertPresenceRow(t, d, ctx, other.ID, home.ID, "api-remote", "declared", nil, at)
-	if _, _, err := shareDB(t, d, ctx, host.ID, guest.ID, "deploy", homeUser.ID, at); err != nil {
+	if _, _, err := grantDB(t, d, ctx, host.ID, guest.ID, "deploy", homeUser.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	list := func(project uuid.UUID, q store.ServiceListQuery) []string {
@@ -502,10 +502,10 @@ func assertPresencePlacedName(t *testing.T, d *DB, ctx context.Context) {
 	tag := strings.ReplaceAll(uuid.New().String(), "-", "")[:10]
 	owner := catalogUser(t, d, ctx, "placed-own-"+tag, at)
 	boxOwner := catalogUser(t, d, ctx, "placed-box-"+tag, at)
-	home := catalogProject(t, d, ctx, owner.ID, "Home", "placed-"+tag, at)
 	box := catalogProject(t, d, ctx, boxOwner.ID, "Box", "placedbox-"+tag, at)
+	home := projectIn(t, d, ctx, box.OrgID, owner.ID, "Home", "placed-"+tag, at)
 	host := enrollHostDB(t, d, ctx, box.ID, boxOwner.ID, "placed-"+tag, at)
-	if _, _, err := shareDB(t, d, ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
+	if _, _, err := grantDB(t, d, ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	spec, hash, display := catalogSpec(t, "pnpm run dev")
@@ -514,6 +514,7 @@ func assertPresencePlacedName(t *testing.T, d *DB, ctx context.Context) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	reportAllowlistDB(t, d, ctx, host.ID) // two deploy projects (D-10)
 	other := insertPresenceRow(t, d, ctx, host.ID, box.ID, "other", "discovered", nil, at)
 	if err := d.UpsertDiscovered(ctx, host.ID, []store.Discovered{{
 		Name: "not-the-entry", Kind: "process", Ports: []int{80},
@@ -855,10 +856,10 @@ func assertOwnershipEnds(t *testing.T, d *DB, ctx context.Context) {
 	tag := strings.ReplaceAll(uuid.New().String(), "-", "")[:10]
 	owner := catalogUser(t, d, ctx, "ownend-"+tag, at)
 	boxOwner := catalogUser(t, d, ctx, "boxend-"+tag, at)
-	home := catalogProject(t, d, ctx, owner.ID, "Home", "ownend"+tag, at)
 	box := catalogProject(t, d, ctx, boxOwner.ID, "Box", "boxend"+tag, at)
+	home := projectIn(t, d, ctx, box.OrgID, owner.ID, "Home", "ownend"+tag, at)
 	host := enrollHostDB(t, d, ctx, box.ID, boxOwner.ID, "end-"+tag, at)
-	if _, _, err := shareDB(t, d, ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
+	if _, _, err := grantDB(t, d, ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	spec, hash, display := catalogSpec(t, "pnpm run dev")
@@ -883,6 +884,7 @@ func assertOwnershipEnds(t *testing.T, d *DB, ctx context.Context) {
 	if err != nil || len(declaredChecks) != 1 {
 		t.Fatalf("declared checks %v %v", declaredChecks, err)
 	}
+	reportAllowlistDB(t, d, ctx, host.ID) // two deploy projects (D-10)
 	redisOwner := &store.DiscoveredOwner{Kind: "program", Project: home.Slug, Entry: "redis"}
 	keptOwner := &store.DiscoveredOwner{Kind: "program", Project: home.Slug, Entry: "kept"}
 	keptDiscovered := store.Discovered{Name: "kept", Kind: "container", Ports: []int{1}}
@@ -916,7 +918,7 @@ func assertOwnershipEnds(t *testing.T, d *DB, ctx context.Context) {
 		t.Fatal(err)
 	}
 	ended := mustServiceDB(t, d, ctx, redis.ID, t2)
-	if ended.ID != redis.ID || ended.Source != "discovered" || ended.CatalogEntry != nil || ended.ProjectID != nil {
+	if ended.ID != redis.ID || ended.Source != "discovered" || ended.CatalogEntry != nil || !sameID(ended.ProjectID, &home.ID) {
 		t.Fatalf("ended %+v", ended)
 	}
 	if ended.DisplayName == nil || *ended.DisplayName != "Redis" || ended.ContainerName == nil || *ended.ContainerName != "redis" {

@@ -20,11 +20,11 @@ func TestProgramEnvSetsOnlyKeyDelete(t *testing.T) {
 	owner := w.user("owner@ex.com", "Owner")
 	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
 	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), w.mem.PersonalOrg(guestUser.ID), guestUser.ID, "Guest", "guest", w.now)
+	guest, err := w.mem.CreateProject(context.Background(), sc.project.OrgID, guestUser.ID, "Guest", "guest", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.share(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	gtok := w.token(guestUser.ID)
@@ -59,11 +59,11 @@ func TestProjectsPreCheckAfterAccess(t *testing.T) {
 	owner := w.user("owner@ex.com", "Owner")
 	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
 	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), w.mem.PersonalOrg(guestUser.ID), guestUser.ID, "Guest", "guest", w.now)
+	guest, err := w.mem.CreateProject(context.Background(), sc.project.OrgID, guestUser.ID, "Guest", "guest", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.share(context.Background(), sc.host.ID, guest.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(context.Background(), sc.host.ID, guest.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	gtok := w.token(guestUser.ID)
@@ -74,7 +74,7 @@ func TestProjectsPreCheckAfterAccess(t *testing.T) {
 	host := sc.host.ID.String()
 	status, env := postAct(w, gtok, gpath, "tra", "run", host, "ord-1", nil)
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "this project has no deploy access to the host")
-	if _, _, err := w.share(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	status, env = postAct(w, gtok, gpath, "tra", "run", host, "ord-2", nil)

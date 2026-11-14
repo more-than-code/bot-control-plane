@@ -626,8 +626,7 @@ FOR UPDATE
 		return store.EnvKey{}, false, err
 	}
 	// Every write re-hashes: a new key changes key names, and a plain value
-	// change re-hashes program entries (api-v1 v1.22 amendment 1). Entries
-	// whose hash is unchanged keep their approvals.
+	// change re-hashes program entries (api-v1 v1.22 amendment 1).
 	if err := d.rehashTx(ctx, tx, projectID, name, at); err != nil {
 		return store.EnvKey{}, false, err
 	}
@@ -951,6 +950,7 @@ UPDATE app.catalog_entries SET spec_hash = $2, updated_at = $3 WHERE id = $1::uu
 `, h.id, h.next, at); err != nil {
 			return mapErr(err)
 		}
+		// Kept so a rollback to v0.2.29 sees no stale approvals; removed in phase 2.
 		if err := exec(ctx, tx, `DELETE FROM app.catalog_host_approvals WHERE entry_id = $1::uuid`, h.id); err != nil {
 			return mapErr(err)
 		}

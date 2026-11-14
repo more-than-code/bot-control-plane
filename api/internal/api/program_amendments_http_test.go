@@ -24,7 +24,7 @@ func sharedGuest(t *testing.T, w *world, sc scene, owner store.User) (string, uu
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.share(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.grant(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	return w.token(guestUser.ID), guest.ID

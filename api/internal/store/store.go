@@ -612,8 +612,8 @@ type Store interface {
 	// ListHostAccess returns the host's access rows ordered by project name, then id.
 	ListHostAccess(ctx context.Context, hostID uuid.UUID) ([]HostAccess, error)
 	// PutHostAccess inserts or updates a row. created is true on insert. A
-	// missing host, or a project that is missing, deleted or not in the host's
-	// org, returns ErrNotFound.
+	// missing or revoked host, a deleted org, or a project that is missing,
+	// deleted or not in the host's org, returns ErrNotFound.
 	PutHostAccess(ctx context.Context, hostID, projectID uuid.UUID, level string, grantedBy uuid.UUID, at time.Time) (HostAccess, bool, error)
 	// DeleteHostAccess removes the row. ErrConflict when that project still
 	// has live services on the host, unless reassignOrg moves them to the org
@@ -726,10 +726,9 @@ type Store interface {
 	CreateBoundSession(ctx context.Context, in BoundSession) (Session, error)
 
 	CreateCatalogEntry(ctx context.Context, projectID uuid.UUID, in CatalogWrite) (CatalogEntry, error)
-	// ReplaceCatalogEntry updates the spec. A changed spec_hash deletes every
-	// host approval of the entry. oldHash is the hash before the write.
+	// ReplaceCatalogEntry updates the spec. oldHash is the hash before the write.
 	ReplaceCatalogEntry(ctx context.Context, projectID uuid.UUID, name string, in CatalogWrite) (oldHash string, entry CatalogEntry, err error)
-	// DeleteCatalogEntry removes the entry. Grants, approvals, and confirmations go with it.
+	// DeleteCatalogEntry removes the entry. Grants and confirmations go with it.
 	DeleteCatalogEntry(ctx context.Context, projectID uuid.UUID, name string) (CatalogEntry, error)
 	GetCatalogEntry(ctx context.Context, projectID uuid.UUID, name string) (CatalogEntry, error)
 	ListCatalogEntries(ctx context.Context, projectID uuid.UUID) ([]CatalogEntry, error)
@@ -826,7 +825,7 @@ type Store interface {
 	// PutEnvSet replaces the set. A key already in the set keeps is_secret.
 	// A key new to the set is secret when newKeysSecret is true.
 	// Keys left out are removed.
-	// Referencing image entries are rehashed. A changed hash voids approvals.
+	// Referencing image entries are rehashed.
 	PutEnvSet(ctx context.Context, projectID uuid.UUID, name string, keys []EnvSecret, actor uuid.UUID, at time.Time, newKeysSecret bool) (EnvSet, error)
 	// CreateEnvSet creates the set with keys (api-v1 v1.19 mode create).
 	// An existing set is ErrConflict and nothing changes. Each key is secret

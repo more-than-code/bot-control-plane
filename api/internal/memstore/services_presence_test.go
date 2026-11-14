@@ -374,6 +374,7 @@ func TestPresenceUsesPlacedName(t *testing.T) {
 	box := catalogProject(t, mem, boxOwner.ID, "Box", "placedbox", at)
 	home := mustProject(t, mem, box.OrgID, owner.ID, "Home", "placedproj", at)
 	host := catalogHost(t, mem, box, boxOwner.ID, "placed-pi", at)
+	reportAllowlist(t, mem, host.ID)
 	if _, _, err := mem.PutHostAccess(ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
 		t.Fatal(err)
 	}
@@ -556,6 +557,7 @@ func TestDiscoveredReportEndsOwnership(t *testing.T) {
 	box := catalogProject(t, mem, boxOwner.ID, "Box", "boxend", at)
 	home := mustProject(t, mem, box.OrgID, owner.ID, "Home", "ownend", at)
 	host := enrollMem(t, mem, box.ID, boxOwner.ID, "end-host", at)
+	reportAllowlist(t, mem, host.ID)
 	if _, _, err := mem.PutHostAccess(ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +613,7 @@ func TestDiscoveredReportEndsOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	ended := mustService(t, mem, redis.ID, t2)
-	if ended.ID != redis.ID || ended.Source != "discovered" || ended.CatalogEntry != nil || ended.ProjectID != nil {
+	if ended.ID != redis.ID || ended.Source != "discovered" || ended.CatalogEntry != nil || !sameID(ended.ProjectID, home.ID) {
 		t.Fatalf("ended %+v", ended)
 	}
 	if ended.DisplayName == nil || *ended.DisplayName != "Redis" || ended.ContainerName == nil || *ended.ContainerName != "redis" {

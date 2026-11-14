@@ -87,9 +87,10 @@ func TestEnrolmentPerOrg(t *testing.T) {
 	if elsewhere.Name != "pi" {
 		t.Fatalf("per-org name %q", elsewhere.Name)
 	}
-	// A token without a grant: no access row, null mirror.
+	// A token without a grant: no access row; the mirror is the org's
+	// oldest live project (review A6).
 	bare := enrollToken(t, mem, org, nil, owner.ID, "bare", at)
-	if bare.ProjectID != nil {
+	if bare.ProjectID == nil || *bare.ProjectID != home.ID {
 		t.Fatalf("bare mirror %v", bare.ProjectID)
 	}
 	if rows, err := mem.ListHostAccess(ctx, bare.ID); err != nil || len(rows) != 0 {
@@ -406,4 +407,187 @@ func enrollToken(t *testing.T, mem *Mem, orgID uuid.UUID, grant *store.TokenGran
 		t.Fatal(err)
 	}
 	return host
+}
+
+// reportAllowlist stores a v0.2.8 hello: programs with a projects allowlist,
+// so programs may be placed for several deploy projects (D-10).
+func reportAllowlist(t *testing.T, mem *Mem, hostID uuid.UUID) {
+	t.Helper()
+	if err := mem.SetHostPrograms(context.Background(), hostID, &store.HostPrograms{Enabled: true, RunAs: []string{"joe"}, Projects: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestOwnedReportNeverMovesRows is review A2: rows are keyed by (host, name)
+// and an owned row is named after its entry, so two projects' entries share a
+// name. A report never moves another project's row or an org-level row.
+func TestOwnedReportNeverMovesRows(t *testing.T) {
+	ctx := context.Background()
+	mem := New()
+	at := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
+	owner := catalogUser(t, mem, "a2-owner")
+	org := mem.PersonalOrg(owner.ID)
+	one := mustProject(t, mem, org, owner.ID, "One", "a2one", at)
+	two := mustProject(t, mem, org, owner.ID, "Two", "a2two", at)
+	host := enrollMem(t, mem, one.ID, owner.ID, "a2-host", at)
+	reportAllowlist(t, mem, host.ID)
+	if _, _, err := mem.PutHostAccess(ctx, host.ID, two.ID, "deploy", owner.ID, at); err != nil {
+		t.Fatal(err)
+	}
+	spec, hash, display := catalogSpec(t, "pnpm run dev")
+	for _, p := range []store.Project{one, two} {
+		if _, err := mem.CreateCatalogEntry(ctx, p.ID, store.CatalogWrite{Name: "web", Spec: spec, SpecHash: hash, CommandDisplay: display, Actor: owner.ID, At: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := func(slug string, extra ...store.Discovered) {
+		t.Helper()
+		items := append([]store.Discovered{{Name: "x", Kind: "process", Owner: &store.DiscoveredOwner{Kind: "program", Project: slug, Entry: "web"}}}, extra...)
+		if err := mem.UpsertDiscovered(ctx, host.ID, items, at, true, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report("a2one")
+	items, _ := mem.ListServices(ctx, host.ID, nil, at)
+	web := findService(t, items, "web")
+	if !sameID(web.ProjectID, one.ID) {
+		t.Fatalf("first owner %+v", web)
+	}
+	// The same name owned by the other project: the row stays one's.
+	report("a2two")
+	items, _ = mem.ListServices(ctx, host.ID, nil, at)
+	if got := findService(t, items, "web"); !sameID(got.ProjectID, one.ID) || got.Source != "owned" {
+		t.Fatalf("takeover %+v", got)
+	}
+	// An org-level row with an entry's name is not claimed either.
+	mem.PutDiscovered(host.ID, "sshd", "process", nil, nil, at)
+	sshd := findService(t, mustList(t, mem, host.ID, at), "sshd")
+	mem.SetServiceProject(sshd.ID, uuid.Nil)
+	if _, err := mem.CreateCatalogEntry(ctx, one.ID, store.CatalogWrite{Name: "sshd", Spec: spec, SpecHash: hash, CommandDisplay: display, Actor: owner.ID, At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mem.UpsertDiscovered(ctx, host.ID, []store.Discovered{{Name: "y", Kind: "process", Owner: &store.DiscoveredOwner{Kind: "program", Project: "a2one", Entry: "sshd"}}}, at, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustService(t, mem, sshd.ID, at); got.ProjectID != nil || got.Source != "discovered" {
+		t.Fatalf("org-level row claimed %+v", got)
+	}
+	conflicts := 0
+	for _, a := range mem.AllAudits() {
+		if a.Action == "service.owner_conflict" {
+			conflicts++
+			if a.OrgID == nil || *a.OrgID != org || a.HostID == nil {
+				t.Fatalf("conflict audit %+v", a)
+			}
+		}
+	}
+	if conflicts != 2 {
+		t.Fatalf("conflict audits %d", conflicts)
+	}
+}
+
+func mustList(t *testing.T, mem *Mem, hostID uuid.UUID, at time.Time) []store.Service {
+	t.Helper()
+	items, err := mem.ListServices(context.Background(), hostID, nil, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return items
+}
+
+// TestTokenCreatorMustStayAdmin is review A7.
+func TestTokenCreatorMustStayAdmin(t *testing.T) {
+	ctx := context.Background()
+	mem := New()
+	at := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
+	owner := mustUser(t, mem, "a7-owner@ex.com", at)
+	admin := mustUser(t, mem, "a7-admin@ex.com", at)
+	org := mem.PersonalOrg(owner.ID)
+	if _, err := mem.AddOrgMember(ctx, org, admin.ID, "admin", owner.ID, at); err != nil {
+		t.Fatal(err)
+	}
+	_, hash, _ := secret.NewToken()
+	if _, err := mem.CreateJoinToken(ctx, org, hash, nil, nil, admin.ID, at.Add(time.Hour), at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mem.UpdateOrgMemberRole(ctx, org, admin.ID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	_, cred, _ := secret.NewToken()
+	if _, err := mem.ConsumeJoinToken(ctx, hash, store.EnrollInput{Name: "pi", NodeType: "pi"}, uuid.New(), cred, at); !errors.Is(err, store.ErrUnauthorized) {
+		t.Fatalf("demoted creator's token %v", err)
+	}
+	if _, err := mem.UpdateOrgMemberRole(ctx, org, admin.ID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mem.ConsumeJoinToken(ctx, hash, store.EnrollInput{Name: "pi", NodeType: "pi"}, uuid.New(), cred, at); err != nil {
+		t.Fatalf("restored creator's token %v", err)
+	}
+}
+
+// TestSignInGivesOrglessUserAnOrg is review B16 (D-8 for users from before orgs).
+func TestSignInGivesOrglessUserAnOrg(t *testing.T) {
+	ctx := context.Background()
+	mem := New()
+	at := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
+	u := mustUser(t, mem, "b16@ex.com", at)
+	if _, err := mem.DeleteOrg(ctx, mem.PersonalOrg(u.ID), at); err != nil {
+		t.Fatal(err)
+	}
+	if orgs, _ := mem.ListUserOrgs(ctx, u.ID); len(orgs) != 0 {
+		t.Fatalf("orgs %+v", orgs)
+	}
+	mustUser(t, mem, "b16@ex.com", at.Add(time.Hour))
+	orgs, err := mem.ListUserOrgs(ctx, u.ID)
+	if err != nil || len(orgs) != 1 || orgs[0].Role != "owner" {
+		t.Fatalf("sign-in org %+v %v", orgs, err)
+	}
+	// A user who is in an org gets no second one.
+	mustUser(t, mem, "b16@ex.com", at.Add(2*time.Hour))
+	if orgs, _ := mem.ListUserOrgs(ctx, u.ID); len(orgs) != 1 {
+		t.Fatalf("second org %+v", orgs)
+	}
+}
+
+// TestAccessRefusedOnDeadHosts is the review D22 decision: no grant on a
+// revoked host or in a deleted org.
+func TestAccessRefusedOnDeadHosts(t *testing.T) {
+	ctx := context.Background()
+	mem := New()
+	at := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
+	owner := mustUser(t, mem, "d22@ex.com", at)
+	org := mem.PersonalOrg(owner.ID)
+	p := mustProject(t, mem, org, owner.ID, "P", "d22p", at)
+	q := mustProject(t, mem, org, owner.ID, "Q", "d22q", at)
+	host := enrollMem(t, mem, p.ID, owner.ID, "d22", at)
+	if err := mem.RevokeHost(ctx, host.ID, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := mem.PutHostAccess(ctx, host.ID, q.ID, "metrics", owner.ID, at); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("revoked host grant %v", err)
+	}
+}
+
+// TestReassignOrgKeepsDeclared is review C17 in memstore.
+func TestReassignOrgKeepsDeclared(t *testing.T) {
+	ctx := context.Background()
+	mem := New()
+	at := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
+	owner := mustUser(t, mem, "c17@ex.com", at)
+	org := mem.PersonalOrg(owner.ID)
+	p := mustProject(t, mem, org, owner.ID, "P", "c17p", at)
+	q := mustProject(t, mem, org, owner.ID, "Q", "c17q", at)
+	host := enrollMem(t, mem, p.ID, owner.ID, "c17", at)
+	if _, _, err := mem.PutHostAccess(ctx, host.ID, q.ID, "deploy", owner.ID, at); err != nil {
+		t.Fatal(err)
+	}
+	declared := mem.PutDeclared(host.ID, "decl", "process", nil, at)
+	mem.SetServiceProject(declared.ID, q.ID)
+	if _, err := mem.DeleteHostAccess(ctx, host.ID, q.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	got := mustService(t, mem, declared.ID, at)
+	if got.Source != "declared" || got.ProjectID != nil || got.CatalogEntry != nil {
+		t.Fatalf("declared after reassign %+v", got)
+	}
 }

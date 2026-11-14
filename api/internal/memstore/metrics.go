@@ -170,6 +170,26 @@ func (m *Mem) serviceIDLocked(hostID uuid.UUID, name string) (uuid.UUID, bool) {
 func (m *Mem) InsertAudit(_ context.Context, row store.AuditRow) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.insertAuditLocked(row)
+	return nil
+}
+
+// insertAuditLocked appends one row. A row with a host or project and no
+// org takes the host's org, else the project's (review A3). The caller holds m.mu.
+func (m *Mem) insertAuditLocked(row store.AuditRow) {
+	if row.OrgID == nil {
+		if row.HostID != nil {
+			if h, ok := m.hosts[*row.HostID]; ok {
+				org := h.OrgID
+				row.OrgID = &org
+			}
+		} else if row.ProjectID != nil {
+			if p, ok := m.projects[*row.ProjectID]; ok {
+				org := p.OrgID
+				row.OrgID = &org
+			}
+		}
+	}
 	m.nextAudit++
 	detail := row.Detail
 	if detail == nil {
@@ -195,7 +215,6 @@ func (m *Mem) InsertAudit(_ context.Context, row store.AuditRow) error {
 		ErrorCode:   row.ErrorCode,
 		Detail:      raw,
 	})
-	return nil
 }
 
 func (m *Mem) ListAudit(_ context.Context, projectID uuid.UUID, limit int, cursor *store.Cursor) ([]store.AuditEntry, *store.Cursor, error) {

@@ -93,6 +93,10 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 	if _, ok := m.liveOrgLocked(tok.OrgID); !ok {
 		return store.Host{}, store.ErrUnauthorized
 	}
+	// The creator must still own or administer the org (review A7).
+	if !store.OrgAdmin(m.orgRoleLocked(tok.OrgID, tok.CreatedBy)) {
+		return store.Host{}, store.ErrUnauthorized
+	}
 	// A grant whose project has since been deleted (or moved) is dropped;
 	// the host still joins the org.
 	var grant *store.TokenGrant
@@ -124,9 +128,16 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 		LastSeenAt:   &at,
 		EnrolledAt:   at,
 	}
-	if grant != nil {
+	// The deprecated project_id mirror (review A6): the grant project for a
+	// deploy grant, otherwise the org's oldest live project, or null.
+	if grant != nil && grant.Level == "deploy" {
 		pid := grant.ProjectID
 		host.ProjectID = &pid
+	} else {
+		host.ProjectID = m.oldestProjectLocked(tok.OrgID)
+	}
+	if grant != nil {
+		pid := grant.ProjectID
 		by := tok.CreatedBy
 		m.access[accessKey(host.ID, pid)] = store.HostAccess{HostID: host.ID, ProjectID: pid, Level: grant.Level, GrantedBy: &by, GrantedAt: at}
 	}
@@ -141,6 +152,25 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 	tok.UsedByHostID = &host.ID
 	m.tokens[id] = tok
 	return cloneHost(host), nil
+}
+
+// oldestProjectLocked is the org's oldest live project, or nil.
+func (m *Mem) oldestProjectLocked(orgID uuid.UUID) *uuid.UUID {
+	var best *store.Project
+	for _, p := range m.projects {
+		if p.OrgID != orgID || p.DeletedAt != nil {
+			continue
+		}
+		if best == nil || p.CreatedAt.Before(best.CreatedAt) || (p.CreatedAt.Equal(best.CreatedAt) && p.ID.String() < best.ID.String()) {
+			cp := p
+			best = &cp
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	id := best.ID
+	return &id
 }
 
 func (m *Mem) GetHost(_ context.Context, id uuid.UUID) (store.Host, error) {
@@ -222,18 +252,16 @@ func pageHosts(all []store.Host, limit int, cursor *store.Cursor) ([]store.Host,
 }
 
 // hostAfter reports whether h is strictly after the host-list cursor.
-// A nil cursor, or one without a rank, starts at the beginning. A rank above
-// 0 (an old shared-hosts cursor) is past every host. The cursor host does
+// A nil cursor, or one without a rank, starts at the beginning. Host cursors
+// have rank 0 since v1.24; any other rank (an old shared-hosts cursor) is
+// past every host, as in Postgres. The cursor host does
 // not have to still be in the list.
 func hostAfter(h store.Host, cursor *store.Cursor) bool {
 	if cursor == nil || cursor.Rank == nil {
 		return true
 	}
-	if *cursor.Rank > 0 {
+	if *cursor.Rank != 0 {
 		return false
-	}
-	if *cursor.Rank < 0 {
-		return true
 	}
 	if h.Name != cursor.Name {
 		return h.Name > cursor.Name

@@ -26,6 +26,7 @@ const (
 	reasonRunAs          = "run_as is not allowed on this host"
 	reasonShell          = "shell is not allowed on this host"
 	reasonNoDeployAccess = "this project has no deploy access to the host"
+	reasonNoAllowlist    = "this host's agent does not enforce a projects allowlist; upgrade it to 0.2.8"
 	reasonInProgress     = "request in progress"
 	reasonNoSecrets      = "this host's agent does not support program secrets"
 	// reasonProgramEnvTooLarge is api-v1 v1.22 item 4: the agent caps a
@@ -323,6 +324,29 @@ func (s *Server) programHost(w http.ResponseWriter, r *http.Request, p principal
 	return host, true
 }
 
+// programsTrusted is spec-organizations D-10 (api-v1 v1.24 item 4): an agent
+// older than 0.2.8 reports no programs.projects and enforces no projects
+// allowlist, so only the host's single deploy project may run, stop or
+// restart programs there.
+func (s *Server) programsTrusted(ctx context.Context, host store.Host, projectID uuid.UUID) (bool, error) {
+	if host.Programs != nil && host.Programs.Projects != nil {
+		return true, nil
+	}
+	rows, err := s.Store.ListHostAccess(ctx, host.ID)
+	if err != nil {
+		return false, err
+	}
+	deploy := 0
+	mine := false
+	for _, a := range rows {
+		if a.Level == authz.LevelDeploy {
+			deploy++
+			mine = mine || a.ProjectID == projectID
+		}
+	}
+	return deploy == 1 && mine, nil
+}
+
 func policyReason(host store.Host, runAs, exec string, shell bool) string {
 	if host.Programs == nil {
 		return reasonNoPrograms
@@ -355,6 +379,12 @@ func policyReason(host store.Host, runAs, exec string, shell bool) string {
 func (s *Server) programGate(ctx context.Context, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, action string) (string, string, error) {
 	if msg := policyReason(host, entry.Spec.RunAs, entry.Spec.Exec, entry.Spec.Shell); msg != "" {
 		return "forbidden", msg, nil
+	}
+	if action == "run" || action == "stop" || action == "restart" {
+		ok, err := s.programsTrusted(ctx, host, projectID)
+		if err != nil || !ok {
+			return "forbidden", reasonNoAllowlist, err
+		}
 	}
 	refs := entry.Spec.Program().EnvRefs()
 	switch action {

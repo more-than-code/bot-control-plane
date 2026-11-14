@@ -34,6 +34,19 @@ func (m *Mem) PersonalOrg(userID uuid.UUID) uuid.UUID {
 	return best.ID
 }
 
+// inAnyOrgLocked reports whether the user is a member of a live org.
+func (m *Mem) inAnyOrgLocked(userID uuid.UUID) bool {
+	for _, om := range m.orgMembers {
+		if om.UserID != userID {
+			continue
+		}
+		if _, ok := m.liveOrgLocked(om.OrgID); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Mem) createOrgLocked(ownerID uuid.UUID, name, baseSlug string, at time.Time) (store.Org, error) {
 	if _, ok := m.users[ownerID]; !ok {
 		return store.Org{}, store.ErrNotFound
@@ -268,17 +281,4 @@ func (m *Mem) TransferOrgOwnership(_ context.Context, orgID, newOwner uuid.UUID)
 	target.Role = store.OrgRoleOwner
 	m.orgMembers[targetKey] = target
 	return nil
-}
-
-// SetProjectOrg moves a project into another org. Tests use it to place a
-// project in a host's org before granting access. It is not part of store.Store.
-func (m *Mem) SetProjectOrg(projectID, orgID uuid.UUID) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	p, ok := m.projects[projectID]
-	if !ok {
-		return
-	}
-	p.OrgID = orgID
-	m.projects[projectID] = p
 }

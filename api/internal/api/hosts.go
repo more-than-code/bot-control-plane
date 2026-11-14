@@ -226,6 +226,8 @@ func (s *Server) handleHostList(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	orgAdmin = orgAdmin && p.Session.Kind != store.KindDelegated
+	mirror := s.newMirrorFilter(r, p.User.ID, orgAdmin)
 	for i := range items {
 		level := ""
 		if items[i].AccessLevel != nil {
@@ -234,8 +236,47 @@ func (s *Server) handleHostList(w http.ResponseWriter, r *http.Request) {
 		items[i] = withAccessLevel(items[i], level)
 		items[i].Status = s.hostStatus(items[i])
 		items[i] = projectsView(items[i], id, viewer.Slug, orgAdmin)
+		if items[i], err = mirror.apply(items[i]); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	writeList(w, items, next)
+}
+
+// mirrorFilter hides the deprecated Host.project_id mirror (review A6): it
+// is returned only to org owners and admins and to members of that project.
+// Membership answers are cached per request.
+type mirrorFilter struct {
+	s        *Server
+	r        *http.Request
+	userID   uuid.UUID
+	orgAdmin bool
+	member   map[uuid.UUID]bool
+}
+
+func (s *Server) newMirrorFilter(r *http.Request, userID uuid.UUID, orgAdmin bool) *mirrorFilter {
+	return &mirrorFilter{s: s, r: r, userID: userID, orgAdmin: orgAdmin, member: map[uuid.UUID]bool{}}
+}
+
+func (f *mirrorFilter) apply(h store.Host) (store.Host, error) {
+	if h.ProjectID == nil || f.orgAdmin {
+		return h, nil
+	}
+	pid := *h.ProjectID
+	ok, seen := f.member[pid]
+	if !seen {
+		_, err := f.s.Store.Role(f.r.Context(), pid, f.userID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return h, err
+		}
+		ok = err == nil
+		f.member[pid] = ok
+	}
+	if !ok {
+		h.ProjectID = nil
+	}
+	return h, nil
 }
 
 // isOrgAdmin reports whether the user owns or administers the org.
@@ -261,7 +302,9 @@ func (s *Server) handleHostGet(w http.ResponseWriter, r *http.Request) {
 	}
 	host = withAccessLevel(host, authz.HighestLevel(rel.Access))
 	host.Status = s.hostStatus(host)
-	if rel.OrgAdmin() {
+	// A delegated (MCP) session never gets access or the allowlist (review A5).
+	orgView := rel.OrgAdmin() && p.Session.Kind != store.KindDelegated
+	if orgView {
 		access, err := s.Store.ListHostAccess(r.Context(), host.ID)
 		if err != nil {
 			s.fail(w, err)
@@ -274,7 +317,12 @@ func (s *Server) handleHostGet(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeOK(w, http.StatusOK, projectsView(host, viewer, slug, rel.OrgAdmin()))
+	host, err = s.newMirrorFilter(r, p.User.ID, rel.OrgAdmin()).apply(host)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, projectsView(host, viewer, slug, orgView))
 }
 
 // hostViewer is the project whose view GET /v1/hosts/{id} shows: the

@@ -25,8 +25,9 @@ func TestListProjectServices(t *testing.T) {
 	deploy := mustProject(t, mem, home.OrgID, deployUser.ID, "Deploy", "deploy", now)
 	metrics := mustProject(t, mem, home.OrgID, metricsUser.ID, "Metrics", "metrics", now)
 	alpha := enrollMem(t, mem, home.ID, homeUser.ID, "alpha-host", now)
-	beta := enrollMem(t, mem, deploy.ID, deployUser.ID, "beta-host", now)
-	gamma := enrollMem(t, mem, metrics.ID, metricsUser.ID, "gamma-host", now)
+	// Org tokens are created by an org admin (review A7): home's owner.
+	beta := enrollMem(t, mem, deploy.ID, homeUser.ID, "beta-host", now)
+	gamma := enrollMem(t, mem, metrics.ID, homeUser.ID, "gamma-host", now)
 	delta := enrollMem(t, mem, home.ID, homeUser.ID, "delta-host", now)
 	epsilon := enrollMem(t, mem, home.ID, homeUser.ID, "epsilon-host", now)
 	zeta := enrollMem(t, mem, home.ID, homeUser.ID, "zeta-host", now)

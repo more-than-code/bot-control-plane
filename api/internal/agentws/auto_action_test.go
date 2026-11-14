@@ -324,7 +324,7 @@ func TestAutoActionIngest(t *testing.T) {
 		t.Fatalf("rollback digests %v %v", digests, err)
 	}
 
-	// A deploy-level share counts; spec_hash comes from its last row.
+	// A deploy-access project counts; spec_hash comes from its last row.
 	sharedID := uuid.New().String()
 	sendAuto(autoFrame(sharedID, "d", "web", "restart", "ok", nil, frameAt))
 	expectAck(t, conn, sharedID)
@@ -333,6 +333,18 @@ func TestAutoActionIngest(t *testing.T) {
 	}
 	if len(autoAudits(t, st, deployer.ID)) != 1 {
 		t.Fatal("shared project audit missing")
+	}
+
+	// Review D25: access removed while the agent stays connected; the next
+	// frame for that project is acknowledged and dropped.
+	if _, err := st.DeleteHostAccess(ctx, hostID, deployer.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	revokedID := uuid.New().String()
+	sendAuto(autoFrame(revokedID, "d", "web", "restart", "ok", nil, frameAt))
+	expectAck(t, conn, revokedID)
+	if len(rows(shared.ID)) != 2 || len(autoAudits(t, st, deployer.ID)) != 1 {
+		t.Fatal("auto_action stored after the project's access was removed")
 	}
 
 	// Frames that fail validation or authority are acknowledged and dropped.

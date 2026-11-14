@@ -151,6 +151,7 @@ func TestOwnedIngestMemstore(t *testing.T) {
 		t.Fatal(err)
 	}
 	host := catalogHost(t, m, box, boxOwner.ID, "pi-box", at)
+	reportAllowlist(t, m, host.ID)
 	if _, _, err := m.PutHostAccess(ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
 		t.Fatal(err)
 	}

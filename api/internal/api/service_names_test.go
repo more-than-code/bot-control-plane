@@ -15,14 +15,14 @@ import (
 )
 
 func TestServiceRenameMatrix(t *testing.T) {
-	fx := newShareFixture(t)
+	fx := newAccessFixture(t)
 	const (
 		ok   = http.StatusOK
 		no   = http.StatusForbidden
 		miss = http.StatusNotFound
 	)
 	want := cellWant(no, ok, no, no, no, miss)
-	for _, actor := range shareActors {
+	for _, actor := range accessActors {
 		if want[actor] == ok {
 			continue
 		}
@@ -93,7 +93,13 @@ func TestServiceRenameMatrix(t *testing.T) {
 		if audits[i].to == "Web" {
 			wantProject = fx.deploy.ID
 		}
-		if row.ProjectID == nil || *row.ProjectID != wantProject || row.OrgID == nil || *row.OrgID != fx.home.OrgID || row.HostID == nil || *row.HostID != fx.sc.host.ID {
+		if row.HostID == nil {
+			// A caller who cannot see the host (not_found) leaves no org,
+			// host or project on the row; the host id is in the detail (review A4).
+			if row.OrgID != nil || row.ProjectID != nil || detail["host_id"] != fx.sc.host.ID.String() {
+				t.Fatalf("hidden audit target %+v", row)
+			}
+		} else if row.ProjectID == nil || *row.ProjectID != wantProject || row.OrgID == nil || *row.OrgID != fx.home.OrgID || *row.HostID != fx.sc.host.ID {
 			t.Fatalf("audit target %+v", row)
 		}
 		if row.Decision != audits[i].decision || detail["from"] != audits[i].from || detail["to"] != audits[i].to {
@@ -106,7 +112,7 @@ func TestServiceRenameMatrix(t *testing.T) {
 }
 
 func TestServiceRenameValidation(t *testing.T) {
-	fx := newShareFixture(t)
+	fx := newAccessFixture(t)
 	path := fx.servicePath(fx.ownerSvc, "")
 	before := len(fx.w.mem.AllAudits())
 	code, env := fx.do(actOwnerViewer, http.MethodPatch, path, `{`)
@@ -190,7 +196,7 @@ func TestServiceRenameValidation(t *testing.T) {
 }
 
 func TestHostServiceListKeepsShape(t *testing.T) {
-	fx := newShareFixture(t)
+	fx := newAccessFixture(t)
 	user := "www-data"
 	if err := fx.w.mem.UpsertDiscovered(context.Background(), fx.sc.host.ID, []store.Discovered{{
 		Name: "api", Kind: "process", Ports: []int{8080}, OwnerUser: &user,
@@ -235,7 +241,7 @@ func TestHostServiceListKeepsShape(t *testing.T) {
 	}
 }
 
-func lastRename(t *testing.T, fx *shareFixture) store.AuditEntry {
+func lastRename(t *testing.T, fx *accessFixture) store.AuditEntry {
 	t.Helper()
 	rows := fx.w.mem.AllAudits()
 	for i := len(rows) - 1; i >= 0; i-- {

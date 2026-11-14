@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
@@ -98,10 +99,19 @@ func (m *Mem) UpsertDiscovered(_ context.Context, hostID uuid.UUID, items []stor
 			}
 			continue
 		}
+		// Rows are keyed by (host, name), and an owned row is named after its
+		// entry, so two projects' entries (or an org-level row) can share a
+		// name. An owned report never moves a row away from a different
+		// project or from the org: the row is left as it is and the conflict
+		// is audited.
+		if source == "owned" && existing.Source != "declared" && !sameProject(existing.ProjectID, projectID) {
+			m.ownerConflictLocked(hostID, existing, item, at)
+			continue
+		}
 		existing.LastSeenAt = at
 		existing.GoneAt = nil
 		existing.OwnerUser = store.NormalizeOwnerUser(item.OwnerUser)
-		// An owned report adopts a discovered row. A discovered placement
+		// An owned report adopts a discovered row of its own project. A discovered placement
 		// ends ownership. declared is left alone. id, display_name, and
 		// health checks are not written here.
 		if existing.Source != "declared" && source == "owned" {
@@ -109,8 +119,9 @@ func (m *Mem) UpsertDiscovered(_ context.Context, hostID uuid.UUID, items []stor
 			existing.ProjectID = cloneID(projectID)
 			existing.CatalogEntry = cloneString(catalogEntry)
 		} else if existing.Source == "owned" && source == "discovered" {
+			// Ownership ends, but the row keeps its project, so the same
+			// project can own it again (review A2).
 			existing.Source = "discovered"
-			existing.ProjectID = cloneID(projectID)
 			existing.CatalogEntry = nil
 		}
 		if existing.Source != "declared" {
@@ -436,6 +447,23 @@ func serviceMatches(row store.ProjectService, q string) bool {
 		}
 	}
 	return false
+}
+
+func sameProject(a, b *uuid.UUID) bool {
+	return a != nil && b != nil && *a == *b
+}
+
+// ownerConflictLocked records a refused owned report (audit
+// service.owner_conflict, via agent). The caller holds m.mu.
+func (m *Mem) ownerConflictLocked(hostID uuid.UUID, existing store.Service, item store.Discovered, at time.Time) {
+	org := m.hosts[hostID].OrgID
+	host := hostID
+	svc := existing.ID
+	m.insertAuditLocked(store.AuditRow{
+		At: at, Via: "agent", OrgID: &org, HostID: &host, ServiceID: &svc,
+		Action: audit.ActionServiceOwnerConflict, Decision: "denied",
+		Detail: map[string]any{"name": existing.Name, "project": item.Owner.Project, "entry": item.Owner.Entry},
+	})
 }
 
 func cloneID(in *uuid.UUID) *uuid.UUID {

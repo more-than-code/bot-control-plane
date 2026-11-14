@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"strings"
 	"time"
 
@@ -326,6 +328,15 @@ func (d *DB) UpsertDiscovered(ctx context.Context, hostID uuid.UUID, items []sto
 			return d.ownerLookup(ctx, tx, hostID, slug, entry, kind)
 		})
 		names = append(names, name)
+		if source == "owned" {
+			conflict, err := ownerConflict(ctx, tx, hostID, name, projectID, item, at)
+			if err != nil {
+				return err
+			}
+			if conflict {
+				continue
+			}
+		}
 		if err := exec(ctx, tx, `
 INSERT INTO app.services (
     id, host_id, name, source, kind, ports,
@@ -349,7 +360,8 @@ ON CONFLICT (host_id, name) DO UPDATE SET
     project_id = CASE
         WHEN app.services.source = 'declared' THEN app.services.project_id
         WHEN EXCLUDED.source = 'owned' THEN EXCLUDED.project_id
-        WHEN app.services.source = 'owned' AND EXCLUDED.source = 'discovered' THEN EXCLUDED.project_id
+        -- Ownership ends but the row keeps its project, so the same
+        -- project can own it again (review A2).
         ELSE app.services.project_id
     END,
     catalog_entry = CASE
@@ -386,6 +398,44 @@ WHERE host_id = $1::uuid
 		return mapErr(err)
 	}
 	return nil
+}
+
+// ownerConflict reports whether an owned report would move an existing row
+// of another project, or an org-level row (review A2). Rows are keyed by
+// (host, name) and an owned row is named after its entry, so two projects'
+// entries can share a name. The row is left as it is and the conflict is
+// audited (service.owner_conflict, via agent) in the same transaction.
+func ownerConflict(ctx context.Context, tx pgx.Tx, hostID uuid.UUID, name string, projectID *uuid.UUID, item store.Discovered, at time.Time) (bool, error) {
+	var serviceText, source string
+	var current *string
+	err := tx.QueryRow(ctx, `
+SELECT id::text, source, project_id::text FROM app.services
+WHERE host_id = $1::uuid AND name = $2
+FOR UPDATE
+`, hostID.String(), name).Scan(&serviceText, &source, &current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, mapErr(err)
+	}
+	if source == "declared" || (current != nil && projectID != nil && *current == projectID.String()) {
+		return false, nil
+	}
+	owner := ""
+	entry := ""
+	if item.Owner != nil {
+		owner, entry = item.Owner.Project, item.Owner.Entry
+	}
+	if err := exec(ctx, tx, `
+INSERT INTO app.audit_log (at, via, org_id, host_id, service_id, action, decision, detail)
+SELECT $1, 'agent', h.org_id, h.id, $3::uuid, $4, 'denied', $5::jsonb
+FROM app.hosts h WHERE h.id = $2::uuid
+`, at, hostID.String(), serviceText, audit.ActionServiceOwnerConflict,
+		auditDetail(map[string]any{"name": name, "project": owner, "entry": entry})); err != nil {
+		return false, mapErr(err)
+	}
+	return true, nil
 }
 
 func (d *DB) ReplaceHealthChecks(ctx context.Context, serviceID uuid.UUID, checks []store.HealthCheckInput) ([]store.HealthCheck, error) {

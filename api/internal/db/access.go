@@ -73,7 +73,7 @@ func (d *DB) ListHostAccess(ctx context.Context, hostID uuid.UUID) ([]store.Host
 	rows, err := d.pool.Query(ctx, `
 SELECT `+accessCols+`
 FROM app.host_access a
-JOIN app.projects p ON p.id = a.project_id
+JOIN app.projects p ON p.id = a.project_id AND p.deleted_at IS NULL
 WHERE a.host_id = $1::uuid
 ORDER BY p.name COLLATE "C", a.project_id
 `, hostID.String())
@@ -95,6 +95,34 @@ ORDER BY p.name COLLATE "C", a.project_id
 	return out, nil
 }
 
+// accessForHosts loads the access rows of many hosts in one query, each
+// list ordered like ListHostAccess (review C19).
+func (d *DB) accessForHosts(ctx context.Context, hostIDs []string) (map[uuid.UUID][]store.HostAccess, error) {
+	out := map[uuid.UUID][]store.HostAccess{}
+	if len(hostIDs) == 0 {
+		return out, nil
+	}
+	rows, err := d.pool.Query(ctx, `
+SELECT `+accessCols+`
+FROM app.host_access a
+JOIN app.projects p ON p.id = a.project_id AND p.deleted_at IS NULL
+WHERE a.host_id = ANY(CAST($1 AS uuid[]))
+ORDER BY a.host_id, p.name COLLATE "C", a.project_id
+`, hostIDs)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		item, err := scanAccess(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[item.HostID] = append(out[item.HostID], item)
+	}
+	return out, mapErr(rows.Err())
+}
+
 func (d *DB) PutHostAccess(ctx context.Context, hostID, projectID uuid.UUID, level string, grantedBy uuid.UUID, at time.Time) (store.HostAccess, bool, error) {
 	if !store.ValidAccessLevel(level) {
 		return store.HostAccess{}, false, store.ErrInvalid
@@ -108,8 +136,10 @@ func (d *DB) PutHostAccess(ctx context.Context, hostID, projectID uuid.UUID, lev
 	if err := tx.QueryRow(ctx, `
 SELECT EXISTS (
     SELECT 1 FROM app.hosts h
+    JOIN app.orgs o ON o.id = h.org_id AND o.deleted_at IS NULL
     JOIN app.projects p ON p.org_id = h.org_id AND p.id = $2::uuid AND p.deleted_at IS NULL
-    WHERE h.id = $1::uuid
+    -- A revoked host takes no new grants (review D22).
+    WHERE h.id = $1::uuid AND h.revoked_at IS NULL
 )
 `, hostID.String(), projectID.String()).Scan(&ok); err != nil {
 		return store.HostAccess{}, false, mapErr(err)
@@ -122,6 +152,8 @@ SELECT EXISTS (
 INSERT INTO app.host_access (host_id, project_id, level, granted_by, granted_at)
 VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5)
 ON CONFLICT (host_id, project_id) DO UPDATE SET level = EXCLUDED.level
+-- xmax is 0 on a freshly inserted row and set on an updated one, so this
+-- reports whether the upsert inserted.
 RETURNING (xmax = 0)
 `, hostID.String(), projectID.String(), level, grantedBy.String(), at).Scan(&inserted); err != nil {
 		return store.HostAccess{}, false, mapErr(err)

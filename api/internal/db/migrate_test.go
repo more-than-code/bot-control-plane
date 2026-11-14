@@ -419,10 +419,10 @@ func TestMigrateUsesOneConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(raw)
-	if !strings.Contains(src, "pgx.Connect(ctx, databaseURL)") || strings.Contains(src, "pgxpool") {
+	if !strings.Contains(src, "pgx.ConnectConfig(ctx, cfg)") || strings.Contains(src, "pgxpool") {
 		t.Fatal("Migrate must apply every file on one pgx.Connect connection, not a pool")
 	}
-	if strings.Count(src, "pgx.Connect(") != 1 {
+	if strings.Count(src, "pgx.Connect") != 1 {
 		t.Fatal("Migrate opens more than one connection")
 	}
 	if !strings.Contains(src, "pg_advisory_lock($1)") {

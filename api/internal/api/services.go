@@ -74,7 +74,7 @@ func (s *Server) handleServicePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := authz.AuthorizeHost(rel, authz.CapServiceWrite, svc.ProjectID); err != nil {
-		s.denyRow(w, r, p, idPtr(host.OrgID), svc.ProjectID, idPtr(host.ID), idPtr(svc.ID), audit.ActionServiceRename, detail, err)
+		s.denyHostDetail(w, r, p, host, svc.ProjectID, idPtr(svc.ID), audit.ActionServiceRename, detail, err)
 		return
 	}
 	if parseMsg != "" {
@@ -103,7 +103,7 @@ func (s *Server) handleServicePatch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) finishRenameAuth(w http.ResponseWriter, r *http.Request, p principal, host store.Host, svc store.Service, detail map[string]any, err error) {
 	var denied *authz.Denied
 	if errors.As(err, &denied) {
-		s.denyRow(w, r, p, idPtr(host.OrgID), svc.ProjectID, idPtr(host.ID), idPtr(svc.ID), audit.ActionServiceRename, detail, err)
+		s.denyHostDetail(w, r, p, host, svc.ProjectID, idPtr(svc.ID), audit.ActionServiceRename, detail, err)
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {

@@ -274,17 +274,18 @@ func (s *Server) handleOrgMemberDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	userID, err := uuid.Parse(r.PathValue("user_id"))
-	if err != nil {
-		writeCode(w, "bad_request", "invalid id")
+	// Gate first (any member), then parse: removing someone else needs
+	// admin+, removing yourself does not.
+	orgID, role, ok := s.orgGate(w, r, p, orgNeedMember, audit.ActionOrgMemberRemove)
+	if !ok {
 		return
 	}
-	need := orgNeedAdmin
-	if userID == p.User.ID {
-		need = orgNeedMember
-	}
-	orgID, _, ok := s.orgGate(w, r, p, need, audit.ActionOrgMemberRemove)
+	userID, ok := s.pathID(w, r, "user_id")
 	if !ok {
+		return
+	}
+	if userID != p.User.ID && !store.OrgAdmin(role) {
+		s.denyRow(w, r, p, idPtr(orgID), nil, nil, nil, audit.ActionOrgMemberRemove, nil, &authz.Denied{Code: "forbidden"})
 		return
 	}
 	if err := s.Store.RemoveOrgMember(r.Context(), orgID, userID); err != nil {
@@ -299,14 +300,9 @@ func (s *Server) handleOrgMemberDelete(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, http.StatusOK, nil)
 }
 
-// orgOwnerErr maps ErrOwner (the owner's role cannot change, and the owner
-// cannot be removed) to an audited forbidden.
+// orgOwnerErr is ownerRefusal for an org.
 func (s *Server) orgOwnerErr(w http.ResponseWriter, r *http.Request, p principal, orgID uuid.UUID, action string, err error) {
-	if errors.Is(err, store.ErrOwner) {
-		s.denyRow(w, r, p, idPtr(orgID), nil, nil, nil, action, nil, &authz.Denied{Code: "forbidden"})
-		return
-	}
-	s.fail(w, err)
+	s.ownerRefusal(w, r, p, idPtr(orgID), nil, action, err)
 }
 
 func (s *Server) handleOrgTransfer(w http.ResponseWriter, r *http.Request) {
@@ -404,10 +400,15 @@ func (s *Server) handleOrgHosts(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// A delegated (MCP) session never gets access or the allowlist (review A5).
+	delegated := p.Session.Kind == store.KindDelegated
 	for i := range items {
 		items[i] = withAccessLevel(items[i], "")
 		items[i].Status = s.hostStatus(items[i])
-		items[i] = projectsView(items[i], uuid.Nil, "", true)
+		items[i] = projectsView(items[i], uuid.Nil, "", !delegated)
+		if delegated {
+			items[i].Access = nil
+		}
 	}
 	writeList(w, items, next)
 }

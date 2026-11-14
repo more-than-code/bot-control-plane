@@ -44,18 +44,28 @@ func Run(ctx context.Context, args []string) int {
 	return 0
 }
 
-// migrate loads the org mapping file when one is named, then applies the
-// embedded migrations.
+// migrate reads BOT_API_ORG_MAPPING_FILE (unset, "none" for the default
+// rule, or a mapping file), then applies the embedded migrations.
 func migrate(ctx context.Context, url, orgMappingFile string) error {
-	var mapping *db.OrgMapping
-	if orgMappingFile != "" {
-		m, err := db.LoadOrgMapping(orgMappingFile)
-		if err != nil {
-			return err
-		}
-		mapping = m
+	orgs, err := orgSource(orgMappingFile)
+	if err != nil {
+		return err
 	}
-	return db.MigrateWith(ctx, url, mapping)
+	return db.MigrateWith(ctx, url, orgs)
+}
+
+func orgSource(orgMappingFile string) (db.OrgSource, error) {
+	switch orgMappingFile {
+	case "":
+		return db.OrgSource{}, nil
+	case "none":
+		return db.OrgSource{Chosen: true}, nil
+	}
+	m, err := db.LoadOrgMapping(orgMappingFile)
+	if err != nil {
+		return db.OrgSource{}, err
+	}
+	return db.OrgSource{Chosen: true, Mapping: m}, nil
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string, d deps) error {
