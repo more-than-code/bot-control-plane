@@ -32,6 +32,8 @@
 		canAdmin,
 		hosts,
 		projectId,
+		projectSlug = null,
+		hostsIncomplete = false,
 		copiesComplete,
 		editor = null,
 		imageEditor = null,
@@ -54,6 +56,10 @@
 		canAdmin: boolean;
 		hosts: Host[];
 		projectId: string;
+		/** For the shared-network hints and block reasons. */
+		projectSlug?: string | null;
+		/** The host list was truncated or could not be read (the shared networks hint says so). */
+		hostsIncomplete?: boolean;
 		/** "Not deployed" needs a complete services list. */
 		copiesComplete: boolean;
 		editor?: CatalogEditorState | null;
@@ -228,6 +234,7 @@
 						disabled={rowBusy}
 						onRowBusy={setRowBusy}
 						{projectId}
+						{projectSlug}
 						openRequest={requests.deploy}
 						fallbackFocusId={menuId}
 					/>
@@ -254,6 +261,9 @@
 					<CatalogImageDialog
 						mode="edit"
 						{entry}
+						{hosts}
+						{hostsIncomplete}
+						{projectSlug}
 						saveAction={actionUrlFrom(page.url, 'catalogUpdate')}
 						setsAction={actionUrlFrom(page.url, 'catalogEnvSets')}
 						filesAction={actionUrlFrom(page.url, 'catalogFiles')}

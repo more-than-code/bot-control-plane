@@ -25,6 +25,7 @@
 		disabled = false,
 		onRowBusy,
 		projectId = null,
+		projectSlug = null,
 		openRequest = 0,
 		fallbackFocusId = null
 	}: {
@@ -40,6 +41,8 @@
 		onRowBusy?: (busy: boolean) => void;
 		/** For the "View logs" link. */
 		projectId?: string | null;
+		/** For the shared-network block reasons. */
+		projectSlug?: string | null;
 		/** A new value (a counter) opens it: the row's "⋯" menu asks for it (below `sm`, where its icon is hidden). */
 		openRequest?: number;
 		/** Where focus goes when it closes and its own trigger is hidden (the menu button). */
@@ -126,6 +129,7 @@
 			active={open}
 			{onBusy}
 			{projectId}
+			{projectSlug}
 			onViewLogs={() => (open = false)}
 		>
 			{#snippet cancel()}

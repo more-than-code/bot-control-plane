@@ -245,3 +245,28 @@ export function hostPolicyLine(host: Pick<Host, 'access' | 'programs'>): string 
 	const onOff = (value: boolean) => (value ? 'on' : 'off');
 	return `Programs ${onOff(programs.enabled)}, Images ${onOff(programs.images)}, Projects: ${projects}`;
 }
+
+/** The host page "Shared networks" item: one line per network, or a status when there are none. */
+export type HostSharedNetworks = { networks: string[] } | { status: 'none' | 'not reported' };
+
+/**
+ * The host page "Shared networks" item (api-v1 v1.25): one line per network, `dd (10.200.10.0/24): daikou,
+ * defect-drainer`, with members only when the API sent them (org owners and admins; "no projects" when empty).
+ * With no networks to list, "none" or "not reported" shows only where the Host policy line shows (see
+ * hostPolicyLine), because only then may the caller see the whole policy; otherwise null.
+ */
+export function hostSharedNetworks(host: Pick<Host, 'access' | 'programs'>): HostSharedNetworks | null {
+	const shared = host.programs?.shared_networks ?? null;
+	if (shared != null && shared.length > 0) {
+		return {
+			networks: shared.map((network) => {
+				const head = `${network.name} (${network.subnet})`;
+				if (network.projects == null) return head;
+				return `${head}: ${network.projects.length === 0 ? 'no projects' : network.projects.join(', ')}`;
+			})
+		};
+	}
+	const policyShown = hostPolicyLine(host) != null;
+	if (!policyShown) return null;
+	return { status: shared == null ? 'not reported' : 'none' };
+}

@@ -31,6 +31,8 @@
 	const serviceRun = $derived(action?.scope === 'catalog' ? (action.catalogAction ?? null) : null);
 	const imageEditor = $derived(action?.scope === 'catalog' ? (action.imageEditor ?? null) : null);
 	const imageDeploy = $derived(action?.scope === 'catalog' ? (action.imageDeploy ?? null) : null);
+	/** A host left out of the list may open more shared networks (the image form's hint says so). */
+	const hostsIncomplete = $derived((data.hostsTruncated ?? false) || data.hostsMessage != null);
 	const catalogMessage = $derived.by(() => {
 		if (catalogEditor || imageEditor || imageDeploy) return data.catalogMessage ?? null;
 		return sectionMessage ?? data.catalogMessage ?? null;
@@ -79,6 +81,9 @@
 				/>
 				<CatalogImageDialog
 					mode="create"
+					hosts={data.hosts ?? []}
+					{hostsIncomplete}
+					projectSlug={data.project.slug}
 					saveAction={actionUrlFrom(page.url, 'catalogCreate')}
 					setsAction={actionUrlFrom(page.url, 'catalogEnvSets')}
 					filesAction={actionUrlFrom(page.url, 'catalogFiles')}
@@ -136,6 +141,8 @@
 			imageDeploy={imageDeploy}
 			onImageSaved={toastImageSaved}
 			projectId={data.project.id}
+			projectSlug={data.project.slug}
+			{hostsIncomplete}
 			copies={data.copies ?? {}}
 			copiesComplete={data.copiesComplete ?? true}
 			copiesOmitted={data.copiesOmitted ?? 0}

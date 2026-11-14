@@ -47,6 +47,7 @@ function policy(overrides: Partial<HostPrograms> = {}): HostPrograms {
 		secrets: false,
 		projects: null,
 		project_listed: null,
+		shared_networks: null,
 		...overrides
 	};
 }
@@ -135,7 +136,7 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 			"This host's allowlist does not include this project. The host owner adds it to `projects` in `/etc/bot-agent/runner.toml`."
 		);
 		// An older agent (list unknown) blocks nothing.
-		assert.equal(projectListedBlockReason(host(policy({ project_listed: null }))), null);
+		assert.equal(projectListedBlockReason(host(policy({ project_listed: null, shared_networks: null }))), null);
 		assert.equal(projectListedBlockReason(host(policy({ project_listed: true }))), null);
 	});
 

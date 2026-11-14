@@ -13,20 +13,24 @@
 	import * as Sheet from '$lib/components/ui/sheet';
 	import Textarea from '$lib/components/Textarea.svelte';
 	import Notice from '$lib/components/Notice.svelte';
-	import type { ImageEntry } from '$lib/api-types';
+	import type { Host, ImageEntry } from '$lib/api-types';
+	import { openSharedNetworks } from '$lib/catalog';
 	import {
 		DEFAULT_LOG_FILES,
 		DEFAULT_LOG_SIZE_MB,
 		HEALTH_POLICY_DEFAULTS,
+		SHARED_NETWORKS_MAX,
 		SUGGESTED_MEMORY_MB,
 		applyDockerPaste,
 		blankImageDraft,
 		dockerRunPreview,
 		imageSpecFromDraft,
+		isSharedNetworkName,
 		loggingForPreview,
 		parseDockerRun,
 		resolveHealthPolicy,
 		setPortPublic,
+		sharedNetworkNames,
 		storedHealthKeys,
 		type ImageDraft,
 		type KnownSet
@@ -55,6 +59,9 @@
 	let {
 		mode,
 		entry = null,
+		hosts = [],
+		hostsIncomplete = false,
+		projectSlug = null,
 		saveAction,
 		sets,
 		setsMessage = null,
@@ -72,6 +79,12 @@
 	}: {
 		mode: 'create' | 'edit';
 		entry?: ImageEntry | null;
+		/** The project's hosts: the Shared networks hint lists the networks open to this project. */
+		hosts?: Host[];
+		/** The host list was truncated or could not be read: a host left out may open more networks. */
+		hostsIncomplete?: boolean;
+		/** Names the container in the Shared networks help, and filters an org admin's member lists. */
+		projectSlug?: string | null;
 		saveAction: string;
 		sets: KnownSet[];
 		setsMessage?: string | null;
@@ -124,6 +137,7 @@
 			healthStart: health ? String(health.start_period_sec) : '',
 			logMaxSizeMb: spec.logging ? String(spec.logging.max_size_mb) : '',
 			logMaxFiles: spec.logging ? String(spec.logging.max_files) : '',
+			networks: (spec.networks ?? []).join(', '),
 			healthOnDeployFailure: policy.on_deploy_failure,
 			healthOnUnhealthy: policy.on_unhealthy,
 			healthUnhealthyAfter: storedAfter,
@@ -182,9 +196,20 @@
 			restart: draft.workload === 'job' ? 'no' : draft.restart,
 			user: draft.user.trim(),
 			memoryMb: memory,
-			logging: loggingForPreview(draft.logMaxSizeMb, draft.logMaxFiles)
+			logging: loggingForPreview(draft.logMaxSizeMb, draft.logMaxFiles),
+			networks: sharedNetworkNames(draft.networks).filter(isSharedNetworkName)
 		});
 	});
+
+	// Shared networks (api-v1 v1.25): the container name others use, and which networks the project's hosts open to it.
+	const containerName = $derived.by(() => {
+		const name = mode === 'edit' && entry ? entry.name : draft.name.trim();
+		return `${projectSlug ?? '<project>'}-${name === '' ? '<entry>' : name}`;
+	});
+	const openNetworks = $derived(openSharedNetworks(hosts, projectSlug ?? null));
+	function networksDescribedBy(): string {
+		return [`${fieldId}-networks-hint`, describedBy('networks')].filter((id) => id != null).join(' ');
+	}
 
 	// api-v1 rule 12: env_sets in order < secret_env < env. Informational only; saving is still allowed.
 	const overrides = $derived(
@@ -813,6 +838,35 @@
 			<Input id="{fieldId}-memory" name="memory_mb" bind:value={draft.memoryMb} inputmode="numeric" maxlength={5} placeholder="Suggested {SUGGESTED_MEMORY_MB}" aria-invalid={invalid('memory_mb')} aria-describedby={describedBy('memory_mb')} />
 		</Label>
 		{@render fieldNotice('memory_mb')}
+		<Label class="grid gap-1.5" for="{fieldId}-networks">
+			Shared networks
+			<Input
+				id="{fieldId}-networks"
+				name="networks"
+				bind:value={draft.networks}
+				maxlength={200}
+				autocomplete="off"
+				spellcheck="false"
+				placeholder="shared-net"
+				aria-invalid={invalid('networks')}
+				aria-describedby={networksDescribedBy()}
+			/>
+		</Label>
+		<div id="{fieldId}-networks-hint" class="text-muted-foreground grid gap-1 text-sm">
+			<p class="break-words">Names of shared networks, separated by commas (up to {SHARED_NETWORKS_MAX}). A host's administrator opens a network to a project in runner.toml.</p>
+			<p class="break-words">Other entries on the same shared network reach this one by its container name, {containerName}.</p>
+			{#each openNetworks as item (item.host)}
+				<p class="break-words">
+					Open on {item.host}: {item.networks.map((network) => `${network.name} (${network.subnet})`).join(', ')}
+				</p>
+			{:else}
+				<p class="break-words">{hostsIncomplete ? 'None of the hosts read opens a shared network to this project.' : 'No host opens a shared network to this project.'}</p>
+			{/each}
+			{#if hostsIncomplete}
+				<p class="break-words">Not every host could be read, so another host may open more networks.</p>
+			{/if}
+		</div>
+		{@render fieldNotice('networks')}
 		<div class="grid gap-1.5">
 			<p class="text-sm font-medium">docker run</p>
 			<pre class="bg-muted max-h-40 overflow-auto rounded-lg p-2 font-mono text-xs whitespace-pre-wrap" aria-label="docker run preview">{previewLine}</pre>

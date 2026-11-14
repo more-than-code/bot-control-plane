@@ -185,6 +185,18 @@ export type HostPrograms = {
 	projects: string[] | null;
 	/** Whether this project's slug is in that allowlist. Null when the agent did not send the list. */
 	project_listed: boolean | null;
+	/** Shared networks root defined on the host (api-v1 v1.25). Null when the agent did not send them (before 0.2.9). */
+	shared_networks: SharedNetwork[] | null;
+};
+
+/**
+ * One shared network (api-v1 v1.25 item 2). `projects` (member slugs) is sent to org owners and admins only;
+ * everyone else gets just the networks open to the project in view, without it.
+ */
+export type SharedNetwork = {
+	name: string;
+	subnet: string;
+	projects?: string[];
 };
 
 export type ProgramSpec = {
@@ -266,6 +278,8 @@ export type ImageSpec = {
 	logging: ImageLogging | null;
 	/** Null means all defaults (roll back on a failed deploy, no action when unhealthy later). */
 	health_policy: ImageHealthPolicy | null;
+	/** Shared networks the container also joins (api-v1 v1.25). Present only when set: 1–4 names. */
+	networks?: string[];
 };
 
 type CatalogEntryBase = {

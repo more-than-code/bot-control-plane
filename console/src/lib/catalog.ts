@@ -204,6 +204,59 @@ export function imageHealthPolicyBlockReason(host: Pick<Host, 'programs'>, hasPo
 	return "This host's agent does not support health policies";
 }
 
+/** The API's first shared-network refusal (api-v1 v1.25 item 3), with a capital T like the other block reasons. */
+export const SHARED_NETWORKS_UNSUPPORTED_BLOCK = "This host's agent does not support shared networks; upgrade it to 0.2.9";
+
+/** The API's second shared-network refusal (api-v1 v1.25 item 3). */
+export function sharedNetworkClosedBlock(name: string): string {
+	return `Shared network ${name} is not open to this project on this host`;
+}
+
+type SharedNetworkView = NonNullable<NonNullable<Host['programs']>['shared_networks']>[number];
+
+/**
+ * Whether a host's network admits this project. A list without `projects` was already filtered by the API to the
+ * project in view; with `projects` (an org admin's view) the slug must be in it. An unknown slug is not refused.
+ */
+function networkOpen(network: SharedNetworkView, slug: string | null): boolean {
+	if (network.projects == null || slug == null) return true;
+	return network.projects.includes(slug);
+}
+
+/**
+ * Why Deploy or Roll back is refused for an entry that joins shared networks, mirroring the API gates.
+ * No networks, or a host that does not run containers (imageHostBlockReason already says so), has no reason.
+ */
+export function imageNetworksBlockReason(host: Pick<Host, 'programs'>, networks: readonly string[] | undefined, slug: string | null): string | null {
+	if (networks == null || networks.length === 0 || host.programs == null || imageHostBlockReason(host) != null) return null;
+	const shared = host.programs.shared_networks;
+	if (shared == null) return SHARED_NETWORKS_UNSUPPORTED_BLOCK;
+	for (const name of networks) {
+		const network = shared.find((item) => item.name === name);
+		if (network == null || !networkOpen(network, slug)) return sharedNetworkClosedBlock(name);
+	}
+	return null;
+}
+
+/**
+ * Shared networks open to this project, per host, for the container form's hint (spec amendment A5): only hosts the
+ * project can deploy to that run containers. Hosts with none open are left out.
+ */
+export function openSharedNetworks(
+	hosts: readonly Pick<Host, 'name' | 'access_level' | 'programs'>[],
+	slug: string | null
+): Array<{ host: string; networks: Array<{ name: string; subnet: string }> }> {
+	const out: Array<{ host: string; networks: Array<{ name: string; subnet: string }> }> = [];
+	for (const host of hosts) {
+		if (!isCatalogHost(host) || imageHostBlockReason(host) != null) continue;
+		const open = (host.programs?.shared_networks ?? [])
+			.filter((network) => networkOpen(network, slug))
+			.map((network) => ({ name: network.name, subnet: network.subnet }));
+		if (open.length > 0) out.push({ host: host.name, networks: open });
+	}
+	return out;
+}
+
 /** Union of run-as accounts on eligible hosts. Shell entries only use hosts that allow a shell. */
 export function runAsChoices(hosts: readonly Pick<Host, 'access_level' | 'programs'>[], shell: boolean): string[] {
 	const names = new Set<string>();

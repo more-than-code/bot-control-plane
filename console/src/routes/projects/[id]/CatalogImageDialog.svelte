@@ -9,7 +9,7 @@
 	import * as Sheet from '$lib/components/ui/sheet';
 	import DrawerResize from '$lib/components/DrawerResize.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
-	import type { ImageEntry } from '$lib/api-types';
+	import type { Host, ImageEntry } from '$lib/api-types';
 	import {
 		imageDialogReveal,
 		imageNoticeOnCloseComplete,
@@ -24,6 +24,9 @@
 	let {
 		mode,
 		entry = null,
+		hosts = [],
+		hostsIncomplete = false,
+		projectSlug = null,
 		saveAction,
 		setsAction,
 		filesAction,
@@ -38,6 +41,11 @@
 	}: {
 		mode: 'create' | 'edit';
 		entry?: ImageEntry | null;
+		/** The project's hosts, for the shared networks hint. */
+		hosts?: Host[];
+		/** The host list was truncated or could not be read. */
+		hostsIncomplete?: boolean;
+		projectSlug?: string | null;
 		saveAction: string;
 		setsAction: string;
 		filesAction: string;
@@ -235,7 +243,7 @@
 				};
 			}}
 		></form>
-		<CatalogImageForm {mode} {entry} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {tagsAction} {digestAction} {editor} onSettled={settle}>
+		<CatalogImageForm {mode} {entry} {hosts} {hostsIncomplete} {projectSlug} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {tagsAction} {digestAction} {editor} onSettled={settle}>
 			{#snippet cancel()}
 				<Sheet.Close type="button" class={buttonVariants({ variant: 'outline' })}>Cancel</Sheet.Close>
 			{/snippet}
