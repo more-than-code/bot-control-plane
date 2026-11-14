@@ -149,6 +149,7 @@ func projectImageEntry(row map[string]any) map[string]any {
 		"healthcheck":     imageHasHealthcheck(spec),
 		"logging":         projectLogging(spec),
 		"health_policy":   projectHealthPolicyFor(spec),
+		"networks":        networkList(spec["networks"]),
 		"my_actions":      stringList(row["my_actions"]),
 	}
 }
@@ -317,6 +318,17 @@ func envKeyNames(spec map[string]any) []any {
 	out := make([]any, len(names))
 	for i, name := range names {
 		out[i] = name
+	}
+	return out
+}
+
+// networkList is spec.networks, or nil (JSON null) when the entry has none,
+// so a listed entry can be written back without tripping the schema's
+// minItems 1 (api-v1 v1.25 amendment A4).
+func networkList(v any) []any {
+	out := stringList(v)
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

@@ -87,7 +87,8 @@
     "run_as": [
       "joe"
     ],
-    "secrets": false
+    "secrets": false,
+    "shared_networks": null
   },
   "list_files": {
     "code": "ok",

@@ -44,6 +44,35 @@ type HostPrograms struct {
 	// ProjectListed is computed by the API for the viewing project (api-v1
 	// v1.23 item 1). It is never read from hello and nil in the store.
 	ProjectListed *bool `json:"project_listed"`
+	// SharedNetworks is hello.programs.shared_networks (api-v1 v1.25 item 2).
+	// Nil (JSON null) when the agent did not send it (agents < 0.2.9).
+	SharedNetworks []SharedNetwork `json:"shared_networks"`
+}
+
+// SharedNetwork is one runner.toml shared network (agent-protocol v1.13).
+// Projects is the member slugs, never nil once parsed from hello. The API
+// sets it to nil for callers who are not org admins (api-v1 v1.25 item 2);
+// omitzero leaves a nil Projects out of the JSON, and an empty list stays [].
+type SharedNetwork struct {
+	Name     string   `json:"name"`
+	Subnet   string   `json:"subnet"`
+	Projects []string `json:"projects,omitzero"`
+}
+
+// CloneSharedNetworks is a deep copy. nil stays nil, and a nil Projects
+// stays nil.
+func CloneSharedNetworks(nets []SharedNetwork) []SharedNetwork {
+	if nets == nil {
+		return nil
+	}
+	out := make([]SharedNetwork, len(nets))
+	for i, n := range nets {
+		out[i] = n
+		if n.Projects != nil {
+			out[i].Projects = append([]string{}, n.Projects...)
+		}
+	}
+	return out
 }
 
 // ProgramSpec is the stored program document. Env, Args, EnvSets and

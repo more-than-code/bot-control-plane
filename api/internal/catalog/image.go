@@ -78,6 +78,8 @@ type Image struct {
 	HealthyAfterSec int
 	MemoryMB        *int
 	TimeoutSec      int
+	// Networks is the api-v1 v1.25 shared network names; nil when absent.
+	Networks []string
 }
 
 // Healthcheck is a Docker CMD healthcheck. Numbers are filled in at write time.
@@ -270,6 +272,10 @@ func BuildImage(name string, raw []byte, sets SetKeys, files map[string]struct{}
 	if err != nil {
 		return Image{}, err
 	}
+	networks, err := decodeNetworks(fields["networks"])
+	if err != nil {
+		return Image{}, err
+	}
 	if env == nil {
 		env = map[string]string{}
 	}
@@ -299,6 +305,7 @@ func BuildImage(name string, raw []byte, sets SetKeys, files map[string]struct{}
 		HealthyAfterSec: healthy,
 		MemoryMB:        memory,
 		TimeoutSec:      timeout,
+		Networks:        networks,
 	}, nil
 }
 
@@ -450,6 +457,12 @@ func specJSON(img Image, withFiles bool, policy string) string {
 	if policy != "" {
 		policy = `,"health_policy":` + policy
 	}
+	// networks is present only when set, so an entry without it keeps its
+	// stored spec and spec_hash (api-v1 v1.25 item 1).
+	networks := ""
+	if len(img.Networks) > 0 {
+		networks = `,"networks":` + stringArrayJSON(img.Networks)
+	}
 	return `{"command":` + argvJSON(img.Command) +
 		`,"entrypoint":` + argvJSON(img.Entrypoint) +
 		`,"env":` + stringMapJSON(img.Env) +
@@ -462,6 +475,7 @@ func specJSON(img Image, withFiles bool, policy string) string {
 		`,"kind":` + jsonString(img.Kind) +
 		logging +
 		`,"memory_mb":` + mem +
+		networks +
 		`,"ports":` + portsJSON(img.Ports) +
 		`,"restart":` + jsonString(img.Restart) +
 		`,"secret_env":` + stringMapJSON(img.SecretEnv) +
@@ -485,6 +499,9 @@ func ParseStored(raw []byte) (Image, error) {
 	if err != nil {
 		return Image{}, err
 	}
+	if err := checkNetworks(doc.Networks); err != nil {
+		return Image{}, err
+	}
 	img := Image{
 		Kind:            doc.Kind,
 		Image:           ref.Image,
@@ -505,6 +522,7 @@ func ParseStored(raw []byte) (Image, error) {
 		HealthyAfterSec: doc.HealthyAfterSec,
 		MemoryMB:        doc.MemoryMB,
 		TimeoutSec:      doc.TimeoutSec,
+		Networks:        nilIfEmpty(doc.Networks),
 	}
 	if img.Ports == nil {
 		img.Ports = []Port{}
@@ -537,6 +555,7 @@ type storedImage struct {
 	HealthyAfterSec int               `json:"healthy_after_sec"`
 	MemoryMB        *int              `json:"memory_mb"`
 	TimeoutSec      int               `json:"timeout_sec"`
+	Networks        []string          `json:"networks"`
 }
 
 func (p Port) MarshalJSON() ([]byte, error) {
@@ -590,7 +609,7 @@ func sortStrings(items []string) {
 var imageFields = map[string]struct{}{
 	"kind": {}, "image": {}, "command": {}, "entrypoint": {}, "ports": {},
 	"env": {}, "env_sets": {}, "secret_env": {}, "volumes": {}, "files": {}, "healthcheck": {}, "logging": {}, "health_policy": {}, "restart": {},
-	"user": {}, "healthy_after_sec": {}, "memory_mb": {}, "timeout_sec": {},
+	"user": {}, "healthy_after_sec": {}, "memory_mb": {}, "timeout_sec": {}, "networks": {},
 }
 
 func specFields(raw []byte) (map[string]json.RawMessage, error) {

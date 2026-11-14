@@ -54,6 +54,7 @@ func clonePrograms(p *store.HostPrograms) *store.HostPrograms {
 	if p.Projects != nil {
 		cp.Projects = append([]string{}, p.Projects...)
 	}
+	cp.SharedNetworks = store.CloneSharedNetworks(p.SharedNetworks)
 	return &cp
 }
 

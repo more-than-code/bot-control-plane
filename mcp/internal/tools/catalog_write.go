@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -24,7 +25,7 @@ var imageSpecKeys = map[string]struct{}{
 	"kind": {}, "image": {}, "command": {}, "entrypoint": {}, "ports": {},
 	"env": {}, "env_sets": {}, "secret_env": {}, "volumes": {}, "files": {},
 	"healthcheck": {}, "logging": {}, "health_policy": {}, "restart": {}, "user": {}, "healthy_after_sec": {},
-	"memory_mb": {}, "timeout_sec": {},
+	"memory_mb": {}, "timeout_sec": {}, "networks": {},
 }
 
 // Healthcheck bounds match api-v1 v1.11 item 7, and a leading CMD, CMD-SHELL
@@ -56,7 +57,13 @@ const (
 	policyAfterMax   = 600
 	policyActionsMin = 1
 	policyActionsMax = 10
+
+	// Shared network names match api-v1 v1.25 item 1.
+	networksMax = 4
 )
+
+// networkNamePattern is the api-v1 v1.25 shared network name rule.
+var networkNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 
 const catalogWriteSchema = `{
   "type": "object",
@@ -121,7 +128,15 @@ const catalogWriteSchema = `{
         "user": {"type": "string"},
         "healthy_after_sec": {"type": "integer"},
         "memory_mb": {"type": ["integer", "null"]},
-        "timeout_sec": {"type": "integer"}
+        "timeout_sec": {"type": "integer"},
+        "networks": {
+          "type": ["array", "null"],
+          "description": "Shared networks on the host to join (1 to 4 names). The host's administrator (root) opens each to projects in runner.toml; others on it reach this container by its name <project>-<entry>. Leave out for none.",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"}
+        }
       }
     }
   }
@@ -253,6 +268,39 @@ func validateImageSpec(raw json.RawMessage) error {
 		if err := validateHealthPolicy(policy, fields); err != nil {
 			return err
 		}
+	}
+	if networks, ok := fields["networks"]; ok {
+		if err := validateNetworks(networks); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateNetworks checks spec.networks (api-v1 v1.25 item 1): null, or 1 to
+// 4 unique shared network names. An empty array is refused here; leave the
+// field out instead.
+func validateNetworks(raw json.RawMessage) error {
+	trimmed := bytes.TrimSpace(raw)
+	if bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	var names []string
+	if err := json.Unmarshal(trimmed, &names); err != nil {
+		return errors.New("networks must be an array of names")
+	}
+	if len(names) == 0 || len(names) > networksMax {
+		return errors.New("networks must list 1 to 4 names")
+	}
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		if !networkNamePattern.MatchString(name) {
+			return errors.New("networks: each name is lowercase letters, digits and -, at most 32 characters")
+		}
+		if _, dup := seen[name]; dup {
+			return errors.New("networks: names must be unique")
+		}
+		seen[name] = struct{}{}
 	}
 	return nil
 }

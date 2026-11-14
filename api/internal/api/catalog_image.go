@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ const (
 	reasonNoHealthcheck = "this host's agent does not support healthcheck"
 	reasonNoLogging     = "this host's agent does not support log settings"
 	reasonNoPolicy      = "this host's agent does not support health policies"
+	reasonNoNetworks    = "this host's agent does not support shared networks; upgrade it to 0.2.9"
 	invalidAgentResult  = "invalid agent result"
 	settleTimeout       = 5 * time.Second
 	staleGraceSec       = 120
@@ -42,6 +44,13 @@ const (
 	secretLineMin       = 16
 	secretPieceMax      = 4096
 )
+
+// reasonNetworkClosed is the refusal for a shared network the host does not
+// define or does not open to the project. name passed the network name rule
+// (catalog.ParseStored re-checks stored names), so it is safe in the reason.
+func reasonNetworkClosed(name string) string {
+	return "shared network " + name + " is not open to this project on this host"
+}
 
 var (
 	errSecretsKey = errors.New("secrets key not configured")
@@ -209,6 +218,9 @@ func (s *Server) imageMutate(w http.ResponseWriter, r *http.Request, action stri
 		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "bad_request", reasonNoPolicy)
 		return
 	}
+	if (action == "deploy" || action == "rollback") && !s.networksAllowed(w, r, p, projectID, host, entry.Name, action, img) {
+		return
+	}
 	if action == "rollback" && !s.digestAllowed(w, r, entry.ID, host.ID, body.Digest) {
 		return
 	}
@@ -236,7 +248,7 @@ func (s *Server) imageMutate(w http.ResponseWriter, r *http.Request, action stri
 		return
 	}
 	if p.Session.Kind == store.KindDelegated {
-		s.issueConfirmation(w, r, p, projectID, host, entry, action, body.Key, hash, digest, force)
+		s.issueConfirmation(w, r, p, projectID, host, entry, action, body.Key, hash, digest, force, img.Networks)
 		return
 	}
 	s.performImage(w, r, p, projectID, host, entry, img, action, body.Force, digest, 0, body.Key)
@@ -278,7 +290,7 @@ func (s *Server) finishImageShort(w http.ResponseWriter, r *http.Request, p prin
 			return
 		}
 		if p.Session.Kind == store.KindDelegated {
-			s.issueConfirmation(w, r, p, projectID, host, entry, action, key, hash, "", nil)
+			s.issueConfirmation(w, r, p, projectID, host, entry, action, key, hash, "", nil, nil)
 			return
 		}
 	}
@@ -324,6 +336,9 @@ func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principa
 	}
 	if (c.Action == "deploy" || c.Action == "rollback") && !policyReady(host, img) {
 		s.imageDeny(w, r, p, c.ProjectID, host.ID, host.Name, entry.Name, c.Action, "bad_request", reasonNoPolicy)
+		return
+	}
+	if (c.Action == "deploy" || c.Action == "rollback") && !s.networksAllowed(w, r, p, c.ProjectID, host, entry.Name, c.Action, img) {
 		return
 	}
 	if c.Action == "rollback" && !s.digestAllowed(w, r, entry.ID, host.ID, digest) {
@@ -921,6 +936,59 @@ func policyReady(host store.Host, img catalog.Image) bool {
 		return true
 	}
 	return policySupported(host)
+}
+
+// networksAllowed is the api-v1 v1.25 item 3 gate for deploy and rollback
+// of an entry with networks. It looks up the project slug only when the
+// entry has networks. false means the refusal was written and audited.
+func (s *Server) networksAllowed(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, host store.Host, entryName, action string, img catalog.Image) bool {
+	if len(img.Networks) == 0 {
+		return true
+	}
+	project, err := s.Store.GetProject(r.Context(), projectID)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	if msg := networksReason(host, img, project.Slug); msg != "" {
+		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entryName, action, "bad_request", msg)
+		return false
+	}
+	return true
+}
+
+// networksReason is the refusal for an entry's networks on host, or "" when
+// they are allowed: the host's agent must report shared_networks, and each
+// name must be defined there with slug as a member.
+func networksReason(host store.Host, img catalog.Image, slug string) string {
+	if len(img.Networks) == 0 {
+		return ""
+	}
+	if host.Programs == nil || host.Programs.SharedNetworks == nil {
+		return reasonNoNetworks
+	}
+	if name := closedNetwork(host.Programs.SharedNetworks, img.Networks, slug); name != "" {
+		return reasonNetworkClosed(name)
+	}
+	return ""
+}
+
+// closedNetwork is the first name in want that the host does not define or
+// that does not list slug, or "" when all are open.
+func closedNetwork(defined []store.SharedNetwork, want []string, slug string) string {
+	for _, name := range want {
+		open := false
+		for _, n := range defined {
+			if n.Name == name {
+				open = slices.Contains(n.Projects, slug)
+				break
+			}
+		}
+		if !open {
+			return name
+		}
+	}
+	return ""
 }
 
 func policySupported(host store.Host) bool {

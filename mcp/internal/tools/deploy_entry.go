@@ -29,7 +29,7 @@ const deployEntrySchema = `{
 func registerDeployEntry(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "deploy_entry",
-		Description: "Deploy a catalog image entry on a host. Requires the deploy permission. The host must run containers. The action is real and is audited. Nothing runs until a second confirm call with the returned confirmation id, after the user agrees. This call does not contact the host. The result lists the last 3 deploys so a rollback digest can be chosen.",
+		Description: "Deploy a catalog image entry on a host. Requires the deploy permission. The host must run containers. The action is real and is audited. Nothing runs until a second confirm call with the returned confirmation id, after the user agrees. This call does not contact the host. The API refuses when the entry joins a shared network the host does not open to the project, or the host's agent is older than 0.2.9. The result lists the last 3 deploys so a rollback digest can be chosen.",
 		Annotations: mutatingAnnotations(false),
 		InputSchema: json.RawMessage(deployEntrySchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
