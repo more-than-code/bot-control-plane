@@ -217,12 +217,8 @@ type InviteAccept struct {
 }
 
 type Host struct {
-	ID    uuid.UUID `json:"id"`
-	OrgID uuid.UUID `json:"org_id"`
-	// ProjectID is the deprecated v1.24 mirror: the backfilled former owner,
-	// or for a new host the token's grant project, or null. Never used for
-	// authorization. Removed in v1.25.
-	ProjectID    *uuid.UUID `json:"project_id"`
+	ID           uuid.UUID  `json:"id"`
+	OrgID        uuid.UUID  `json:"org_id"`
 	Name         string     `json:"name"`
 	NodeType     string     `json:"node_type"`
 	OS           string     `json:"os"`
@@ -239,14 +235,13 @@ type Host struct {
 	// Access is every project with access to the host. It is set only for
 	// org admins and omitted otherwise.
 	Access *[]HostAccess `json:"access,omitempty"`
-	// Relation and ShareLevel are deprecated v1.24 mirrors of AccessLevel:
-	// relation "owner" when access_level is deploy, otherwise "shared".
-	// Removed in v1.25.
-	Relation   string  `json:"relation"`
-	ShareLevel *string `json:"share_level"`
 	// Programs is the last hello programs object. Nil when the agent has
 	// not reported a policy file.
 	Programs *HostPrograms `json:"programs"`
+	// GrantProjectID is the project the join token granted access to, set
+	// only on the host EnrollHost returns, for the host.enroll audit row
+	// (api-v1 v1.24 item 5). Never sent.
+	GrantProjectID *uuid.UUID `json:"-"`
 }
 
 // HostAccess is one project's access to a host (api-v1 v1.24).

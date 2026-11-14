@@ -12,7 +12,7 @@ func TestMigrationSkipsDownScript(t *testing.T) {
 	if numberedSQL("0003_shared_hosts.down.sql") || numberedSQL("0004_service_names.down.sql") || numberedSQL("0005_mcp_oauth.down.sql") || numberedSQL("0006_invites.down.sql") || numberedSQL("0007_catalog.down.sql") || numberedSQL("0008_service_gone.down.sql") || numberedSQL("0009_catalog_images.down.sql") || numberedSQL("0010_project_files.down.sql") || numberedSQL("0011_service_confirmations.down.sql") || numberedSQL("0012_revoked_host_rows.down.sql") || numberedSQL("0013_catalog_write_confirmations.down.sql") || numberedSQL("0014_auto_actions.down.sql") || numberedSQL("0015_orgs.down.sql") {
 		t.Fatal("down script is numbered SQL")
 	}
-	if !numberedSQL("0003_shared_hosts.sql") || !numberedSQL("0004_service_names.sql") || !numberedSQL("0005_mcp_oauth.sql") || !numberedSQL("0006_invites.sql") || !numberedSQL("0007_catalog.sql") || !numberedSQL("0008_service_gone.sql") || !numberedSQL("0009_catalog_images.sql") || !numberedSQL("0010_project_files.sql") || !numberedSQL("0011_service_confirmations.sql") || !numberedSQL("0012_revoked_host_rows.sql") || !numberedSQL("0013_catalog_write_confirmations.sql") || !numberedSQL("0014_auto_actions.sql") || !numberedSQL("0015_orgs.sql") {
+	if !numberedSQL("0003_shared_hosts.sql") || !numberedSQL("0004_service_names.sql") || !numberedSQL("0005_mcp_oauth.sql") || !numberedSQL("0006_invites.sql") || !numberedSQL("0007_catalog.sql") || !numberedSQL("0008_service_gone.sql") || !numberedSQL("0009_catalog_images.sql") || !numberedSQL("0010_project_files.sql") || !numberedSQL("0011_service_confirmations.sql") || !numberedSQL("0012_revoked_host_rows.sql") || !numberedSQL("0013_catalog_write_confirmations.sql") || !numberedSQL("0014_auto_actions.sql") || !numberedSQL("0015_orgs.sql") || !numberedSQL("0016_orgs_phase2.sql") {
 		t.Fatal("numbered migration was skipped")
 	}
 	names, err := migrationFiles()
@@ -20,7 +20,7 @@ func TestMigrationSkipsDownScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(names, ",")
-	for _, want := range []string{"0001_app.sql", "0002_metrics.sql", "0003_shared_hosts.sql", "0004_service_names.sql", "0005_mcp_oauth.sql", "0006_invites.sql", "0007_catalog.sql", "0008_service_gone.sql", "0009_catalog_images.sql", "0010_project_files.sql", "0011_service_confirmations.sql", "0012_revoked_host_rows.sql", "0013_catalog_write_confirmations.sql", "0014_auto_actions.sql", "0015_orgs.sql"} {
+	for _, want := range []string{"0001_app.sql", "0002_metrics.sql", "0003_shared_hosts.sql", "0004_service_names.sql", "0005_mcp_oauth.sql", "0006_invites.sql", "0007_catalog.sql", "0008_service_gone.sql", "0009_catalog_images.sql", "0010_project_files.sql", "0011_service_confirmations.sql", "0012_revoked_host_rows.sql", "0013_catalog_write_confirmations.sql", "0014_auto_actions.sql", "0015_orgs.sql", "0016_orgs_phase2.sql"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("migrations = %s", got)
 		}
@@ -472,5 +472,45 @@ func TestParseOrgMapping(t *testing.T) {
 	}
 	if _, err := LoadOrgMapping(t.TempDir() + "/missing.json"); err == nil {
 		t.Fatal("missing file accepted")
+	}
+}
+
+// TestOrgsPhase2MigrationText is api-v1 v1.26 item 3: 0016 drops the legacy
+// objects, keeps the per-org name rule, and has no down script.
+func TestOrgsPhase2MigrationText(t *testing.T) {
+	body, err := migrations.FS.ReadFile("0016_orgs_phase2.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"DROP TRIGGER host_shares_not_owner ON app.host_shares",
+		"DROP FUNCTION app.host_shares_not_owner()",
+		"DROP TABLE app.host_shares",
+		"DROP TABLE app.catalog_host_approvals",
+		"ALTER TABLE app.hosts DROP CONSTRAINT hosts_project_name_unique",
+		"ALTER TABLE app.hosts DROP COLUMN project_id",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("0016 lacks %q", want)
+		}
+	}
+	if strings.Contains(text, "DROP CONSTRAINT hosts_org_name_unique") {
+		t.Fatal("0016 drops the per-org name rule")
+	}
+	if _, err := migrations.FS.ReadFile("0016_orgs_phase2.down.sql"); err == nil {
+		t.Fatal("0016 is forward only")
+	}
+	// splitSQL does not know comments: a semicolon in one splits the file,
+	// and an apostrophe opens a quote that swallows the next statements.
+	for _, line := range strings.Split(text, "\n") {
+		if trim := strings.TrimSpace(line); strings.HasPrefix(trim, "--") && strings.ContainsAny(trim, ";'") {
+			t.Fatalf("comment contains a semicolon or an apostrophe: %s", trim)
+		}
+	}
+	// The report block, the trigger, the function, two tables and two
+	// hosts changes.
+	if stmts := splitSQL(text); len(stmts) != 7 {
+		t.Fatalf("0016 splits into %d statements, want 7: %q", len(stmts), stmts)
 	}
 }

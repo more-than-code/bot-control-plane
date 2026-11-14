@@ -34,21 +34,14 @@ func (s *Server) gateHost(w http.ResponseWriter, r *http.Request, p principal, h
 	return rel, true
 }
 
-// withAccessLevel sets access_level and its deprecated v1.24 mirrors
-// (relation, share_level) for one level, or clears them for "".
+// withAccessLevel sets access_level for one level, or clears it for "".
 func withAccessLevel(h store.Host, level string) store.Host {
-	h.AccessLevel, h.ShareLevel, h.Relation = nil, nil, ""
+	h.AccessLevel = nil
 	if level == "" {
 		return h
 	}
 	l := level
 	h.AccessLevel = &l
-	m := level
-	h.ShareLevel = &m
-	h.Relation = "shared"
-	if level == authz.LevelDeploy {
-		h.Relation = "owner"
-	}
 	return h
 }
 

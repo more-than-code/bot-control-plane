@@ -950,10 +950,6 @@ UPDATE app.catalog_entries SET spec_hash = $2, updated_at = $3 WHERE id = $1::uu
 `, h.id, h.next, at); err != nil {
 			return mapErr(err)
 		}
-		// Kept so a rollback to v0.2.29 sees no stale approvals; removed in phase 2.
-		if err := exec(ctx, tx, `DELETE FROM app.catalog_host_approvals WHERE entry_id = $1::uuid`, h.id); err != nil {
-			return mapErr(err)
-		}
 	}
 	return nil
 }

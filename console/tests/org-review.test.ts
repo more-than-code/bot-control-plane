@@ -95,11 +95,11 @@ describe('roles and parsing (items 22, 28, 33)', () => {
 		assert.deepEqual(parseHost({ ...RAW_HOST, access: [row, { ...row, level: 'owner' }] })?.access, [row]);
 	});
 
-	test('parseHost falls back to the deprecated mirrors, and access_level wins over them', () => {
+	test('parseHost reads only access_level; the removed v1.24 mirrors are ignored (api-v1 v1.26)', () => {
 		const { access_level: _level, ...legacy } = RAW_HOST;
-		assert.equal(parseHost({ ...legacy, relation: 'shared', share_level: 'deploy' })?.access_level, 'deploy');
-		assert.equal(parseHost({ ...legacy, relation: 'shared', share_level: 'metrics' })?.access_level, 'metrics');
-		assert.equal(parseHost({ ...RAW_HOST, access_level: 'metrics', relation: 'owner', share_level: null })?.access_level, 'metrics');
+		assert.equal(parseHost({ ...legacy, relation: 'shared', share_level: 'deploy' })?.access_level, null);
+		assert.equal(parseHost({ ...legacy, relation: 'owner', share_level: null })?.access_level, null);
+		assert.equal(parseHost({ ...RAW_HOST, access_level: 'metrics', relation: 'owner', share_level: 'deploy' })?.access_level, 'metrics');
 		assert.equal(isCatalogHost({ access_level: 'metrics' }), false);
 		assert.equal(isCatalogHost({ access_level: null }), false);
 		assert.equal(isCatalogHost({ access_level: 'deploy' }), true);

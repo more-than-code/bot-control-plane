@@ -835,3 +835,15 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
    - `create_catalog_entry` and `update_catalog_entry` accept `networks`, and `list_catalog` shows it;
    - the `list_hosts` summary names the shared networks and subnets the caller may see.
 
+## v1.26 organizations phase 2: removals (2026-11-14, approved spec `docs/spec-organizations.md` rev 1, §4.1 and §5; migration 0016; breaking)
+
+1. **Removed from `Host`:** `project_id`, `relation` and `share_level`, the deprecated mirrors of v1.24 item 1. Clients use `org_id` and `access_level`.
+2. **Removed routes:** `/v1/hosts/{id}/shares*` and the catalog host-approval routes keep answering `410 gone` from a small stub; their real handlers and storage are deleted.
+3. **Migration 0016** (forward only; applied by `--migrate`; no down script):
+   - drops `app.host_shares`, the `host_shares_not_owner` trigger and function, and `app.catalog_host_approvals` with any other approvals table that v1.24 left unused;
+   - drops `hosts.project_id` and the old host-name uniqueness constraint;
+   - the v1.24 per-org name rule stays.
+
+   The rollback after this migration is restoring the pre-release dump (spec §7).
+4. **Unchanged:** every other route, field and error, agent-protocol, and oauth-v1.
+5. **Release condition:** ships only after phase 1 (v0.2.30) has been live and checked (spec §7, D-9).

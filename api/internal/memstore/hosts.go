@@ -128,17 +128,12 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 		LastSeenAt:   &at,
 		EnrolledAt:   at,
 	}
-	// The deprecated project_id mirror (review A6): the grant project for a
-	// deploy grant, otherwise the org's oldest live project, or null.
-	if grant != nil && grant.Level == "deploy" {
-		pid := grant.ProjectID
-		host.ProjectID = &pid
-	} else {
-		host.ProjectID = m.oldestProjectLocked(tok.OrgID)
-	}
 	if grant != nil {
 		pid := grant.ProjectID
 		by := tok.CreatedBy
+		if grant.Level == "deploy" {
+			m.enrolGrant[host.ID] = pid
+		}
 		m.access[accessKey(host.ID, pid)] = store.HostAccess{HostID: host.ID, ProjectID: pid, Level: grant.Level, GrantedBy: &by, GrantedAt: at}
 	}
 	m.hosts[host.ID] = host
@@ -151,26 +146,12 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 	tok.UsedAt = &at
 	tok.UsedByHostID = &host.ID
 	m.tokens[id] = tok
-	return cloneHost(host), nil
-}
-
-// oldestProjectLocked is the org's oldest live project, or nil.
-func (m *Mem) oldestProjectLocked(orgID uuid.UUID) *uuid.UUID {
-	var best *store.Project
-	for _, p := range m.projects {
-		if p.OrgID != orgID || p.DeletedAt != nil {
-			continue
-		}
-		if best == nil || p.CreatedAt.Before(best.CreatedAt) || (p.CreatedAt.Equal(best.CreatedAt) && p.ID.String() < best.ID.String()) {
-			cp := p
-			best = &cp
-		}
+	out := cloneHost(host)
+	if grant != nil {
+		pid := grant.ProjectID
+		out.GrantProjectID = &pid
 	}
-	if best == nil {
-		return nil
-	}
-	id := best.ID
-	return &id
+	return out, nil
 }
 
 func (m *Mem) GetHost(_ context.Context, id uuid.UUID) (store.Host, error) {

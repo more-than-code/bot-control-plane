@@ -60,7 +60,8 @@ func TestHostFactsOrgAndAccess(t *testing.T) {
 }
 
 // TestEnrolmentPerOrg: the token's grant becomes an access row, names are
-// unique per org, and the mirror project_id is the grant project.
+// unique per org, and the enrolled host names the grant project for the
+// host.enroll audit row.
 func TestEnrolmentPerOrg(t *testing.T) {
 	ctx := context.Background()
 	mem := New()
@@ -74,8 +75,8 @@ func TestEnrolmentPerOrg(t *testing.T) {
 	if first.Name != "pi" || second.Name != "pi-2" || second.OrgID != org {
 		t.Fatalf("names %q %q", first.Name, second.Name)
 	}
-	if second.ProjectID == nil || *second.ProjectID != home.ID {
-		t.Fatalf("mirror %v", second.ProjectID)
+	if second.GrantProjectID == nil || *second.GrantProjectID != home.ID {
+		t.Fatalf("grant project %v", second.GrantProjectID)
 	}
 	level, err := mem.HostProjectAccess(ctx, home.ID, second.ID)
 	if err != nil || level != "deploy" {
@@ -87,11 +88,10 @@ func TestEnrolmentPerOrg(t *testing.T) {
 	if elsewhere.Name != "pi" {
 		t.Fatalf("per-org name %q", elsewhere.Name)
 	}
-	// A token without a grant: no access row; the mirror is the org's
-	// oldest live project (review A6).
+	// A token without a grant: no access row and no grant project.
 	bare := enrollToken(t, mem, org, nil, owner.ID, "bare", at)
-	if bare.ProjectID == nil || *bare.ProjectID != home.ID {
-		t.Fatalf("bare mirror %v", bare.ProjectID)
+	if bare.GrantProjectID != nil {
+		t.Fatalf("bare grant project %v", bare.GrantProjectID)
 	}
 	if rows, err := mem.ListHostAccess(ctx, bare.ID); err != nil || len(rows) != 0 {
 		t.Fatalf("bare access %+v %v", rows, err)

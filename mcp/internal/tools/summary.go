@@ -158,18 +158,13 @@ const hostAccessPreview = 3
 // summarizeHosts reads access_level in a project's list (v1.24) and the
 // access list in an org's list. The API omits access for delegated sessions
 // (v1.24 item 1), which is what MCP uses, so an absent list adds nothing; only
-// a present, empty list says "no project access". When access_level is absent
-// (an API older than v1.24, as in a rollback window), it falls back to the
-// v1.1 relation: a shared host shows its share level, an owned host shows
-// nothing extra.
+// a present, empty list says "no project access".
 func summarizeHosts(payload json.RawMessage, org bool) string {
 	var body struct {
 		Items []struct {
 			Name        string `json:"name"`
 			Status      string `json:"status"`
 			AccessLevel string `json:"access_level"`
-			Relation    string `json:"relation"`
-			ShareLevel  string `json:"share_level"`
 			Access      *[]struct {
 				ProjectName string `json:"project_name"`
 				Level       string `json:"level"`
@@ -205,8 +200,6 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 			line += " (access: " + strings.Join(grants, ", ") + ")"
 		case h.AccessLevel != "":
 			line += " (" + summaryField(h.AccessLevel) + ")"
-		case h.Relation == "shared":
-			line += " (shared: " + summaryField(h.ShareLevel) + ")"
 		}
 		// api-v1 v1.25 item 6: the shared networks the API showed this caller.
 		if h.Programs != nil && len(h.Programs.SharedNetworks) > 0 {

@@ -87,7 +87,7 @@ func enrollOrgHost(t *testing.T, d *DB, ctx context.Context, orgID uuid.UUID, gr
 func orgsIntegration(t *testing.T, d *DB, ctx context.Context, owner store.User, project store.Project, host store.Host, at time.Time) {
 	t.Helper()
 	org := project.OrgID
-	if host.OrgID != org || host.ProjectID == nil || *host.ProjectID != project.ID {
+	if host.OrgID != org || host.GrantProjectID == nil || *host.GrantProjectID != project.ID {
 		t.Fatalf("enrolled host %+v", host)
 	}
 	facts, err := d.HostFacts(ctx, owner.ID, host.ID)
@@ -161,9 +161,10 @@ VALUES ($1::uuid, $2::uuid, 'org-other-svc', 'owned', 'process', '{}', $3, $3, $
 		t.Fatalf("org-level row in a project filter %v %v", namesOfSvc(filtered), err)
 	}
 
-	// Enrolment per org: grant applied, name unique per org, mirror project.
+	// Enrolment per org: grant applied, name unique per org, grant project
+	// named for the audit row.
 	grantHost := enrollOrgHost(t, d, ctx, org, &store.TokenGrant{ProjectID: other.ID, Level: "deploy"}, owner.ID, host.Name, at)
-	if grantHost.Name != host.Name+"-2" || grantHost.ProjectID == nil || *grantHost.ProjectID != other.ID {
+	if grantHost.Name != host.Name+"-2" || grantHost.GrantProjectID == nil || *grantHost.GrantProjectID != other.ID {
 		t.Fatalf("grant host %+v", grantHost)
 	}
 	if level, err := d.HostProjectAccess(ctx, other.ID, grantHost.ID); err != nil || level != "deploy" {
@@ -171,9 +172,8 @@ VALUES ($1::uuid, $2::uuid, 'org-other-svc', 'owned', 'process', '{}', $3, $3, $
 	}
 	bare := enrollOrgHost(t, d, ctx, org, nil, owner.ID, "org-bare", at)
 	got, err := d.GetHost(ctx, bare.ID)
-	// The mirror of a host without a deploy grant is the org's oldest live
-	// project (review A6); project and other share a created_at here.
-	if err != nil || got.ProjectID == nil || (*got.ProjectID != project.ID && *got.ProjectID != other.ID) || got.OrgID != org {
+	// A host enrolled without a grant belongs to the org only.
+	if err != nil || bare.GrantProjectID != nil || got.OrgID != org {
 		t.Fatalf("bare host %+v %v", got, err)
 	}
 	awayHost := enrollOrgHost(t, d, ctx, away.OrgID, &store.TokenGrant{ProjectID: away.ID, Level: "deploy"}, guest.ID, host.Name, at)
@@ -301,6 +301,8 @@ func TestOrgsMigration(t *testing.T) {
 			_ = Migrate(cctx, url)
 		}
 	})
+	// 0016 dropped what the down script needs: start from phase 1.
+	restorePhase1Schema(t, ctx, url)
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	tag := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 	owner := dbUser(t, d, ctx, "mig-owner-"+tag, at)
@@ -381,15 +383,15 @@ WHERE table_schema = 'app' AND table_name = $1 AND column_name = $2
 	if _, err := d.pool.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '0015_orgs.sql'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := MigrateWith(ctx, url, OrgSource{}); err == nil || !strings.Contains(err.Error(), "needs BOT_API_ORG_MAPPING_FILE") {
+	if err := migrateUntil(ctx, url, OrgSource{}, upTo0015); err == nil || !strings.Contains(err.Error(), "needs BOT_API_ORG_MAPPING_FILE") {
 		t.Fatalf("pending 0015 without a mapping choice: %v", err)
 	}
 	unknown := &OrgMapping{Orgs: []OrgMappingOrg{{Slug: "mig-x-" + tag, Name: "X", OwnerEmail: owner.Email, Projects: []string{"no-such-" + tag}}}}
-	if err := MigrateWith(ctx, url, OrgSource{Chosen: true, Mapping: unknown}); err == nil || !strings.Contains(err.Error(), "unknown project slug") {
+	if err := migrateUntil(ctx, url, OrgSource{Chosen: true, Mapping: unknown}, upTo0015); err == nil || !strings.Contains(err.Error(), "unknown project slug") {
 		t.Fatalf("unknown slug %v", err)
 	}
 	strict := &OrgMapping{RequireAllProjects: true, Orgs: []OrgMappingOrg{{Slug: "mig-x-" + tag, Name: "X", OwnerEmail: owner.Email, Projects: []string{p.Slug}}}}
-	if err := MigrateWith(ctx, url, OrgSource{Chosen: true, Mapping: strict}); err == nil || !strings.Contains(err.Error(), "require_all_projects") || !strings.Contains(err.Error(), q.Slug) {
+	if err := migrateUntil(ctx, url, OrgSource{Chosen: true, Mapping: strict}, upTo0015); err == nil || !strings.Contains(err.Error(), "require_all_projects") || !strings.Contains(err.Error(), q.Slug) {
 		t.Fatalf("require_all %v", err)
 	}
 	// The SQL duplicate-slug check (review B14), reached without
@@ -398,7 +400,7 @@ WHERE table_schema = 'app' AND table_name = $1 AND column_name = $2
 		{Slug: "mig-d1-" + tag, Name: "D1", OwnerEmail: owner.Email, Projects: []string{p.Slug}},
 		{Slug: "mig-d2-" + tag, Name: "D2", OwnerEmail: owner.Email, Projects: []string{p.Slug}},
 	}}
-	if err := MigrateWith(ctx, url, OrgSource{Chosen: true, Mapping: dup}); err == nil || !strings.Contains(err.Error(), "a project slug is listed more than once") {
+	if err := migrateUntil(ctx, url, OrgSource{Chosen: true, Mapping: dup}, upTo0015); err == nil || !strings.Contains(err.Error(), "a project slug is listed more than once") {
 		t.Fatalf("duplicate slug %v", err)
 	}
 	if err := d.pool.QueryRow(ctx, `SELECT to_regclass('app.orgs') IS NOT NULL`).Scan(&orgsLeft); err != nil || orgsLeft {
@@ -407,7 +409,7 @@ WHERE table_schema = 'app' AND table_name = $1 AND column_name = $2
 
 	// 3. The mapping places p, q and r in one org; h3 collides with h1 and is renamed.
 	mapped := &OrgMapping{Orgs: []OrgMappingOrg{{Slug: "mig-mtc-" + tag, Name: "More Than Code " + tag, OwnerEmail: strings.ToUpper(owner.Email), Projects: []string{p.Slug, q.Slug, r.Slug}}}}
-	if err := MigrateWith(ctx, url, OrgSource{Chosen: true, Mapping: mapped}); err != nil {
+	if err := migrateUntil(ctx, url, OrgSource{Chosen: true, Mapping: mapped}, upTo0015); err != nil {
 		t.Fatalf("mapped migrate: %v", err)
 	}
 	assertOrgOf(t, d, ctx, p.ID, "mig-mtc-"+tag, owner.ID)
@@ -463,7 +465,7 @@ SELECT count(*) FROM app.org_members m JOIN app.orgs o ON o.id = m.org_id WHERE 
 	if _, err := d.pool.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '0015_orgs.sql'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := Migrate(ctx, url); err != nil {
+	if err := migrateUntil(ctx, url, OrgSource{Chosen: true}, upTo0015); err != nil {
 		t.Fatalf("default migrate: %v", err)
 	}
 	assertOrgOf(t, d, ctx, p.ID, store.PersonalOrgSlug(owner.ID), owner.ID)
@@ -471,7 +473,8 @@ SELECT count(*) FROM app.org_members m JOIN app.orgs o ON o.id = m.org_id WHERE 
 	assertOrgOf(t, d, ctx, r.ID, store.PersonalOrgSlug(second.ID), second.ID)
 }
 
-// runDown runs 0015_orgs.down.sql as deploybot_owner on one connection.
+// runDown runs 0015_orgs.down.sql as deploybot_owner on one connection, after
+// filling hosts.project_id as the v1.24 API did (fillHostMirrorSQL).
 func runDown(t *testing.T, ctx context.Context, url string) {
 	t.Helper()
 	body, err := migrations.FS.ReadFile("0015_orgs.down.sql")
@@ -484,6 +487,9 @@ func runDown(t *testing.T, ctx context.Context, url string) {
 	}
 	defer conn.Close(ctx)
 	if _, err := conn.Exec(ctx, `SET ROLE deploybot_owner`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, fillHostMirrorSQL); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.PgConn().Exec(ctx, string(body)).ReadAll(); err != nil {
@@ -584,6 +590,7 @@ func TestOrgsMigrationProductionShape(t *testing.T) {
 			_ = Migrate(cctx, url)
 		}
 	})
+	restorePhase1Schema(t, ctx, url)
 	runDown(t, ctx, url)
 	tag := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 	exec := func(sql string, args ...any) {
@@ -650,7 +657,7 @@ VALUES ($1::uuid, $2::uuid, $3, $4, 'process', '{}', now(), now(), $5::uuid, $6)
 	var logs strings.Builder
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	err = MigrateWith(ctx, url, OrgSource{Chosen: true, Mapping: mapping})
+	err = migrateUntil(ctx, url, OrgSource{Chosen: true, Mapping: mapping}, upTo0015)
 	slog.SetDefault(prev)
 	if err != nil {
 		t.Fatalf("mapped migrate: %v", err)
@@ -815,6 +822,9 @@ func tryDown(ctx context.Context, url string) error {
 	}
 	defer conn.Close(ctx)
 	if _, err := conn.Exec(ctx, `SET ROLE deploybot_owner`); err != nil {
+		return err
+	}
+	if _, err := conn.Exec(ctx, fillHostMirrorSQL); err != nil {
 		return err
 	}
 	_, err = conn.PgConn().Exec(ctx, string(body)).ReadAll()

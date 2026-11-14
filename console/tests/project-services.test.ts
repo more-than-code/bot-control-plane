@@ -140,11 +140,9 @@ test('shape keeps v1.2 names and fails a closed project-services envelope', () =
 	assert.equal(parseHost({ ...HOST, access_level: 'metrics' })?.access_level, 'metrics');
 	assert.equal(parseHost({ ...HOST, access_level: null })?.access_level, null);
 	assert.equal(parseHost({ ...HOST, access_level: 'owner' }), null);
-	// Without access_level (an API before v1.24) the deprecated relation mirrors still say the level.
+	// Without access_level the host has no level; the removed relation mirror is not read (api-v1 v1.26).
 	const { access_level: _level, ...legacyHost } = HOST;
-	assert.equal(parseHost({ ...legacyHost, relation: 'owner', share_level: null })?.access_level, 'deploy');
-	assert.equal(parseHost({ ...legacyHost, access_level: 'metrics' })?.access_level, 'metrics');
-	assert.equal(parseHost({ ...legacyHost, relation: 'shared', share_level: null }), null);
+	assert.equal(parseHost({ ...legacyHost, relation: 'owner', share_level: null })?.access_level, null);
 	assert.equal(parseHost(legacyHost)?.access_level, null);
 
 	const page = parseServicePage({

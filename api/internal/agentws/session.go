@@ -180,13 +180,13 @@ func (h *Hub) enroll(ac *agentConn, f frame) {
 		return
 	}
 	// api-v1 v1.24 item 5: the org, plus the grant's project when the
-	// token carried one (the host's project_id mirror).
+	// token carried one.
 	orgID := host.OrgID
 	hostID := host.ID
 	h.aud.Record(ac.parent, store.AuditRow{
 		Via:       audit.ViaAgent,
 		OrgID:     &orgID,
-		ProjectID: host.ProjectID,
+		ProjectID: host.GrantProjectID,
 		HostID:    &hostID,
 		Action:    audit.ActionHostEnroll,
 		Decision:  audit.DecisionAllowed,
