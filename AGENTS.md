@@ -2,11 +2,13 @@
 
 The Deploybot server side in one repo: the API (`api/`), the MCP gateway (`mcp/`) and the web console (`console/`). One Go module (`github.com/more-than-code/bot-control-plane`) builds the server binary `cmd/deploybot-server` (`deploybot-server api [--migrate]` or `deploybot-server mcp`; called as `bot-api-server` or `bot-mcp-server`, it runs that mode) and the user CLI `cmd/deploybot`. The host agent is the separate repo bot-agent.
 
+Tenancy (api-v1 v1.24): an organization owns hosts and contains projects. Org owners and admins manage hosts, join tokens and per-project host access (`metrics` or `deploy`) and act as admin on every project in the org. Projects keep their own members and roles; a project member need not be in the org. The agent sees only project slugs.
+
 Umbrella: `/Users/joe/workspace/deploybot` (cross-repo design `docs/design-bot-agent-deploy.md`, ledger `tasks/todo.md`).
 
 ## Rules for every part
 
-- The contracts in `docs/contracts/` (`api-v1.md`, `oauth-v1.md`, `agent-protocol-v1.md`) are frozen copies of the umbrella source; report problems instead of editing them. They hold only implemented versions: api-v1 v1.20 and agent-protocol v1.10 (env generate, on hold) stay out until that work lands. bot-agent keeps its own copy of `agent-protocol-v1.md`.
+- The contracts in `docs/contracts/` (`api-v1.md`, `oauth-v1.md`, `agent-protocol-v1.md`) are frozen copies of the umbrella source; report problems instead of editing them. They hold only implemented versions: api-v1 v1.20 and agent-protocol v1.10 (env generate, on hold) stay out until that work lands. The api-v1 copy already includes v1.24 (organizations), ahead of its API implementation, from the approved spec `docs/spec-organizations.md`. bot-agent keeps its own copy of `agent-protocol-v1.md`.
 - Do not print, log, or commit `.env` or any secret. Log only a short redacted error line.
 - Do not commit unless the user asks. Do not push or add a remote.
 
@@ -32,6 +34,8 @@ Database tests run only when `DEPLOYBOT_TEST_DATABASE_URL` is set; without it th
 Go service and CLI; package `mcp` exposes `Run`, started by `deploybot-server mcp`; the `deploybot login|logout` logic is in `mcp/cli`, built from `cmd/deploybot`. Design: `mcp/docs/design.md`.
 
 No database. One client secret that only allows exchanging user tokens; never act without a user token. Calls to the API `/v1` use only the delegated token from that exchange.
+
+Organizations are read-only over MCP (`list_orgs`; `list_projects` shows each project's org; `list_hosts` takes `project_id` or `org_id`). Do not add a tool for org, membership, join-token or host-access writes: the API refuses delegated sessions on those routes.
 
 ## Console (`console/`)
 

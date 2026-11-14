@@ -709,3 +709,93 @@ Before release; nothing of v1.22 or v1.23 has shipped.
 2. **Secret values may not change what runs (amends v1.22 item 1 and item 4).** For a program entry, a key whose final value comes from a set key with `is_secret: true` must not be one of the v1.6.1 item 2 keys, nor `GIT_SSH`, `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `SSH_ASKPASS`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `JDK_JAVA_OPTIONS`, `PYTHONHOME`, `PYTHONINSPECT`, `GCONV_PATH`, `DOTNET_STARTUP_HOOKS`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, or `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` in either case. A `secret_env` key in that list is `bad_request` "this variable changes what the program runs" on write; at Run, such a key coming from a secret set key is the same `bad_request` before any task. Inline `env` and plain set keys keep the v1.6.1 list (their values are approved).
 3. **A plain secret-looking set key (amends v1.22 item 4).** A further Run gate, before any task and before the idempotency claim: a final key that matches the inline-env secret-looking rule (v1.22 item 1, "use secret_env") but whose value comes from a set key with `is_secret: false` → `bad_request` "<KEY> looks like a secret but is not marked secret in set <set>; mark it secret". It is audited as a denied `program.run`.
 4. **`policy_denied` wording (amends v1.23 item 3).** The mapping applies to a `policy_denied` refusal of any task kind, not only program and image tasks.
+
+## v1.24 organizations: hosts belong to an org, projects get host access (2026-11-14, approved spec `docs/spec-organizations.md` rev 1; migration 0015, phase 1 additive)
+
+Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry host approvals of v1.6 item 2. Agent protocol unchanged: no frame or task spec gains a key, and project slugs keep their meaning (globally unique, immutable, agent grammar `^[a-z0-9][a-z0-9-]{0,63}$`). The on-hold v1.20 (env generate) moves its migration to 0016.
+
+1. **Objects.**
+   - `Org{id,name,slug,role,created_at}`. `role` is the caller's org role: `owner|admin|member`. There is exactly one owner. `slug` is unique, `^[a-z0-9][a-z0-9-]{0,63}$`, server-side only.
+   - `OrgMember{user_id,email,name,role,added_at}`.
+   - `Project` gains `org_id`, and `via:"member"|"org"`. `via:"org"` means the caller reaches the project only as an org owner or admin, and then `role` is `"admin"`.
+   - `Host` gains `org_id` and `access_level:"metrics"|"deploy"|null`, the level of the project in whose list the host appears (null in org-scoped views). It also gains `access:[{project_id,project_name,level}]`, returned only to org admins. `project_id`, `relation` and `share_level` stay in phase 1 as deprecated mirrors:
+     - `project_id` is the backfilled former owner, or for a new host the token's grant project or null;
+     - `relation` is `"owner"` when `access_level` is `"deploy"`, otherwise `"shared"`;
+     - `share_level` equals `access_level`.
+     They are removed in v1.25.
+   - `HostPrograms.projects`, the host's allowlist of project slugs (v1.23 item 1), is returned only to org admins and owners. Every other caller gets `projects: null`. Each project view keeps its own `project_listed`. This replaces v1.23's "members of the host's owning project": a project with access never sees the other projects' slugs.
+   - `HostAccess{project_id,project_name,level,granted_by,granted_at}`.
+2. **Permissions** (replaces the v1.1 matrix; roles are org roles or the caller's role in a project that has access):
+   - see the host, status, metrics, processes and snapshot: org admin+, or any member of a project with access (any level);
+   - services list, service read, logs, probe and health history: org admin+ (all services), or a member of a `deploy` project (that project's services only);
+   - deploy, run, stop, restart, rollback, remove and health-check edits: org admin+ (all), or an admin+ of a `deploy` project (its own entries and services);
+   - credential revoke, access grants and join tokens: org admin+ only;
+   - anyone else: `not_found`.
+   - Org members without a project role see no host.
+   - Project capabilities (v1.0) also allow an org owner or admin of the project's org, as `admin`. `CapProjectWrite` (rename, delete, transfer) stays with the project owner, or the org owner.
+3. **Routes** (all `delegatedDeny` unless noted):
+   - `GET /v1/me` gains `orgs:[Org]`; its projects carry `org_id` and `via`.
+   - `POST /v1/orgs` `{name}` → `Org`. The caller becomes owner. Any session.
+   - `GET /v1/orgs/{id}` (member+).
+   - `PATCH /v1/orgs/{id}` `{name}` (admin+).
+   - `DELETE /v1/orgs/{id}` (owner): soft delete; it revokes every host's credential and soft-deletes every project, as v1.0 project delete.
+   - `GET /v1/orgs/{id}/members` (member+).
+   - `POST /v1/orgs/{id}/members` `{email,role:"admin"|"member"}`, existing users only, as v1.0 project members (admin+).
+   - `PATCH` and `DELETE /v1/orgs/{id}/members/{user_id}` (admin+; self-removal for anyone; the owner cannot be removed).
+   - `POST /v1/orgs/{id}/transfer-ownership` `{user_id}` (owner).
+   - `GET /v1/orgs/{id}/projects` (member+: projects the caller can reach).
+   - `POST /v1/orgs/{id}/projects` `{name}` (admin+) → `Project`. The caller becomes project owner. `POST /v1/projects` stays for one release: it creates the project in the caller's only org with role owner or admin, and is `bad_request` "choose an organization" when there are several, or none.
+   - `GET /v1/orgs/{id}/hosts` (admin+): every host of the org, with `access`. Same paging as the project host list.
+   - `POST /v1/orgs/{id}/join-tokens` (admin+) `{host_name_hint?, expires_in_sec?, grant?:{project_id, level}}`. The grant's project must be in the org. The response is as v1.0, plus `grant`.
+   - `GET /v1/orgs/{id}/join-tokens` and `DELETE /v1/orgs/{id}/join-tokens/{token_id}` (admin+).
+   - `POST /v1/projects/{id}/join-tokens` stays for one release: it needs org admin+ of the project's org, and creates an org token with `grant:{project_id:id, level:"deploy"}`. The project `GET` and `DELETE` routes list and revoke the tokens whose grant names that project.
+   - `GET /v1/hosts/{id}/access` (org admin+) → `{items:[HostAccess]}`.
+   - `PUT /v1/hosts/{id}/access/{project_id}` `{level}` (org admin+): an upsert. The project must be in the host's org, otherwise `not_found`.
+   - `DELETE /v1/hosts/{id}/access/{project_id}`: org admin+, or admin+ of that project (leaving). It is `conflict` while the project still has services on the host, unless `?reassign=org`, which moves them to the org (`project_id` null).
+   - `/v1/hosts/{id}/shares` and `/v1/hosts/{id}/shares/{project_id}`, all methods: `410` `gone` "replaced by /access".
+   - `DELETE /v1/hosts/{id}/credential`: org admin+.
+   - `GET /v1/orgs/{id}/audit` (admin+): rows with that `org_id`.
+4. **Catalog.**
+   - Host approvals are removed. The `GET`, `POST` and `DELETE /v1/hosts/{id}/catalog-approvals*` routes are `410`.
+   - A run or deploy on a host needs `access_level:"deploy"` for the entry's project. Without it: `forbidden` "this project has no deploy access to the host", where the caller can see the host; otherwise `not_found`.
+   - The v1.23 allowlist pre-check is unchanged and comes right after the access check.
+   - "Approved shared host" in v1.22 secret release means a host where the entry's project has `deploy` access.
+   - Approval voiding (v1.22 amendment 1) no longer applies. `spec_hash` is still computed.
+5. **Enrolment.**
+   - Join tokens belong to an org.
+   - Host names are unique per org, and `-2`-style suffixes are per org.
+   - The token's `grant`, if any, becomes a `host_access` row in the enrolment transaction.
+   - The `host.enroll` audit row carries `org_id`, plus the grant's project.
+   - Wire frames are unchanged.
+6. **Services.**
+   - Discovered services with no Deploybot owner have `project_id: null` and are visible to org admins only.
+   - An agent-reported owner `{project:<slug>, entry}` maps to that project only when the project is in the host's org and has `deploy` access. Otherwise the service is org-level.
+   - `auto_action.project` must name such a project (amends v1.15).
+7. **Project delete:**
+   - it no longer revokes hosts;
+   - it deletes the project's `host_access` rows;
+   - it marks its services gone;
+   - it stops nothing on the host.
+   `Settings` text: "Hosts stay in the organization."
+8. **Audit.**
+   - `AuditEntry` gains `org_id`. Host events are written with `org_id` and, where one applies, the project.
+   - New actions: `org.create`, `org.rename`, `org.delete`, `org.transfer`, `org_member.add`, `org_member.update`, `org_member.remove`, `org_join_token.create`, `org_join_token.revoke`, `host.access_grant`, `host.access_update`, `host.access_revoke`.
+   - The `host.share*` actions stay readable in history.
+9. **Migration 0015** (phase 1, additive):
+   - adds `orgs`, `org_members` and `host_access`;
+   - adds `org_id` on `projects`, `hosts`, `join_tokens` and `audit_log`, plus `join_tokens.grant_project_id` and `grant_level`;
+   - backfills: an explicit mapping on production (spec §4.1), and otherwise one org per project owner;
+   - converts each host's former owning project into a `host_access` row at `deploy`, and same-org shares into `host_access` rows;
+   - keeps `hosts.project_id`, `host_shares` and the approval tables, unused by the new API, so v0.2.29 still runs after a rollback;
+   - relaxes `NOT NULL` on `services.project_id` (org-level discovered services) and `hosts.project_id` (hosts enrolled with an org token that has no grant), and adds `UNIQUE (org_id, name)` on hosts (`hosts_project_name_unique` stays);
+   - ships a rollback script, `0015_orgs.down.sql`, which is not applied by `--migrate`. Ops runs it before pointing `current` back at v0.2.29. It:
+     - gives every NULL `services.project_id` its host's `project_id`;
+     - gives every NULL `hosts.project_id` a project with `deploy` access, otherwise the org's oldest project;
+     - restores both `NOT NULL` constraints.
+     Access grants made after the release are not carried back into `host_shares` (spec §7).
+   - the `deploybot_api` grants follow the existing default privileges.
+10. **MCP-visible change:**
+    - `list_projects` shows the org;
+    - new `list_orgs` (reads `/v1/me`);
+    - `list_hosts` takes `project_id` or `org_id`.
+    No write tool for orgs, members, tokens or access. Delegated sessions are refused on every route in item 3 except `GET /v1/me`, `GET /v1/orgs/{id}`, `GET /v1/orgs/{id}/projects` and `GET /v1/orgs/{id}/hosts`, which are `delegatedAllow` reads.

@@ -61,3 +61,31 @@ func TestConfirmDescriptionSaysProgramPortsComeLater(t *testing.T) {
 		t.Errorf("confirm description lacks the ports note: %q", d)
 	}
 }
+
+// Organizations spec §4.4: the read tools say how orgs fit, and there is no
+// write tool for orgs, members, join tokens or host access.
+func TestOrgToolDescriptions(t *testing.T) {
+	desc := listToolDescriptions(t)
+	for name, phrases := range map[string][]string{
+		"list_orgs":     {"organizations", "Read-only", "in the console"},
+		"list_projects": {"organization", "org_id", "via"},
+		"list_hosts":    {"exactly one of project_id or org_id", "access_level", "owners and admins only"},
+	} {
+		d, ok := desc[name]
+		if !ok {
+			t.Fatalf("%s not registered", name)
+		}
+		for _, phrase := range phrases {
+			if !strings.Contains(d, phrase) {
+				t.Errorf("%s description lacks %q: %q", name, phrase, d)
+			}
+		}
+	}
+	for name := range desc {
+		for _, word := range []string{"org", "member", "token", "access", "grant", "invite"} {
+			if strings.Contains(name, word) && name != "list_orgs" {
+				t.Errorf("tool %s looks like an org, membership, token or access tool", name)
+			}
+		}
+	}
+}

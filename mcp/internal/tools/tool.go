@@ -32,6 +32,7 @@ const maxErrorBytes = 1024
 
 // Register adds the phase 1 tools and the catalog tools to server.
 func Register(server *mcp.Server, api *apiclient.Client) {
+	registerListOrgs(server, api)
 	registerListProjects(server, api)
 	registerListHosts(server, api)
 	registerListServices(server, api)

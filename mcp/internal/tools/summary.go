@@ -48,7 +48,7 @@ const maxHealthPlanRunes = 10886
 //	env, 64 keys, both sides a quoted 4096-byte value     2101954
 //	command and entrypoint, 32 args, both sides           2097559
 //	files, volumes, secret_env, image, ports, and the rest  78955
-//	head, field separators, and the approvals tail            145
+//	head, field separators, and the closing note              145
 //	total                                                4278613
 const maxCatalogPlanRunes = 4278613
 
@@ -96,30 +96,80 @@ func preview(parts []string) string {
 	return strings.Join(parts[:previewCount], ", ") + fmt.Sprintf(", and %d more", rest)
 }
 
+// summarizeProjects names each project with the caller's role, "via org"
+// when the role comes from the organization, and the organization's name
+// when /v1/me lists it.
 func summarizeProjects(payload json.RawMessage) string {
 	var body struct {
-		Projects []struct {
+		Orgs []struct {
+			ID   string `json:"id"`
 			Name string `json:"name"`
-			Role string `json:"role"`
+		} `json:"orgs"`
+		Projects []struct {
+			Name  string `json:"name"`
+			Role  string `json:"role"`
+			OrgID string `json:"org_id"`
+			Via   string `json:"via"`
 		} `json:"projects"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil {
 		return "projects"
 	}
+	orgNames := make(map[string]string, len(body.Orgs))
+	for _, o := range body.Orgs {
+		orgNames[o.ID] = o.Name
+	}
 	parts := make([]string, 0, len(body.Projects))
 	for _, p := range body.Projects {
-		parts = append(parts, summaryField(p.Name)+" ("+summaryField(p.Role)+")")
+		role := summaryField(p.Role)
+		if p.Via == "org" {
+			role += " via org"
+		}
+		line := summaryField(p.Name) + " (" + role + ")"
+		if name, ok := orgNames[p.OrgID]; ok && p.OrgID != "" {
+			line += " in " + summaryField(name)
+		}
+		parts = append(parts, line)
 	}
 	return withPreview(fmt.Sprintf("%d projects", len(body.Projects)), parts)
 }
 
-func summarizeHosts(payload json.RawMessage) string {
+func summarizeOrgs(payload json.RawMessage) string {
+	var body struct {
+		Orgs []struct {
+			Name string `json:"name"`
+			Role string `json:"role"`
+		} `json:"orgs"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return "orgs"
+	}
+	parts := make([]string, 0, len(body.Orgs))
+	for _, o := range body.Orgs {
+		parts = append(parts, summaryField(o.Name)+" ("+summaryField(o.Role)+")")
+	}
+	return withPreview(fmt.Sprintf("%d orgs", len(body.Orgs)), parts)
+}
+
+// hostAccessPreview is how many project grants an org host line names.
+const hostAccessPreview = 3
+
+// summarizeHosts reads access_level in a project's list (v1.24) and the
+// access list in an org's list. When access_level is absent (an API older
+// than v1.24, as in a rollback window), it falls back to the v1.1 relation:
+// a shared host shows its share level, an owned host shows nothing extra.
+func summarizeHosts(payload json.RawMessage, org bool) string {
 	var body struct {
 		Items []struct {
-			Name       string `json:"name"`
-			Status     string `json:"status"`
-			Relation   string `json:"relation"`
-			ShareLevel string `json:"share_level"`
+			Name        string `json:"name"`
+			Status      string `json:"status"`
+			AccessLevel string `json:"access_level"`
+			Relation    string `json:"relation"`
+			ShareLevel  string `json:"share_level"`
+			Access      []struct {
+				ProjectName string `json:"project_name"`
+				Level       string `json:"level"`
+			} `json:"access"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil {
@@ -128,7 +178,22 @@ func summarizeHosts(payload json.RawMessage) string {
 	parts := make([]string, 0, len(body.Items))
 	for _, h := range body.Items {
 		line := summaryField(h.Name) + " " + summaryField(h.Status)
-		if h.Relation == "shared" {
+		switch {
+		case org && len(h.Access) == 0:
+			line += " (no project access)"
+		case org:
+			grants := make([]string, 0, hostAccessPreview)
+			for i, a := range h.Access {
+				if i == hostAccessPreview {
+					grants = append(grants, fmt.Sprintf("%d more", len(h.Access)-hostAccessPreview))
+					break
+				}
+				grants = append(grants, summaryField(a.ProjectName)+" "+summaryField(a.Level))
+			}
+			line += " (access: " + strings.Join(grants, ", ") + ")"
+		case h.AccessLevel != "":
+			line += " (" + summaryField(h.AccessLevel) + ")"
+		case h.Relation == "shared":
 			line += " (shared: " + summaryField(h.ShareLevel) + ")"
 		}
 		parts = append(parts, line)

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// truncateLists cuts items, projects, points, and lines arrays longer than max.
+// truncateLists cuts items, projects, orgs, points, and lines arrays longer than max.
 // The original JSON is returned unchanged when nothing is cut, so numbers
 // are not re-encoded. The note is empty when nothing is cut.
 func truncateLists(raw json.RawMessage, max int) (json.RawMessage, string) {
@@ -50,5 +50,5 @@ func walkTruncate(v any, max int, changed *bool) {
 }
 
 func truncatableKey(key string) bool {
-	return key == "items" || key == "projects" || key == "points" || key == "lines"
+	return key == "items" || key == "projects" || key == "orgs" || key == "points" || key == "lines"
 }
