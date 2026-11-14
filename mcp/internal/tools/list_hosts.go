@@ -28,7 +28,7 @@ const listHostsSchema = `{
 func registerListHosts(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "list_hosts",
-		Description: "List hosts for a project or an organization; pass exactly one of project_id or org_id. Hosts belong to an organization, and projects get access to them. With project_id, the hosts that project may use, each with access_level (metrics: status, charts and processes; deploy: also its services, logs and catalog runs). With org_id (organization owners and admins only), every host of the organization with access, the list of projects and their levels. Reads stored host records (id, name, status, last seen, and related fields). Does not contact the hosts.",
+		Description: "List hosts for a project or an organization; pass exactly one of project_id or org_id. Hosts belong to an organization, and projects get access to them. With project_id, the hosts that project may use, each with access_level (metrics: status, charts and processes; deploy: also its services, logs and catalog runs). With org_id (organization owners and admins only), every host of the organization; project access per host is shown in the console, not here. Reads stored host records (id, name, status, last seen, and related fields). Does not contact the hosts.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(listHostsSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {

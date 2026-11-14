@@ -155,9 +155,12 @@ func summarizeOrgs(payload json.RawMessage) string {
 const hostAccessPreview = 3
 
 // summarizeHosts reads access_level in a project's list (v1.24) and the
-// access list in an org's list. When access_level is absent (an API older
-// than v1.24, as in a rollback window), it falls back to the v1.1 relation:
-// a shared host shows its share level, an owned host shows nothing extra.
+// access list in an org's list. The API omits access for delegated sessions
+// (v1.24 item 1), which is what MCP uses, so an absent list adds nothing; only
+// a present, empty list says "no project access". When access_level is absent
+// (an API older than v1.24, as in a rollback window), it falls back to the
+// v1.1 relation: a shared host shows its share level, an owned host shows
+// nothing extra.
 func summarizeHosts(payload json.RawMessage, org bool) string {
 	var body struct {
 		Items []struct {
@@ -166,7 +169,7 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 			AccessLevel string `json:"access_level"`
 			Relation    string `json:"relation"`
 			ShareLevel  string `json:"share_level"`
-			Access      []struct {
+			Access      *[]struct {
 				ProjectName string `json:"project_name"`
 				Level       string `json:"level"`
 			} `json:"access"`
@@ -179,13 +182,15 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 	for _, h := range body.Items {
 		line := summaryField(h.Name) + " " + summaryField(h.Status)
 		switch {
-		case org && len(h.Access) == 0:
+		case org && h.Access == nil:
+			// Not sent to this session: say nothing about access.
+		case org && len(*h.Access) == 0:
 			line += " (no project access)"
 		case org:
 			grants := make([]string, 0, hostAccessPreview)
-			for i, a := range h.Access {
+			for i, a := range *h.Access {
 				if i == hostAccessPreview {
-					grants = append(grants, fmt.Sprintf("%d more", len(h.Access)-hostAccessPreview))
+					grants = append(grants, fmt.Sprintf("%d more", len(*h.Access)-hostAccessPreview))
 					break
 				}
 				grants = append(grants, summaryField(a.ProjectName)+" "+summaryField(a.Level))

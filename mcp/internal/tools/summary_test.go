@@ -408,9 +408,10 @@ func TestSummarizeHostsAccess(t *testing.T) {
 			{"project_id":"d","project_name":"qa","level":"metrics"},
 			{"project_id":"e","project_name":"ml","level":"metrics"}
 		]},
-		{"name":"pi2","status":"online","access_level":null,"access":[]}
+		{"name":"pi2","status":"online","access_level":null,"access":[]},
+		{"name":"pi3","status":"online","access_level":null}
 	]}`)
-	want := "2 hosts: pi1 online (access: lab deploy, web metrics, ops deploy, 2 more), pi2 online (no project access)"
+	want := "3 hosts: pi1 online (access: lab deploy, web metrics, ops deploy, 2 more), pi2 online (no project access), pi3 online"
 	if got := summarizeHosts(org, true); got != want {
 		t.Fatalf("org hosts\n got %q\nwant %q", got, want)
 	}
