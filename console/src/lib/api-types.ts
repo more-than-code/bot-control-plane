@@ -187,6 +187,8 @@ export type HostPrograms = {
 	project_listed: boolean | null;
 	/** Shared networks root defined on the host (api-v1 v1.25). Null when the agent did not send them (before 0.2.9). */
 	shared_networks: SharedNetwork[] | null;
+	/** True when the agent applies env value changes without Force (agent-protocol v1.14). Missing on older hellos is false. */
+	env_hash: boolean;
 };
 
 /**
@@ -347,7 +349,8 @@ export type ImageLogs = {
 };
 
 /**
- * `value` is null for a secret. The console also drops a secret value before it reaches the browser.
+ * `value` is null for a secret. The console also drops a secret value before it reaches the browser; the one
+ * exception is a generated value, shown once through the reveal dialog's own request and never in page data.
  * `preview` is the short secret preview, or null for a plain key and when the API sent none.
  */
 export type EnvSetKey = {
@@ -355,6 +358,10 @@ export type EnvSetKey = {
 	is_secret: boolean;
 	value: string | null;
 	preview: string | null;
+	/** A generated value that can still be shown once (api-v1 v1.27). Missing on an older API is false. */
+	reveal_pending: boolean;
+	/** A placeholder with no value yet (api-v1 v1.27). Missing on an older API is false. */
+	needs_value: boolean;
 };
 
 export type EnvSet = {

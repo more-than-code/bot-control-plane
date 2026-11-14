@@ -257,6 +257,18 @@ export function openSharedNetworks(
 	return out;
 }
 
+/**
+ * A note, not a block (agent-protocol v1.14): an agent without `env_hash` reports a value-only env change to
+ * a service as unchanged, so the container keeps its old env unless the deploy is forced. Null for a job
+ * (it always runs fresh), for a capable agent, and for a host that cannot run containers (it has its own reason).
+ */
+export function imageEnvHashNote(host: Pick<Host, 'programs'>, workload: 'service' | 'job'): string | null {
+	if (workload !== 'service') return null;
+	if (imageHostBlockReason(host) != null) return null;
+	if (host.programs?.env_hash === true) return null;
+	return "This host's agent does not apply env value changes without Force.";
+}
+
 /** Union of run-as accounts on eligible hosts. Shell entries only use hosts that allow a shell. */
 export function runAsChoices(hosts: readonly Pick<Host, 'access_level' | 'programs'>[], shell: boolean): string[] {
 	const names = new Set<string>();

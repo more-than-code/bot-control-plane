@@ -9,7 +9,7 @@ export type SelectedSet = { name: string; keys: readonly string[] };
 /** A secret env row: its env key and the `<set>.<name>` it reads. */
 export type SecretRef = { key: string; set: string; name: string };
 
-type Winner = { kind: 'set'; name: string } | { kind: 'secret' } | { kind: 'env' };
+export type Winner = { kind: 'set'; name: string } | { kind: 'secret' } | { kind: 'env' };
 
 export type EnvOverrides = {
 	/** Inline env key → what it overrides (selected sets in order, and whether a secret has it too). */
@@ -102,4 +102,18 @@ export function setOrderLine(selected: readonly string[]): string | null {
 /** One note per key that two or more selected sets share. */
 export function setConflictNotes(overrides: EnvOverrides): Array<{ key: string; sets: string[]; text: string }> {
 	return overrides.conflicts.map(({ key, sets, used }) => ({ key, sets, text: `${key} is in ${joinNames(sets)}; ${winnerText(used)}.` }));
+}
+
+/**
+ * The source whose value a key gets in the entry's final env (api-v1 rule 12), or null when no source sets it:
+ * the inline env, else the secret env, else the last selected set that has it.
+ */
+export function envSource(key: string, envKeys: readonly string[], secretKeys: readonly string[], selected: readonly SelectedSet[]): Winner | null {
+	if (cleanKeys(envKeys).has(key)) return { kind: 'env' };
+	if (cleanKeys(secretKeys).has(key)) return { kind: 'secret' };
+	for (let index = selected.length - 1; index >= 0; index -= 1) {
+		const set = selected[index];
+		if (set && cleanKeys(set.keys).has(key)) return { kind: 'set', name: set.name };
+	}
+	return null;
 }

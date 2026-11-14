@@ -330,7 +330,8 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 	const logging = reportedBool(value, 'logging');
 	const health_policy = reportedBool(value, 'health_policy');
 	const secrets = reportedBool(value, 'secrets');
-	if (images === null || docker === null || files === null || logging === null || health_policy === null || secrets === null) return null;
+	const env_hash = reportedBool(value, 'env_hash');
+	if (images === null || docker === null || files === null || logging === null || health_policy === null || secrets === null || env_hash === null) return null;
 	const projects = parseAllowlist(value);
 	if (projects === undefined) return null;
 	const shared_networks = parseSharedNetworks(value);
@@ -350,7 +351,8 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 		secrets,
 		projects,
 		project_listed: listed,
-		shared_networks
+		shared_networks,
+		env_hash
 	};
 }
 
@@ -1622,15 +1624,26 @@ function parseEnvSetKey(value: unknown): EnvSetKey | null {
 	if (!isRecord(value) || typeof value.is_secret !== 'boolean') return null;
 	const key = text(value.key, 64);
 	if (!key || !ENV_KEY.test(key)) return null;
+	const flags = envKeyFlags(value);
+	if (!flags) return null;
 	if (value.is_secret) {
 		const preview = secretPreview(value.preview);
 		if (preview === undefined) return null;
-		return { key, is_secret: true, value: null, preview };
+		return { key, is_secret: true, value: null, preview, ...flags };
 	}
 	if (value.value != null && (typeof value.value !== 'string' || utf8.encode(value.value).byteLength > 4096 || LINE_BREAK.test(value.value))) {
 		return null;
 	}
-	return { key, is_secret: false, value: value.value == null ? null : value.value, preview: null };
+	// reveal_pending implies secret (migration 0015 CHECK); a plain key never offers Reveal once.
+	return { key, is_secret: false, value: value.value == null ? null : value.value, preview: null, ...flags, reveal_pending: false };
+}
+
+/** api-v1 v1.27 key flags. Missing or null (an older API) is false; a present non-boolean drops the key. */
+function envKeyFlags(value: Record<string, unknown>): { reveal_pending: boolean; needs_value: boolean } | null {
+	const reveal_pending = reportedBool(value, 'reveal_pending');
+	const needs_value = reportedBool(value, 'needs_value');
+	if (reveal_pending === null || needs_value === null) return null;
+	return { reveal_pending, needs_value };
 }
 
 export function parseEnvSet(value: unknown): EnvSet | null {

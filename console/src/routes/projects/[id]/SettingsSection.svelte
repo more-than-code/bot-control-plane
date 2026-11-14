@@ -119,7 +119,7 @@
 	<Card.Root class="mt-4">
 		<Card.Header>
 			<Card.Title>Env sets</Card.Title>
-			<Card.Description>Plain values are shown. A secret shows only a short preview.</Card.Description>
+			<Card.Description>Plain values are shown. A secret shows only a short preview. A generated value is shown once.</Card.Description>
 			<Card.Action>
 				<EnvSetDialog action={actionUrlFrom(page.url, 'saveEnvSet')} {message} {settingsField} onStatus={(text) => (envSetNote = text)} />
 			</Card.Action>
@@ -138,6 +138,7 @@
 					deleteSetAction={actionUrlFrom(page.url, 'deleteEnvSet')}
 					makeSecretAction={actionUrlFrom(page.url, 'makeEnvKeysSecret')}
 					mergeAction={actionUrlFrom(page.url, 'mergeEnvSet')}
+					revealAction={actionUrlFrom(page.url, 'revealEnvKey')}
 					mergeError={settingsField === 'merge' && settingsName === set.name ? message : null}
 					onAction={() => (envSetNote = '')}
 				/>

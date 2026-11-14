@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { tick, untrack, type Snippet } from 'svelte';
 	import InfoIcon from '@lucide/svelte/icons/info';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Combobox from '$lib/components/ui/combobox';
@@ -51,6 +52,7 @@
 	import { ImageTagLookup } from '$lib/image-tag-lookup';
 	import { settleImageForm, type DialogOutcome } from '$lib/dialog-open';
 	import { envOverrideNote, envOverrides } from '$lib/env-precedence';
+	import { envRefHints } from '$lib/env-references';
 	import type { ImageEditorState } from '$lib/project-action';
 	import ImageLookupPost from './ImageLookupPost.svelte';
 	import EnvSourceFields from './EnvSourceFields.svelte';
@@ -201,6 +203,7 @@
 		});
 	});
 
+	const selectedSets = $derived(draft.envSets.map((name) => ({ name, keys: sets.find((set) => set.name === name)?.keys ?? [] })));
 	// Shared networks (api-v1 v1.25): the container name others use, and which networks the project's hosts open to it.
 	const containerName = $derived.by(() => {
 		const name = mode === 'edit' && entry ? entry.name : draft.name.trim();
@@ -212,13 +215,14 @@
 	}
 
 	// api-v1 rule 12: env_sets in order < secret_env < env. Informational only; saving is still allowed.
-	const overrides = $derived(
-		envOverrides(
-			draft.env.map((row) => row.key),
-			draft.secrets,
-			draft.envSets.map((name) => ({ name, keys: sets.find((set) => set.name === name)?.keys ?? [] }))
-		)
-	);
+	const overrides = $derived(envOverrides(draft.env.map((row) => row.key), draft.secrets, selectedSets));
+	// api-v1 v1.27 item 7: where each ${NAME} in an inline value comes from. Key names only; the API decides.
+	// "Not set" is only said once the sets' keys are known.
+	function refHints(value: string) {
+		if (!value.includes('${')) return [];
+		const hints = envRefHints(value, draft.env.map((row) => row.key), draft.secrets.map((row) => row.key), selectedSets);
+		return setsStatus === 'ready' ? hints : hints.filter((hint) => hint.kind !== 'unknown');
+	}
 	/** A row input is described by its override note (when shown) and then its error. */
 	function withNote(noteId: string | null, name: string): string | undefined {
 		const ids = [noteId, describedBy(name) ?? null].filter((id) => id != null);
@@ -483,6 +487,7 @@
 			<p class="text-sm font-medium">Environment</p>
 			{#each draft.env as row, index (index)}
 				{@const note = envOverrideNote(overrides, row.key)}
+				{@const hints = refHints(row.value)}
 				<div class="flex flex-wrap items-center gap-2">
 					<Label class="sr-only" for="{fieldId}-env-key-{index}">Environment key {index + 1}</Label>
 					<Input
@@ -496,11 +501,25 @@
 						aria-describedby={withNote(note ? `${fieldId}-env-note-${index}` : null, 'env')}
 					/>
 					<Label class="sr-only" for="{fieldId}-env-value-{index}">Environment value {index + 1}</Label>
-					<Input id="{fieldId}-env-value-{index}" name="env_value" bind:value={draft.env[index].value} maxlength={4096} placeholder="Value" spellcheck="false" aria-invalid={invalid('env')} aria-describedby={describedBy('env')} />
+					<Input id="{fieldId}-env-value-{index}" name="env_value" bind:value={draft.env[index].value} maxlength={4096} placeholder="Value" spellcheck="false" aria-invalid={invalid('env')} aria-describedby={withNote(hints.length > 0 ? `${fieldId}-env-refs-${index}` : null, 'env')} />
 					<Button type="button" variant="outline" aria-label="Remove env var {index + 1}" onclick={() => (draft.env = draft.env.filter((_, item) => item !== index))}>Remove</Button>
 				</div>
 				{#if note}
 					{@render overrideNote(`${fieldId}-env-note-${index}`, note)}
+				{/if}
+				{#if hints.length > 0}
+					<ul id="{fieldId}-env-refs-{index}" class="text-muted-foreground grid gap-1 text-sm break-words">
+						{#each hints as hint, hintIndex (hintIndex)}
+							<li class="flex min-w-0 items-start gap-1.5">
+								{#if hint.kind === 'source'}
+									<InfoIcon class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+								{:else}
+									<TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+								{/if}
+								<span class="min-w-0">{hint.text}</span>
+							</li>
+						{/each}
+					</ul>
 				{/if}
 			{/each}
 			<Button type="button" variant="outline" disabled={draft.env.length >= 64} onclick={() => (draft.env = [...draft.env, { key: '', value: '' }])}>Add variable</Button>

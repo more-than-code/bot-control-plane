@@ -45,6 +45,7 @@ function policy(overrides: Partial<HostPrograms> = {}): HostPrograms {
 		projects: null,
 		project_listed: null,
 		shared_networks: null,
+		env_hash: false,
 		...overrides
 	};
 }
@@ -408,6 +409,23 @@ describe('shared networks (api-v1 v1.25)', () => {
 		assert.match(none.replaceAll(/<!--[^>]*-->/g, ''), /Shared networks<\/dt>\s*<dd[^>]*>\s*none\s*<\/dd>/);
 		const plain = render(OverviewTab, { props: { ...props, host: host(policy()) } }).body;
 		assert.equal(plain.includes('Shared networks'), false);
+	});
+
+	test('an agent without env_hash or shared_networks: block reason and env note both show, Deploy described by the reason only', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const old = host(policy({ shared_networks: null, env_hash: false }));
+		const html = render(CatalogDeployForm, { props: { ...DEPLOY_PROPS, entry: entry(['dd']), projectSlug: 'defect-drainer', hosts: [old], result: null } }).body;
+		const note = "pi3: This host's agent does not apply env value changes without Force.";
+		assert.equal(html.includes(`pi3: ${SHARED_NETWORKS_UNSUPPORTED_BLOCK}`), true);
+		assert.equal(html.includes(note), true);
+		const deploy = control(html, 'Deploy');
+		assert.equal(markedDisabled(deploy), true);
+		assert.match(openTag(deploy), /aria-describedby="deploy-serve-reasons"/);
+		// The reasons element holds the block reason and not the note.
+		const start = html.indexOf('id="deploy-serve-reasons"');
+		const reasons = html.slice(start, html.indexOf('</div>', start));
+		assert.equal(reasons.includes(SHARED_NETWORKS_UNSUPPORTED_BLOCK), true);
+		assert.equal(reasons.includes(note), false);
 	});
 
 	test('Deploy and Roll back are disabled and described by their reasons on a closed host', () => {

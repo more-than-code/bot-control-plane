@@ -18,6 +18,7 @@ import {
 	type ImageDraft,
 	type KnownSet
 } from '$lib/image-spec';
+import { generateRequestBody, isGenerateKind, revealFailedText } from '$lib/env-generate';
 import { imageRepository, isTaggedRef, tagLookupError, type ImageDigestResult, type ImageTagsResult, type TagLookupError } from '$lib/image-tags';
 import type { EnvSet, ProjectFile, Registry } from '$lib/api-types';
 import type { ImageDeployState, ImageEditorState } from '$lib/project-action';
@@ -512,6 +513,18 @@ export async function putEnvKey(event: RequestEvent) {
 	const value = formText(form, 'value');
 	const path = envKeyPath(id, name, key);
 	if (!path) return settingsFailure(event, 400, 'That env set key is not valid.');
+	// api-v1 v1.27 item 1: Generate (One variable, new keys only) sends no value; the API makes one.
+	const kind = formText(form, 'generate_kind');
+	if (kind !== '') {
+		if (!isGenerateKind(kind)) return settingsFailure(event, 400, 'Choose what to generate.');
+		try {
+			await apiFetch(event, path, { method: 'PUT', body: JSON.stringify(generateRequestBody(kind)) });
+			redirect(303, backTo(event.url));
+		} catch (err) {
+			if (isRedirect(err) || isHttpError(err)) throw err;
+			return settingsFailure(event, apiStatus(err), apiMessage(err));
+		}
+	}
 	const invalid = envValueError(value);
 	if (invalid) return settingsFailure(event, 400, invalid);
 	const adding = formText(form, 'op') === 'add';
@@ -523,6 +536,39 @@ export async function putEnvKey(event: RequestEvent) {
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
 		return settingsFailure(event, apiStatus(err), redactSubmitted(apiMessage(err), value === '' ? [] : [value]));
+	}
+}
+
+/**
+ * Show a generated value once (api-v1 v1.27 item 3). The value is only in this action's result, which the
+ * reveal dialog reads from its own fetch and never applies to the page: it is not in page data, `form`,
+ * a URL, or a log. A post that is not that fetch (no `x-sveltekit-action` header, or an Accept without
+ * JSON, as a form post without JavaScript sends) is refused before the API is called, so the value never
+ * renders into a page. Failures use `revealError`, not the settings message.
+ */
+export async function revealEnvKey(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const form = await event.request.formData();
+	const key = formText(form, 'key');
+	const path = envKeyPath(id, formText(form, 'set'), key);
+	if (!path) return fail(400, { scope: 'settings' as const, revealError: 'That env set key is not valid.' });
+	const accept = event.request.headers.get('accept') ?? '';
+	if (event.request.headers.get('x-sveltekit-action') !== 'true' || !accept.includes('application/json')) {
+		return fail(400, { scope: 'settings' as const, revealError: 'Showing a value needs JavaScript.' });
+	}
+	try {
+		const payload = await apiFetch(event, `${path}/reveal`, { method: 'POST', body: '{}' });
+		const item = payload != null && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+		if (!item || item.key !== key || typeof item.value !== 'string') return fail(502, { scope: 'settings' as const, revealError: revealFailedText(key) });
+		return { scope: 'settings' as const, revealed: { key, value: item.value } };
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		// An API answer (a conflict: already shown or not generated) carries its message, which names the key only.
+		// A timeout or a lost answer may have used up the one-time view, so it says how to get a new value.
+		const message = apiMessage(err);
+		const answered = err instanceof ApiError && !stillRunning(err) && err.code !== 'unavailable';
+		return fail(apiStatus(err), { scope: 'settings' as const, revealError: answered ? message : revealFailedText(key) });
 	}
 }
 

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { tick } from 'svelte';
+	import Eye from '@lucide/svelte/icons/eye';
 	import Lock from '@lucide/svelte/icons/lock';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -10,11 +12,13 @@
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { EnvSet, EnvSetKey } from '$lib/api-types';
 	import { COPY_FAILED_NOTE } from '$lib/copy-text';
+	import { envRowActions } from '$lib/env-generate';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Table from '$lib/components/ui/table';
 	import EnvAddVariablesDialog from './EnvAddVariablesDialog.svelte';
+	import EnvRevealDialog from './EnvRevealDialog.svelte';
 	import EnvValueEditor from './EnvValueEditor.svelte';
 	import {
 		MAKE_SECRET_MESSAGE,
@@ -43,6 +47,7 @@
 		deleteSetAction,
 		makeSecretAction,
 		mergeAction,
+		revealAction,
 		mergeError = null,
 		onAction = () => {}
 	}: {
@@ -52,6 +57,8 @@
 		deleteSetAction: string;
 		makeSecretAction: string;
 		mergeAction: string;
+		/** revealEnvKey (api-v1 v1.27 item 3): the show-once dialog posts it. */
+		revealAction: string;
 		/** An Add variables (paste) failure for this set, shown on that dialog's Paste several tab. */
 		mergeError?: string | null;
 		/** Another env action ran here (save, add, make secret, delete): the card clears "Saved env set …". */
@@ -74,6 +81,22 @@
 	function copyResult(note: string) {
 		if (note === COPY_FAILED_NOTE) statusNote = note;
 		else if (statusNote === COPY_FAILED_NOTE) statusNote = '';
+	}
+
+	// The key whose generated value the reveal dialog shows once, or null. The value itself stays in that dialog.
+	let revealKey = $state<string | null>(null);
+
+	function showOnce(key: string) {
+		revealKey = key;
+	}
+
+	// The row reloads without Reveal once; focus goes to the row's Edit button.
+	async function afterReveal(key: string) {
+		revealKey = null;
+		await invalidateAll();
+		await tick();
+		const target = document.getElementById(domId('edit', key)) ?? document.getElementById(domId('status'));
+		target?.focus();
 	}
 
 	// Collapse hides the table. It does not clear an edit in progress.
@@ -198,6 +221,7 @@
 					statusNote = `Added ${key}.`;
 					panel = { ...panel, open: true };
 				}}
+				onGenerated={showOnce}
 				onMerged={() => {
 					onAction();
 					statusNote = savedVariablesNote(set.name);
@@ -237,6 +261,7 @@
 			{/if}
 			{#each set.keys as item (`${set.name}:${item.key}`)}
 				{@const editingRow = edit?.key === item.key}
+				{@const rowActions = envRowActions(item)}
 				<Table.Row onkeydown={editingRow ? onRowKeydown(item.key) : undefined}>
 					<Table.Cell class="whitespace-normal">
 						<!-- Wraps after an underscore (<wbr>); only a part wider than the cap breaks inside. -->
@@ -290,6 +315,9 @@
 						<Table.Cell class="whitespace-normal">
 							<div class="flex flex-wrap items-center gap-1">
 								<RowAction id={domId('edit', item.key)} label="Edit {item.key}" icon={Pencil} onclick={() => startEdit(item)} />
+								{#if rowActions.revealOnce}
+									<RowAction id={domId('reveal', item.key)} label="Reveal {item.key} once" icon={Eye} onclick={() => showOnce(item.key)} />
+								{/if}
 								{#if !item.is_secret}
 									<CopyButton value={item.value ?? ''} label="Copy {item.key}" tip="Copy {item.key}" iconOnly onResult={copyResult} />
 								{/if}
@@ -336,4 +364,5 @@
 		</Table.Body>
 		</Table.Root>
 	</div>
+	<EnvRevealDialog setName={set.name} {revealKey} action={revealAction} onClose={afterReveal} />
 </div>

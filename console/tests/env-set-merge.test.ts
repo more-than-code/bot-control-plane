@@ -41,7 +41,7 @@ function decode(value: string): string {
 
 const SETS: EnvSet[] = ['app', 'web'].map((name) => ({
 	name,
-	keys: [{ key: 'LOG_LEVEL', is_secret: false, value: 'info', preview: null }],
+	keys: [{ key: 'LOG_LEVEL', is_secret: false, value: 'info', preview: null, reveal_pending: false, needs_value: false }],
 	updated_at: '2026-10-26T10:00:00Z',
 	updated_by: USER.id
 }));

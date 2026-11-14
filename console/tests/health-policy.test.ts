@@ -85,7 +85,7 @@ function entry(policy: ImageHealthPolicy | null, kind: ImageSpec['kind'] = 'serv
 }
 
 function programs(healthPolicy: boolean): HostPrograms {
-	return { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: healthPolicy, secrets: false, projects: null, project_listed: null, shared_networks: null };
+	return { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: healthPolicy, secrets: false, projects: null, project_listed: null, shared_networks: null, env_hash: false };
 }
 
 function host(id: string, name: string, healthPolicy: boolean): Host {
@@ -442,7 +442,7 @@ describe('health failure policy: deploy dialog', () => {
 		const capable = host(OTHER_HOST_ID, 'pi3', true);
 		const blocked = deployForm(entry({ on_deploy_failure: 'keep' }), [old, capable]);
 		assert.match(blocked, /pi1: This host&#39;s agent does not support health policies|pi1: This host's agent does not support health policies/);
-		assert.equal(blocked.includes('pi3: This host'), false);
+		assert.equal(blocked.includes('pi3: This host&#39;s agent does not support') || blocked.includes("pi3: This host's agent does not support"), false);
 		assert.equal(isDisabled(submitTag(blocked, 'Deploy')), true);
 
 		const fine = deployForm(entry({ on_deploy_failure: 'keep' }), [capable]);

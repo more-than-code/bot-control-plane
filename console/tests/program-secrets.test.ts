@@ -48,6 +48,7 @@ function policy(overrides: Partial<HostPrograms> = {}): HostPrograms {
 		projects: null,
 		project_listed: null,
 		shared_networks: null,
+		env_hash: false,
 		...overrides
 	};
 }
