@@ -13,7 +13,7 @@ import (
 func TestProjectServiceView(t *testing.T) {
 	w := newWorld(t)
 	owner := w.user("view-owner@ex.com", "Owner")
-	project, err := w.mem.CreateProject(context.Background(), owner.ID, "View", "viewproj", w.now)
+	project, err := w.mem.CreateProject(context.Background(), w.mem.PersonalOrg(owner.ID), owner.ID, "View", "viewproj", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestProjectServiceView(t *testing.T) {
 func TestProjectServiceStatusGoneLast(t *testing.T) {
 	w := newWorld(t)
 	owner := w.user("status-owner@ex.com", "Owner")
-	project, err := w.mem.CreateProject(context.Background(), owner.ID, "Status", "statusproj", w.now)
+	project, err := w.mem.CreateProject(context.Background(), w.mem.PersonalOrg(owner.ID), owner.ID, "Status", "statusproj", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,11 +156,11 @@ func TestProjectServiceViewFilters(t *testing.T) {
 	ctx := context.Background()
 	homeUser := w.user("view-filter-home@ex.com", "Home")
 	guestUser := w.user("view-filter-guest@ex.com", "Guest")
-	home, err := w.mem.CreateProject(ctx, homeUser.ID, "Home", "viewfilter", w.now)
+	home, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(homeUser.ID), homeUser.ID, "Home", "viewfilter", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	guest, err := w.mem.CreateProject(ctx, guestUser.ID, "Guest", "viewguest", w.now)
+	guest, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(guestUser.ID), guestUser.ID, "Guest", "viewguest", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestProjectServiceViewFilters(t *testing.T) {
 	}
 	w.mem.SetServiceProject(api.ID, guest.ID)
 	w.mem.SetServiceProject(found.ID, guest.ID)
-	if _, _, err := w.mem.PutHostShare(ctx, host.ID, guest.ID, "deploy", homeUser.ID, w.now); err != nil {
+	if _, _, err := w.share(ctx, host.ID, guest.ID, "deploy", homeUser.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	homeTok := w.token(homeUser.ID)
@@ -190,7 +190,7 @@ func TestProjectServiceViewFilters(t *testing.T) {
 	q := url.Values{}
 	q.Set("q", "api")
 	q.Set("view", "deploybot")
-	if got := itemNames(t, listView(t, w, homeTok, homeID, q)); !sameStrings(got, []string{"api", "api-old", "api-remote"}) {
+	if got := itemNames(t, listView(t, w, homeTok, homeID, q)); !sameStrings(got, []string{"api-old", "api-remote"}) {
 		t.Fatalf("q api %v", got)
 	}
 	q.Set("q", "found")
@@ -198,13 +198,13 @@ func TestProjectServiceViewFilters(t *testing.T) {
 		t.Fatalf("q found deploybot %v", got)
 	}
 	q.Set("view", "deploybot_and_discovered")
-	if got := itemNames(t, listView(t, w, homeTok, homeID, q)); !sameStrings(got, []string{"found"}) {
+	if got := itemNames(t, listView(t, w, homeTok, homeID, q)); len(got) != 0 {
 		t.Fatalf("q found with discovered %v", got)
 	}
 	q.Set("q", "api")
 	q.Set("view", "deploybot")
 	q.Set("host_id", host.ID.String())
-	if got := itemNames(t, listView(t, w, homeTok, homeID, q)); !sameStrings(got, []string{"api", "api-old"}) {
+	if got := itemNames(t, listView(t, w, homeTok, homeID, q)); !sameStrings(got, []string{"api-old"}) {
 		t.Fatalf("host_id %v", got)
 	}
 	guestQ := url.Values{}
@@ -248,7 +248,7 @@ func TestProjectServicesRevokedHost(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
 	owner := w.user("revoke-rows@ex.com", "Owner")
-	project, err := w.mem.CreateProject(ctx, owner.ID, "Revoke", "revokerows", w.now)
+	project, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Revoke", "revokerows", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,11 +352,11 @@ func TestProjectDeleteMarksHostRowsGone(t *testing.T) {
 	ctx := context.Background()
 	owner := w.user("delgone@ex.com", "Owner")
 	otherUser := w.user("delother@ex.com", "Other")
-	project, err := w.mem.CreateProject(ctx, owner.ID, "Del", "delgone", w.now)
+	project, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Del", "delgone", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := w.mem.CreateProject(ctx, otherUser.ID, "Other", "delother", w.now)
+	other, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(otherUser.ID), otherUser.ID, "Other", "delother", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,12 +391,14 @@ func TestProjectDeleteMarksHostRowsGone(t *testing.T) {
 		t.Fatalf("already %v %v", alreadyRow.GoneAt, err)
 	}
 	stragglerRow, err := w.mem.GetService(ctx, straggler.ID, w.now)
-	if err != nil || stragglerRow.GoneAt == nil || !stragglerRow.GoneAt.Equal(earlyRevoke) {
+	// v1.24 item 7: a still-present row on an early-revoked host is gone at the delete.
+	if err != nil || stragglerRow.GoneAt == nil || !stragglerRow.GoneAt.Equal(w.now) {
 		t.Fatalf("straggler %v %v", stragglerRow.GoneAt, err)
 	}
+	// api-v1 v1.24 item 7: the deleted project's services are gone on every host.
 	foreignRow, err := w.mem.GetService(ctx, foreign.ID, w.now)
-	if err != nil || foreignRow.GoneAt != nil || foreignRow.ProjectID != other.ID {
-		t.Fatalf("foreign gone %v project %s err %v", foreignRow.GoneAt, foreignRow.ProjectID, err)
+	if err != nil || foreignRow.GoneAt == nil {
+		t.Fatalf("foreign gone %v err %v", foreignRow.GoneAt, err)
 	}
 	foreignHostRow, err := w.mem.GetHost(ctx, foreignHost.ID)
 	if err != nil || foreignHostRow.RevokedAt != nil {

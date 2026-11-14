@@ -28,11 +28,25 @@ const (
 	RoleOwner  = "owner"
 	RoleAdmin  = "admin"
 	RoleViewer = "viewer"
+
+	// Org roles (api-v1 v1.24).
+	OrgOwner  = "owner"
+	OrgAdmin  = "admin"
+	OrgMember = "member"
 )
 
-// Lookup reports the caller's role in a project. member is false when the
-// user is not a member or the project does not exist.
-type Lookup func(ctx context.Context, userID, projectID uuid.UUID) (role string, member bool, err error)
+// ProjectFacts is the caller's standing in one project. MemberRole is their
+// project role ("" when not a member). OrgRole is their role in the
+// project's org ("" when not an org member). Found is false when the
+// project does not exist or is deleted.
+type ProjectFacts struct {
+	Found      bool
+	MemberRole string
+	OrgRole    string
+}
+
+// Lookup loads the caller's standing in a project.
+type Lookup func(ctx context.Context, userID, projectID uuid.UUID) (ProjectFacts, error)
 
 type ctxKey struct{}
 
@@ -66,6 +80,33 @@ func Allows(role, capability string) bool {
 	}
 }
 
+// orgAdminRole reports whether an org role manages the org.
+func orgAdminRole(role string) bool {
+	return role == OrgOwner || role == OrgAdmin
+}
+
+// AllowsProject is the v1.24 project rule (item 2): a project member's role,
+// or an org owner or admin of the project's org acting as admin. The org
+// owner also holds CapProjectWrite (rename, delete, transfer).
+func AllowsProject(f ProjectFacts, capability string) bool {
+	if !f.Found {
+		return false
+	}
+	if f.MemberRole != "" && Allows(f.MemberRole, capability) {
+		return true
+	}
+	if orgAdminRole(f.OrgRole) && Allows(RoleAdmin, capability) {
+		return true
+	}
+	return f.OrgRole == OrgOwner && capability == CapProjectWrite
+}
+
+// Reaches reports whether the caller sees the project at all: a member, or
+// an org owner or admin of its org. An org member without a project role does not.
+func Reaches(f ProjectFacts) bool {
+	return f.Found && (f.MemberRole != "" || orgAdminRole(f.OrgRole))
+}
+
 // AllCapabilities is every capability Authorize understands, for tests.
 func AllCapabilities() []string {
 	return []string{
@@ -83,7 +124,8 @@ func AllCapabilities() []string {
 
 // Authorize decides whether userID may use capability in projectID.
 // CapSession ignores projectID and succeeds for any non-nil user.
-// A non-member gets not_found. A member whose role is too low gets forbidden.
+// A caller the project does not reach (Reaches) gets not_found. One whose
+// role is too low gets forbidden.
 func Authorize(ctx context.Context, userID, projectID uuid.UUID, capability string) error {
 	if userID == uuid.Nil {
 		return &Denied{Code: "unauthorized"}
@@ -95,14 +137,14 @@ func Authorize(ctx context.Context, userID, projectID uuid.UUID, capability stri
 	if lookup == nil {
 		return errors.New("authz lookup is not configured")
 	}
-	role, member, err := lookup(ctx, userID, projectID)
+	facts, err := lookup(ctx, userID, projectID)
 	if err != nil {
 		return err
 	}
-	if !member {
+	if !Reaches(facts) {
 		return &Denied{Code: "not_found"}
 	}
-	if !Allows(role, capability) {
+	if !AllowsProject(facts, capability) {
 		return &Denied{Code: "forbidden"}
 	}
 	return nil

@@ -30,7 +30,7 @@ func TestRunMigrateIsOptIn(t *testing.T) {
 			opened = true
 			return nil, errors.New("database connection failed")
 		},
-		migrate: func(context.Context, string) error {
+		migrate: func(context.Context, string, string) error {
 			migrated = true
 			return nil
 		},
@@ -96,7 +96,7 @@ func TestRunRejectsMCPSecretMode(t *testing.T) {
 			opened = true
 			return nil, errors.New("database connection failed")
 		},
-		migrate: func(context.Context, string) error { return nil },
+		migrate: func(context.Context, string, string) error { return nil },
 		serve:   func(string, http.Handler, func()) error { return nil },
 	}
 	getenv := func(k string) string {

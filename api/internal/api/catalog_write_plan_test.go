@@ -44,36 +44,33 @@ func TestCatalogWritePlanSentences(t *testing.T) {
 	}
 
 	job := mustPlanImage(t, "web", `{"kind":"job","image":"nginx"}`, nil, nil)
-	got = catalogUpdatePlan("web", plain, job, 0)
-	want = "will update image entry web: kind: service → job; restart: unless-stopped → no; healthy_after_sec: 30 → 0; timeout_sec: 0 → 600; voids 0 host approvals"
+	got = catalogUpdatePlan("web", plain, job)
+	want = "will update image entry web: kind: service → job; restart: unless-stopped → no; healthy_after_sec: 30 → 0; timeout_sec: 0 → 600"
 	if got != want {
 		t.Fatalf("kind plan\n%s", got)
 	}
 
 	bumped := mustPlanImage(t, "web", `{"kind":"service","image":"nginx:1.27"}`, nil, nil)
-	got = catalogUpdatePlan("web", plain, bumped, 2)
-	want = "will update image entry web: image: docker.io/library/nginx:latest → docker.io/library/nginx:1.27; voids 2 host approvals"
+	got = catalogUpdatePlan("web", plain, bumped)
+	want = "will update image entry web: image: docker.io/library/nginx:latest → docker.io/library/nginx:1.27"
 	if got != want {
 		t.Fatalf("image plan\n%s", got)
 	}
 
-	if catalogUpdatePlan("web", plain, plain, 0) != "will update image entry web: voids 0 host approvals" {
-		t.Fatalf("unchanged plan %s", catalogUpdatePlan("web", plain, plain, 0))
+	if catalogUpdatePlan("web", plain, plain) != "will update image entry web: no field changes" {
+		t.Fatalf("unchanged plan %s", catalogUpdatePlan("web", plain, plain))
 	}
 
 	modeA := mustPlanImage(t, "web", `{"kind":"service","image":"nginx","env":{"MODE":"one"}}`, nil, nil)
 	modeB := mustPlanImage(t, "web", `{"kind":"service","image":"nginx","env":{"MODE":"two"}}`, nil, nil)
-	got = catalogUpdatePlan("web", modeA, modeB, 1)
-	want = "will update image entry web: env MODE: one → two; voids 1 host approval"
+	got = catalogUpdatePlan("web", modeA, modeB)
+	want = "will update image entry web: env MODE: one → two"
 	if got != want {
 		t.Fatalf("env plan\n%s", got)
 	}
 
-	if catalogDeletePlan("web", 1) != "will delete image entry web; 1 host approval and its grants are removed; running containers are not stopped" {
-		t.Fatalf("delete one %s", catalogDeletePlan("web", 1))
-	}
-	if catalogDeletePlan("web", 0) != "will delete image entry web; 0 host approvals and its grants are removed; running containers are not stopped" {
-		t.Fatalf("delete zero %s", catalogDeletePlan("web", 0))
+	if catalogDeletePlan("web") != "will delete image entry web; its grants are removed; running containers are not stopped" {
+		t.Fatalf("delete %s", catalogDeletePlan("web"))
 	}
 }
 
@@ -87,16 +84,16 @@ func TestLoggingPlan(t *testing.T) {
 	if strings.Contains(catalogCreatePlan("Proj", "web", plain), "logging") {
 		t.Fatal("plan mentioned absent logging")
 	}
-	added := catalogUpdatePlan("web", plain, img, 1)
+	added := catalogUpdatePlan("web", plain, img)
 	if !strings.Contains(added, "logging: none → max_size_mb=10 max_files=3") {
 		t.Fatalf("added plan %s", added)
 	}
-	removed := catalogUpdatePlan("web", img, plain, 1)
+	removed := catalogUpdatePlan("web", img, plain)
 	if !strings.Contains(removed, "logging: max_size_mb=10 max_files=3 → none") {
 		t.Fatalf("removed plan %s", removed)
 	}
 	next := mustPlanImage(t, "web", `{"kind":"service","image":"nginx","logging":{"max_size_mb":5,"max_files":2}}`, nil, nil)
-	changed := catalogUpdatePlan("web", img, next, 0)
+	changed := catalogUpdatePlan("web", img, next)
 	if !strings.Contains(changed, "logging: max_size_mb=10 max_files=3 → max_size_mb=5 max_files=2") {
 		t.Fatalf("changed plan %s", changed)
 	}
@@ -117,7 +114,7 @@ func TestHealthcheckPlan(t *testing.T) {
 	if strings.Contains(catalogCreatePlan("Proj", "web", plain), "healthcheck") {
 		t.Fatal("plan mentioned an absent healthcheck")
 	}
-	upd := catalogUpdatePlan("web", plain, img, 1)
+	upd := catalogUpdatePlan("web", plain, img)
 	if !strings.Contains(upd, "healthcheck: none → "+want[len("healthcheck "):]) {
 		t.Fatalf("update plan %s", upd)
 	}
@@ -152,7 +149,7 @@ func TestCatalogWritePlanQuotesControlledText(t *testing.T) {
 	}
 	assertPlanHasNoRawControl(t, create)
 	plain := mustPlanImage(t, "web", `{"kind":"service","image":"nginx"}`, nil, nil)
-	update := catalogUpdatePlan("web", plain, img, 0)
+	update := catalogUpdatePlan("web", plain, img)
 	for _, field := range []string{target, fileTarget, nasty} {
 		if !strings.Contains(update, strconv.Quote(field)) {
 			t.Fatalf("update plan missing %s\n%s", strconv.Quote(field), update)

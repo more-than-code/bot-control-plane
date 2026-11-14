@@ -39,15 +39,27 @@ var (
 	ErrTarget = errors.New("invalid target")
 )
 
-// ValidShareLevel reports whether level is a host share level.
-func ValidShareLevel(level string) bool {
+// ValidAccessLevel reports whether level is a host access level (api-v1 v1.24).
+func ValidAccessLevel(level string) bool {
 	return level == "metrics" || level == "deploy"
+}
+
+// Org roles (api-v1 v1.24). Exactly one owner per org.
+const (
+	OrgRoleOwner  = "owner"
+	OrgRoleAdmin  = "admin"
+	OrgRoleMember = "member"
+)
+
+// OrgAdmin reports whether an org role manages the org (owner or admin).
+func OrgAdmin(role string) bool {
+	return role == OrgRoleOwner || role == OrgRoleAdmin
 }
 
 // Cursor is the position of the last item returned by a list.
 // Time-ordered lists set At and ID. ID is a UUID string, or the decimal
 // audit id. Host lists set Rank, Name, and ID instead (rank 0 owned, rank 1
-// shared) and leave At zero. A nil Rank is not a host cursor.
+// shared before v1.24; always 0 since) and leave At zero. A nil Rank is not a host cursor.
 type Cursor struct {
 	At   time.Time
 	ID   string
@@ -98,6 +110,23 @@ type Session struct {
 }
 
 type Project struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+	Name  string    `json:"name"`
+	Slug  string    `json:"slug"`
+	Role  string    `json:"role"`
+	// Via is "member" when Role is the caller's project membership, or "org"
+	// when the caller reaches the project only as an org owner or admin
+	// (Role is then "admin"). Empty when the row was not loaded for a caller.
+	Via       string     `json:"via,omitempty"`
+	CreatedBy uuid.UUID  `json:"-"`
+	CreatedAt time.Time  `json:"created_at"`
+	DeletedAt *time.Time `json:"-"`
+}
+
+// Org is an organization (api-v1 v1.24). Role is the caller's org role.
+// Slug is server-side only and is never sent to agents.
+type Org struct {
 	ID        uuid.UUID  `json:"id"`
 	Name      string     `json:"name"`
 	Slug      string     `json:"slug"`
@@ -105,6 +134,24 @@ type Project struct {
 	CreatedBy uuid.UUID  `json:"-"`
 	CreatedAt time.Time  `json:"created_at"`
 	DeletedAt *time.Time `json:"-"`
+}
+
+// OrgMember is one org membership.
+type OrgMember struct {
+	UserID  uuid.UUID `json:"user_id"`
+	Email   string    `json:"email"`
+	Name    string    `json:"name"`
+	Role    string    `json:"role"`
+	AddedAt time.Time `json:"added_at"`
+}
+
+// ProjectAccess is the caller's standing in a project: their membership role
+// ("" when not a member) and their role in the project's org ("" when not an
+// org member). The project exists and is not deleted.
+type ProjectAccess struct {
+	OrgID      uuid.UUID
+	MemberRole string
+	OrgRole    string
 }
 
 type Member struct {
@@ -115,16 +162,23 @@ type Member struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// TokenGrant is the host access a join token applies at enrolment (v1.24 item 5).
+type TokenGrant struct {
+	ProjectID uuid.UUID `json:"project_id"`
+	Level     string    `json:"level"`
+}
+
 type JoinToken struct {
-	ID           uuid.UUID  `json:"id"`
-	ProjectID    uuid.UUID  `json:"-"`
-	HostNameHint *string    `json:"host_name_hint"`
-	CreatedBy    uuid.UUID  `json:"created_by"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	UsedAt       *time.Time `json:"used_at"`
-	UsedByHostID *uuid.UUID `json:"used_by_host_id"`
-	RevokedAt    *time.Time `json:"revoked_at"`
+	ID           uuid.UUID   `json:"id"`
+	OrgID        uuid.UUID   `json:"-"`
+	Grant        *TokenGrant `json:"grant"`
+	HostNameHint *string     `json:"host_name_hint"`
+	CreatedBy    uuid.UUID   `json:"created_by"`
+	CreatedAt    time.Time   `json:"created_at"`
+	ExpiresAt    time.Time   `json:"expires_at"`
+	UsedAt       *time.Time  `json:"used_at"`
+	UsedByHostID *uuid.UUID  `json:"used_by_host_id"`
+	RevokedAt    *time.Time  `json:"revoked_at"`
 }
 
 // Invite is a project membership link. The plaintext token is never stored
@@ -163,8 +217,12 @@ type InviteAccept struct {
 }
 
 type Host struct {
-	ID           uuid.UUID  `json:"id"`
-	ProjectID    uuid.UUID  `json:"project_id"`
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+	// ProjectID is the deprecated v1.24 mirror: the backfilled former owner,
+	// or for a new host the token's grant project, or null. Never used for
+	// authorization. Removed in v1.25.
+	ProjectID    *uuid.UUID `json:"project_id"`
 	Name         string     `json:"name"`
 	NodeType     string     `json:"node_type"`
 	OS           string     `json:"os"`
@@ -175,41 +233,47 @@ type Host struct {
 	LastSeenAt   *time.Time `json:"last_seen_at"`
 	EnrolledAt   time.Time  `json:"enrolled_at"`
 	RevokedAt    *time.Time `json:"revoked_at"`
-	// Relation is "owner" or "shared" on host API responses. It is empty
-	// when the row was not loaded for a project list or a caller relation.
-	Relation string `json:"relation"`
-	// ShareLevel is set when Relation is "shared". JSON null when the host
-	// is owned by the project (or the caller) being described.
+	// AccessLevel is the level of the project in whose list the host appears
+	// (metrics or deploy). Null in org-scoped views.
+	AccessLevel *string `json:"access_level"`
+	// Access is every project with access to the host. It is set only for
+	// org admins and omitted otherwise.
+	Access *[]HostAccess `json:"access,omitempty"`
+	// Relation and ShareLevel are deprecated v1.24 mirrors of AccessLevel:
+	// relation "owner" when access_level is deploy, otherwise "shared".
+	// Removed in v1.25.
+	Relation   string  `json:"relation"`
 	ShareLevel *string `json:"share_level"`
 	// Programs is the last hello programs object. Nil when the agent has
 	// not reported a policy file.
 	Programs *HostPrograms `json:"programs"`
 }
 
-// HostShare is one project a host is shared with.
-type HostShare struct {
-	HostID      uuid.UUID `json:"-"`
-	ProjectID   uuid.UUID `json:"project_id"`
-	ProjectName string    `json:"project_name"`
-	Level       string    `json:"level"`
-	CreatedBy   uuid.UUID `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at"`
+// HostAccess is one project's access to a host (api-v1 v1.24).
+type HostAccess struct {
+	HostID      uuid.UUID  `json:"-"`
+	ProjectID   uuid.UUID  `json:"project_id"`
+	ProjectName string     `json:"project_name"`
+	Level       string     `json:"level"`
+	GrantedBy   *uuid.UUID `json:"granted_by"`
+	GrantedAt   time.Time  `json:"granted_at"`
 }
 
-// HostShareAccess is one share the caller is a member of on a host.
-type HostShareAccess struct {
+// MemberAccess is one project with access to a host that the caller is a
+// member of, with the caller's role in that project.
+type MemberAccess struct {
 	ProjectID uuid.UUID
 	Level     string
 	Role      string
 }
 
-// HostFacts is the caller's membership in the host's owning project and
-// every share project they belong to. OwnerRole is empty when they are not
-// a member of the owning project. Shares is empty when they belong to none.
-// The authz package decides that an owner role wins and drops the shares.
+// HostFacts is the caller's standing on a host: their role in the host's org
+// ("" when not an org member) and every project with access to the host
+// that they are a member of. Deleted projects are left out.
 type HostFacts struct {
-	OwnerRole string
-	Shares    []HostShareAccess
+	OrgID   uuid.UUID
+	OrgRole string
+	Access  []MemberAccess
 }
 
 // EnrollInput is the host facts from an enroll frame. Name is the requested
@@ -242,12 +306,13 @@ type Service struct {
 	ContainerName *string   `json:"container_name"`
 	ImageDigest   *string   `json:"image_digest"`
 	ProcessName   *string   `json:"process_name"`
-	ProjectID     uuid.UUID `json:"project_id"`
-	DisplayName   *string   `json:"display_name"`
-	OwnerUser     *string   `json:"owner_user"`
-	CatalogEntry  *string   `json:"catalog_entry"`
-	FirstSeenAt   time.Time `json:"first_seen_at"`
-	LastSeenAt    time.Time `json:"last_seen_at"`
+	// ProjectID is nil for an org-level discovered service (api-v1 v1.24 item 6).
+	ProjectID    *uuid.UUID `json:"project_id"`
+	DisplayName  *string    `json:"display_name"`
+	OwnerUser    *string    `json:"owner_user"`
+	CatalogEntry *string    `json:"catalog_entry"`
+	FirstSeenAt  time.Time  `json:"first_seen_at"`
+	LastSeenAt   time.Time  `json:"last_seen_at"`
 	// GoneAt is when the service was missing from its host's latest
 	// complete services report. Null means that report included it.
 	GoneAt *time.Time `json:"gone_at"`
@@ -401,6 +466,7 @@ type AuditRow struct {
 	At          time.Time
 	ActorUserID *uuid.UUID
 	Via         string
+	OrgID       *uuid.UUID
 	ProjectID   *uuid.UUID
 	HostID      *uuid.UUID
 	ServiceID   *uuid.UUID
@@ -417,6 +483,7 @@ type AuditEntry struct {
 	At          time.Time       `json:"at"`
 	ActorUserID *uuid.UUID      `json:"actor_user_id"`
 	Via         string          `json:"via"`
+	OrgID       *uuid.UUID      `json:"org_id"`
 	ProjectID   *uuid.UUID      `json:"project_id"`
 	HostID      *uuid.UUID      `json:"host_id"`
 	ServiceID   *uuid.UUID      `json:"service_id"`
@@ -443,6 +510,8 @@ type Device struct {
 
 // Store is the full phase-1 persistence surface.
 type Store interface {
+	// UpsertGoogleUser creates the user on first sign-in together with a
+	// personal org that the user owns (spec-organizations D-8).
 	UpsertGoogleUser(ctx context.Context, in GoogleSignIn) (User, error)
 	GetUser(ctx context.Context, id uuid.UUID) (User, error)
 	UserByEmail(ctx context.Context, email string) (User, error)
@@ -454,18 +523,49 @@ type Store interface {
 	DeleteSession(ctx context.Context, id uuid.UUID) error
 	TouchSession(ctx context.Context, id uuid.UUID, at time.Time) error
 
-	CreateProject(ctx context.Context, ownerID uuid.UUID, name, baseSlug string, at time.Time) (Project, error)
+	// CreateOrg creates an org owned by ownerID. The slug is baseSlug, made unique.
+	CreateOrg(ctx context.Context, ownerID uuid.UUID, name, baseSlug string, at time.Time) (Org, error)
+	// GetOrg returns ErrNotFound for a missing or deleted org. Role is empty.
+	GetOrg(ctx context.Context, id uuid.UUID) (Org, error)
+	// OrgRole returns ErrNotFound when the user is not a member or the org is deleted or missing.
+	OrgRole(ctx context.Context, orgID, userID uuid.UUID) (string, error)
+	// ListUserOrgs returns the caller's orgs with their role, oldest first.
+	ListUserOrgs(ctx context.Context, userID uuid.UUID) ([]Org, error)
+	RenameOrg(ctx context.Context, id uuid.UUID, name string) (Org, error)
+	// DeleteOrg soft-deletes the org and every project in it, and revokes every
+	// host credential of the org in one transaction. It returns the host ids.
+	DeleteOrg(ctx context.Context, id uuid.UUID, at time.Time) ([]uuid.UUID, error)
+	ListOrgMembers(ctx context.Context, orgID uuid.UUID, limit int, cursor *Cursor) ([]OrgMember, *Cursor, error)
+	// AddOrgMember adds admin or member. An existing member is ErrConflict.
+	AddOrgMember(ctx context.Context, orgID, userID uuid.UUID, role string, addedBy uuid.UUID, at time.Time) (OrgMember, error)
+	// UpdateOrgMemberRole changes admin or member. The owner is ErrOwner.
+	UpdateOrgMemberRole(ctx context.Context, orgID, userID uuid.UUID, role string) (OrgMember, error)
+	// RemoveOrgMember removes a member. The owner is ErrOwner.
+	RemoveOrgMember(ctx context.Context, orgID, userID uuid.UUID) error
+	// TransferOrgOwnership makes newOwner (an org member) the owner and the old owner an admin.
+	TransferOrgOwnership(ctx context.Context, orgID, newOwner uuid.UUID) error
+
+	// CreateProject creates a project in orgID with ownerID as project owner.
+	CreateProject(ctx context.Context, orgID, ownerID uuid.UUID, name, baseSlug string, at time.Time) (Project, error)
+	// ListProjects returns the projects the user can reach: memberships (via
+	// "member") and every project of an org they own or administer (via "org",
+	// role "admin"). A membership wins over org reach.
 	ListProjects(ctx context.Context, userID uuid.UUID, limit int, cursor *Cursor) ([]Project, *Cursor, error)
 	ListAllProjects(ctx context.Context, userID uuid.UUID) ([]Project, error)
+	// ListOrgProjects is ListAllProjects limited to one org.
+	ListOrgProjects(ctx context.Context, orgID, userID uuid.UUID) ([]Project, error)
 	GetProject(ctx context.Context, id uuid.UUID) (Project, error)
 	// Role returns ErrNotFound when the user is not a member or the project is deleted or missing.
+	// It is membership only; ProjectAccess also reports the org role.
 	Role(ctx context.Context, projectID, userID uuid.UUID) (string, error)
+	// ProjectAccess returns ErrNotFound when the project is missing or deleted.
+	ProjectAccess(ctx context.Context, projectID, userID uuid.UUID) (ProjectAccess, error)
 	RenameProject(ctx context.Context, id uuid.UUID, name string) (Project, error)
-	// DeleteProject soft-deletes the project, revokes every host credential, and returns the host ids.
-	// Shares of the project and of its hosts are removed. Invites of the project are deleted.
-	// Services of the project that sit on another project's host move to that host's owner,
-	// in the same transaction.
-	DeleteProject(ctx context.Context, id uuid.UUID, at time.Time) ([]uuid.UUID, error)
+	// DeleteProject soft-deletes the project (api-v1 v1.24 item 7). It revokes
+	// no host: it deletes the project's host_access rows, revokes join tokens
+	// that grant the project, marks the project's services gone, and deletes
+	// its invites, catalog and secrets, in one transaction.
+	DeleteProject(ctx context.Context, id uuid.UUID, at time.Time) error
 
 	ListMembers(ctx context.Context, projectID uuid.UUID, limit int, cursor *Cursor) ([]Member, *Cursor, error)
 	AddMember(ctx context.Context, projectID, userID uuid.UUID, role string, addedBy uuid.UUID, at time.Time) (Member, error)
@@ -473,11 +573,19 @@ type Store interface {
 	RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error
 	TransferOwnership(ctx context.Context, projectID, newOwner uuid.UUID) error
 
-	CreateJoinToken(ctx context.Context, projectID uuid.UUID, hash []byte, hint *string, createdBy uuid.UUID, expiresAt, at time.Time) (JoinToken, error)
-	ListJoinTokens(ctx context.Context, projectID uuid.UUID, limit int, cursor *Cursor) ([]JoinToken, *Cursor, error)
-	RevokeJoinToken(ctx context.Context, projectID, tokenID uuid.UUID, at time.Time) error
+	// CreateJoinToken creates an org token. A grant whose project is not a live
+	// project of orgID is ErrNotFound.
+	CreateJoinToken(ctx context.Context, orgID uuid.UUID, hash []byte, hint *string, grant *TokenGrant, createdBy uuid.UUID, expiresAt, at time.Time) (JoinToken, error)
+	// ListJoinTokens lists the org's tokens. grantProject non-nil keeps only
+	// tokens whose grant names that project (the v1.0 project routes).
+	ListJoinTokens(ctx context.Context, orgID uuid.UUID, grantProject *uuid.UUID, limit int, cursor *Cursor) ([]JoinToken, *Cursor, error)
+	// RevokeJoinToken revokes an org token. With grantProject non-nil, a token
+	// whose grant names another project is ErrNotFound.
+	RevokeJoinToken(ctx context.Context, orgID uuid.UUID, grantProject *uuid.UUID, tokenID uuid.UUID, at time.Time) error
 	// ConsumeJoinToken marks the token used and creates the host and credential in one step.
-	// A bad, used, revoked, or expired token returns ErrUnauthorized.
+	// The host joins the token's org with a name unique in that org, and the
+	// token's grant becomes a host_access row in the same transaction.
+	// A bad, used, revoked, or expired token, or a deleted org, returns ErrUnauthorized.
 	ConsumeJoinToken(ctx context.Context, tokenHash []byte, in EnrollInput, credentialID uuid.UUID, credentialHash []byte, at time.Time) (Host, error)
 
 	CreateInvite(ctx context.Context, projectID uuid.UUID, hash []byte, role string, createdBy uuid.UUID, expiresAt, at time.Time, maxUses int) (Invite, error)
@@ -492,24 +600,25 @@ type Store interface {
 	AcceptInvite(ctx context.Context, tokenHash []byte, userID uuid.UUID, at time.Time) (InviteAccept, error)
 
 	GetHost(ctx context.Context, id uuid.UUID) (Host, error)
-	// ListHosts returns hosts owned by projectID, then hosts shared with it.
-	// Each group is ordered by name, then id. Relation and ShareLevel describe
-	// that project, not the caller. A cursor resumes by comparing
-	// (rank, name, id) with the cursor's values. It does not look the cursor
-	// host up, so a host that was unshared or renamed does not drop the rest.
+	// ListHosts returns the hosts projectID has access to, ordered by name,
+	// then id, with AccessLevel set to that project's level. A cursor resumes
+	// by comparing (name, id) with the cursor's values (Rank is always 0).
+	// It does not look the cursor host up.
 	ListHosts(ctx context.Context, projectID uuid.UUID, limit int, cursor *Cursor) ([]Host, *Cursor, error)
+	// ListOrgHosts returns every host of the org with Access filled, paged like ListHosts.
+	ListOrgHosts(ctx context.Context, orgID uuid.UUID, limit int, cursor *Cursor) ([]Host, *Cursor, error)
 	// HostFacts returns ErrNotFound when the host does not exist.
 	HostFacts(ctx context.Context, userID, hostID uuid.UUID) (HostFacts, error)
-	ListHostShares(ctx context.Context, hostID uuid.UUID) ([]HostShare, error)
-	// PutHostShare inserts or updates a share. created is true on insert.
-	// Sharing with the owning project returns ErrInvalid. A missing host or
-	// a missing or deleted project returns ErrNotFound.
-	PutHostShare(ctx context.Context, hostID, projectID uuid.UUID, level string, createdBy uuid.UUID, at time.Time) (HostShare, bool, error)
-	// DeleteHostShare removes the share. ErrConflict when that project still
-	// has services on the host, unless reassignOwner moves them to the host's
-	// owning project in the same transaction. The returned share is the row
-	// that was removed.
-	DeleteHostShare(ctx context.Context, hostID, projectID uuid.UUID, reassignOwner bool) (HostShare, error)
+	// ListHostAccess returns the host's access rows ordered by project name, then id.
+	ListHostAccess(ctx context.Context, hostID uuid.UUID) ([]HostAccess, error)
+	// PutHostAccess inserts or updates a row. created is true on insert. A
+	// missing host, or a project that is missing, deleted or not in the host's
+	// org, returns ErrNotFound.
+	PutHostAccess(ctx context.Context, hostID, projectID uuid.UUID, level string, grantedBy uuid.UUID, at time.Time) (HostAccess, bool, error)
+	// DeleteHostAccess removes the row. ErrConflict when that project still
+	// has live services on the host, unless reassignOrg moves them to the org
+	// (project_id null) in the same transaction. It returns the removed row.
+	DeleteHostAccess(ctx context.Context, hostID, projectID uuid.UUID, reassignOrg bool) (HostAccess, error)
 	RevokeHost(ctx context.Context, hostID uuid.UUID, at time.Time) error
 	TouchHost(ctx context.Context, hostID uuid.UUID, at time.Time, version, osName, arch string) error
 
@@ -563,6 +672,8 @@ type Store interface {
 
 	InsertAudit(ctx context.Context, row AuditRow) error
 	ListAudit(ctx context.Context, projectID uuid.UUID, limit int, cursor *Cursor) ([]AuditEntry, *Cursor, error)
+	// ListOrgAudit returns the rows whose org_id is orgID, newest first.
+	ListOrgAudit(ctx context.Context, orgID uuid.UUID, limit int, cursor *Cursor) ([]AuditEntry, *Cursor, error)
 
 	CreateDevice(ctx context.Context, row Device) error
 	DeviceByUserCode(ctx context.Context, code string) (Device, error)
@@ -632,19 +743,9 @@ type Store interface {
 	ListCatalogGrants(ctx context.Context, entryID uuid.UUID) ([]CatalogGrant, error)
 	ReplaceCatalogGrants(ctx context.Context, projectID uuid.UUID, name string, grants []CatalogGrant) error
 
-	// HostProjectRelation is "owner", "deploy", "metrics", or "" when the
-	// host exists and the project cannot see it. A missing host is ErrNotFound.
-	HostProjectRelation(ctx context.Context, projectID, hostID uuid.UUID) (string, error)
-	ListCatalogApprovals(ctx context.Context, hostID uuid.UUID) ([]CatalogApproval, error)
-	// ApproveCatalog records an approval for the entry's current spec.
-	// A hash that is not current is ErrConflict. A missing entry or host is ErrNotFound.
-	ApproveCatalog(ctx context.Context, hostID, entryID uuid.UUID, specHash string, approver uuid.UUID, at time.Time) (CatalogApproval, error)
-	DeleteCatalogApproval(ctx context.Context, hostID, entryID uuid.UUID) error
-	// UpsertPendingApproval stores a pending row for specHash.
-	// An approved row for that same hash is left as it is.
-	// A pending row, or an approved row for a different hash, becomes pending
-	// with requested_by = userID.
-	UpsertPendingApproval(ctx context.Context, entryID, hostID uuid.UUID, specHash string, userID uuid.UUID, at time.Time) error
+	// HostProjectAccess is the project's access level on the host, "deploy"
+	// or "metrics", or "" when it has none. A missing host is ErrNotFound.
+	HostProjectAccess(ctx context.Context, projectID, hostID uuid.UUID) (string, error)
 
 	PutConfirmation(ctx context.Context, hash []byte, c CatalogConfirmation) error
 	GetConfirmation(ctx context.Context, hash []byte) (CatalogConfirmation, error)
@@ -666,9 +767,6 @@ type Store interface {
 	// PutCatalogWriteConfirmation inserts one catalog-write plan. A duplicate token hash is ErrConflict.
 	PutCatalogWriteConfirmation(ctx context.Context, hash []byte, c CatalogWriteConfirmation) error
 	GetCatalogWriteConfirmation(ctx context.Context, hash []byte) (CatalogWriteConfirmation, error)
-	// CountEntryApprovals is the host-approval rows for the named entry, pending and approved.
-	// A missing entry is 0.
-	CountEntryApprovals(ctx context.Context, projectID uuid.UUID, name string) (int, error)
 	// CommitCatalogWrite locks the plan, re-checks the name or spec_hash, applies
 	// the write through the console create, replace, or delete path, and marks
 	// the plan used. in.Name must equal the row's entry name. For create and
@@ -708,8 +806,7 @@ type Store interface {
 	RollbackDigests(ctx context.Context, entryID, hostID uuid.UUID) ([]string, error)
 	// AutoActionTarget resolves an auto_action's project slug and entry name
 	// for one host. ErrNotFound: unknown or deleted project, no image entry of
-	// that name, or a host that is neither the project's nor shared with it
-	// at deploy level. It writes nothing.
+	// that name, or a project without deploy access to the host. It writes nothing.
 	AutoActionTarget(ctx context.Context, hostID uuid.UUID, projectSlug, entry string) (AutoTarget, error)
 	// RecordAutoAction stores one agent automatic action as a finished
 	// image_deploys row with via agent and no user (api-v1 v1.15 item 3).

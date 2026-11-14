@@ -30,10 +30,10 @@ func assertServiceNamesLive(t *testing.T, d *DB, ctx context.Context, at time.Ti
 	deployHost := enrollHostDB(t, d, ctx, deploy.ID, deployUser.ID, "deploy-host", at)
 	tieHost := enrollHostDB(t, d, ctx, deploy.ID, deployUser.ID, "deploy-tie", at)
 	metricsHost := enrollHostDB(t, d, ctx, metrics.ID, metricsUser.ID, "metrics-host", at)
-	if _, _, err := d.PutHostShare(ctx, homeHost.ID, deploy.ID, "deploy", homeUser.ID, at); err != nil {
+	if _, _, err := shareDB(t, d, ctx, homeHost.ID, deploy.ID, "deploy", homeUser.ID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := d.PutHostShare(ctx, homeHost.ID, metrics.ID, "metrics", homeUser.ID, at); err != nil {
+	if _, _, err := shareDB(t, d, ctx, homeHost.ID, metrics.ID, "metrics", homeUser.ID, at); err != nil {
 		t.Fatal(err)
 	}
 
@@ -612,7 +612,7 @@ func mustSvcUser(t *testing.T, d *DB, ctx context.Context, email string, at time
 
 func mustSvcProject(t *testing.T, d *DB, ctx context.Context, owner uuid.UUID, name, slug string, at time.Time) store.Project {
 	t.Helper()
-	project, err := d.CreateProject(ctx, owner, name, slug, at)
+	project, err := d.CreateProject(ctx, personalOrg(t, d, ctx, owner), owner, name, slug, at)
 	if err != nil {
 		t.Fatal(err)
 	}

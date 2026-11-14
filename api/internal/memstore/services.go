@@ -58,10 +58,12 @@ func (m *Mem) UpsertDiscovered(_ context.Context, hostID uuid.UUID, items []stor
 	if _, ok := m.hosts[hostID]; !ok {
 		return store.ErrNotFound
 	}
-	hostProject := m.hosts[hostID].ProjectID
 	reported := make(map[string]struct{}, len(items))
+	lookup := func(slug, entry, kind string) (uuid.UUID, bool) {
+		return m.lookupOwnerLocked(hostID, slug, entry, kind)
+	}
 	for _, item := range items {
-		name, source, projectID, catalogEntry := store.PlaceDiscovered(item, hostProject, m.lookupCatalogLocked)
+		name, source, projectID, catalogEntry := store.PlaceDiscovered(item, lookup)
 		reported[name] = struct{}{}
 		var found uuid.UUID
 		var existing store.Service
@@ -79,7 +81,7 @@ func (m *Mem) UpsertDiscovered(_ context.Context, hostID uuid.UUID, items []stor
 			m.services[id] = store.Service{
 				ID:            id,
 				HostID:        hostID,
-				ProjectID:     projectID,
+				ProjectID:     cloneID(projectID),
 				Name:          name,
 				Source:        source,
 				Kind:          item.Kind,
@@ -104,11 +106,11 @@ func (m *Mem) UpsertDiscovered(_ context.Context, hostID uuid.UUID, items []stor
 		// health checks are not written here.
 		if existing.Source != "declared" && source == "owned" {
 			existing.Source = "owned"
-			existing.ProjectID = projectID
+			existing.ProjectID = cloneID(projectID)
 			existing.CatalogEntry = cloneString(catalogEntry)
 		} else if existing.Source == "owned" && source == "discovered" {
 			existing.Source = "discovered"
-			existing.ProjectID = projectID
+			existing.ProjectID = cloneID(projectID)
 			existing.CatalogEntry = nil
 		}
 		if existing.Source != "declared" {
@@ -270,12 +272,12 @@ func (m *Mem) ListProjectServices(_ context.Context, projectID uuid.UUID, q stor
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if q.HostID != nil {
-		host, ok := m.hosts[*q.HostID]
+		_, ok := m.hosts[*q.HostID]
 		level := ""
 		if ok {
-			level = m.shareLevelLocked(*q.HostID, projectID)
+			level = m.accessLevelLocked(*q.HostID, projectID)
 		}
-		if !ok || !authz.ProjectHostReached(host.ProjectID == projectID, level) {
+		if !ok || !authz.ProjectHostReached(level) {
 			return store.ServicePage{}, store.ErrInvalid
 		}
 	}
@@ -285,8 +287,8 @@ func (m *Mem) ListProjectServices(_ context.Context, projectID uuid.UUID, q stor
 		if !ok {
 			continue
 		}
-		level := m.shareLevelLocked(host.ID, projectID)
-		if !authz.ProjectServiceVisible(host.ProjectID == projectID, level, svc.ProjectID, projectID) {
+		level := m.accessLevelLocked(host.ID, projectID)
+		if !authz.ProjectServiceVisible(level, svc.ProjectID, projectID) {
 			continue
 		}
 		if q.HostID != nil && svc.HostID != *q.HostID {
@@ -296,7 +298,7 @@ func (m *Mem) ListProjectServices(_ context.Context, projectID uuid.UUID, q stor
 			continue
 		}
 		projectName := ""
-		if p, ok := m.projects[svc.ProjectID]; ok {
+		if p, ok := m.projects[projectID]; ok {
 			projectName = p.Name
 		}
 		row := m.projectRowLocked(svc, host, projectName, now)
@@ -328,14 +330,6 @@ func (m *Mem) ListProjectServices(_ context.Context, projectID uuid.UUID, q stor
 		rows = []store.ProjectService{}
 	}
 	return store.ServicePage{Items: rows, Total: total}, nil
-}
-
-func (m *Mem) shareLevelLocked(hostID, projectID uuid.UUID) string {
-	sh, ok := m.shares[shareKey(hostID, projectID)]
-	if !ok {
-		return ""
-	}
-	return sh.Level
 }
 
 func (m *Mem) projectRowLocked(svc store.Service, host store.Host, projectName string, now time.Time) store.ProjectService {
@@ -409,10 +403,10 @@ func (m *Mem) deploybotRowLocked(svc store.Service) bool {
 	case "declared":
 		return true
 	case "owned":
-		if svc.GoneAt == nil || svc.CatalogEntry == nil {
+		if svc.GoneAt == nil || svc.CatalogEntry == nil || svc.ProjectID == nil {
 			return true
 		}
-		_, ok := m.entryByName[entryKey(svc.ProjectID, *svc.CatalogEntry)]
+		_, ok := m.entryByName[entryKey(*svc.ProjectID, *svc.CatalogEntry)]
 		return ok
 	default:
 		return false
@@ -442,6 +436,14 @@ func serviceMatches(row store.ProjectService, q string) bool {
 		}
 	}
 	return false
+}
+
+func cloneID(in *uuid.UUID) *uuid.UUID {
+	if in == nil {
+		return nil
+	}
+	v := *in
+	return &v
 }
 
 func cloneString(in *string) *string {
@@ -475,7 +477,7 @@ func (m *Mem) PutDeclared(hostID uuid.UUID, name, kind string, ports []int, at t
 	s := store.Service{
 		ID:          uuid.New(),
 		HostID:      hostID,
-		ProjectID:   m.hosts[hostID].ProjectID,
+		ProjectID:   cloneID(m.hosts[hostID].ProjectID),
 		Name:        name,
 		Source:      "declared",
 		Kind:        kind,
@@ -496,7 +498,7 @@ func (m *Mem) PutDiscovered(hostID uuid.UUID, name, kind string, ports []int, ow
 	s := store.Service{
 		ID:          uuid.New(),
 		HostID:      hostID,
-		ProjectID:   m.hosts[hostID].ProjectID,
+		ProjectID:   cloneID(m.hosts[hostID].ProjectID),
 		Name:        name,
 		Source:      "discovered",
 		Kind:        kind,
@@ -509,8 +511,8 @@ func (m *Mem) PutDiscovered(hostID uuid.UUID, name, kind string, ports []int, ow
 	return s
 }
 
-// SetServiceProject assigns a service to a project. Tests use it to place a
-// service on a sharing project. It is not part of store.Store.
+// SetServiceProject assigns a service to a project; uuid.Nil makes it
+// org-level. Tests use it to place a service. It is not part of store.Store.
 func (m *Mem) SetServiceProject(id, projectID uuid.UUID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -518,6 +520,9 @@ func (m *Mem) SetServiceProject(id, projectID uuid.UUID) {
 	if !ok {
 		return
 	}
-	s.ProjectID = projectID
+	s.ProjectID = nil
+	if projectID != uuid.Nil {
+		s.ProjectID = &projectID
+	}
 	m.services[id] = s
 }

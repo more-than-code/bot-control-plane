@@ -210,12 +210,11 @@ func TestDelegatedCatalogProgramForbidden(t *testing.T) {
 
 func TestDelegatedCatalogUpdate(t *testing.T) {
 	c := newCatalogCast(t)
-	web := createImage(t, c.w, c.console, c.sc.project.ID, "web", nginxSpec)
-	approveEntry(t, c, web)
+	_ = createImage(t, c.w, c.console, c.sc.project.ID, "web", nginxSpec)
 	status, env, _ := mustCall(t, c.w, c.tok, http.MethodPut, catalogItem(c.sc.project.ID, "web"), catalogImagePutBody(`{"kind":"service","image":"nginx:1.27"}`, "upd-1"))
 	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
 	id, plan, _ := healthPlanOf(t, env)
-	want := "will update image entry web: image: docker.io/library/nginx:latest → docker.io/library/nginx:1.27; voids 1 host approval"
+	want := "will update image entry web: image: docker.io/library/nginx:latest → docker.io/library/nginx:1.27"
 	if plan != want {
 		t.Fatalf("plan %q", plan)
 	}
@@ -224,29 +223,21 @@ func TestDelegatedCatalogUpdate(t *testing.T) {
 	if objectPayload(t, env)["command_display"] != "docker.io/library/nginx:1.27" {
 		t.Fatalf("updated %#v", objectPayload(t, env))
 	}
-	if len(listApprovals(t, c.w, c.owner.ID, c.sc.host.ID)) != 0 {
-		t.Fatal("confirm did not void the approval")
-	}
 	if auditViaForName(t, auditRows(t, c.w, c.sc.project.ID), audit.ActionCatalogUpdate, "web") != audit.ViaMCP {
 		t.Fatal("applied update was not via mcp")
 	}
 
-	edge := createImage(t, c.w, c.console, c.sc.project.ID, "edge", nginxSpec)
-	approveEntry(t, c, edge)
+	_ = createImage(t, c.w, c.console, c.sc.project.ID, "edge", nginxSpec)
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodPut, catalogItem(c.sc.project.ID, "edge"), catalogImagePutBody(nginxSpec, "upd-same"))
 	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
 	sameID, plan, _ := healthPlanOf(t, env)
-	if plan != "will update image entry edge: voids 0 host approvals" {
+	if plan != "will update image entry edge: no field changes" {
 		t.Fatalf("same plan %q", plan)
 	}
 	status, env = c.w.do(c.tok, http.MethodPost, "/v1/confirmations/"+sameID, confirmBody("upd-same"))
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if len(listApprovals(t, c.w, c.owner.ID, c.sc.host.ID)) != 1 {
-		t.Fatal("same-hash confirm voided an approval")
-	}
 
-	old := createImage(t, c.w, c.console, c.sc.project.ID, "old", nginxSpec)
-	approveEntry(t, c, old)
+	_ = createImage(t, c.w, c.console, c.sc.project.ID, "old", nginxSpec)
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodPut, catalogItem(c.sc.project.ID, "old"), catalogImagePutBody(`{"kind":"service","image":"nginx:1.27"}`, "upd-stale"))
 	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
 	staleID, _, _ := healthPlanOf(t, env)
@@ -266,14 +257,13 @@ func TestDelegatedCatalogUpdate(t *testing.T) {
 func TestDelegatedCatalogDelete(t *testing.T) {
 	c := newCatalogCast(t)
 	web := createImage(t, c.w, c.console, c.sc.project.ID, "web", nginxSpec)
-	approveEntry(t, c, web)
 	entryID, _ := web["id"].(string)
 	status, env, _ := mustCall(t, c.w, c.console, http.MethodGet, catalogItem(c.sc.project.ID, "web")+"/permissions", "")
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodDelete, catalogItem(c.sc.project.ID, "web"), confirmBody("del-1"))
 	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
 	id, plan, _ := healthPlanOf(t, env)
-	if plan != "will delete image entry web; 1 host approval and its grants are removed; running containers are not stopped" {
+	if plan != "will delete image entry web; its grants are removed; running containers are not stopped" {
 		t.Fatalf("plan %q", plan)
 	}
 	status, env = c.w.do(c.console, http.MethodGet, catalogItem(c.sc.project.ID, "web"), "")
@@ -284,9 +274,6 @@ func TestDelegatedCatalogDelete(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
 	status, env = c.w.do(c.console, http.MethodGet, catalogItem(c.sc.project.ID, "web")+"/permissions", "")
 	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
-	if len(listApprovals(t, c.w, c.owner.ID, c.sc.host.ID)) != 0 {
-		t.Fatal("delete left an approval")
-	}
 	svc, err := c.w.mem.GetService(context.Background(), c.sc.svc.ID, c.w.now)
 	if err != nil || svc.Name != "api" {
 		t.Fatalf("service %+v %v", svc, err)
@@ -324,6 +311,16 @@ func TestDelegatedCatalogConfirmBounds(t *testing.T) {
 	status, env = c.w.do(other, http.MethodPost, "/v1/confirmations/"+id, confirmBody("own-1"))
 	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
 	if err := c.w.mem.TransferOwnership(context.Background(), c.sc.project.ID, c.admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The org owner also holds project_write (v1.24 item 2): move that too.
+	if _, err := c.w.mem.AddOrgMember(context.Background(), c.sc.project.OrgID, c.admin.ID, "member", c.owner.ID, c.w.now); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.w.mem.TransferOrgOwnership(context.Background(), c.sc.project.OrgID, c.admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.w.mem.RemoveOrgMember(context.Background(), c.sc.project.OrgID, c.owner.ID); err != nil {
 		t.Fatal(err)
 	}
 	status, env = c.w.do(c.tok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("own-1"))
@@ -380,15 +377,10 @@ func TestDelegatedCatalogPlanOmitsSecrets(t *testing.T) {
 
 func TestDelegatedCatalogConsoleOnly(t *testing.T) {
 	c := newCatalogCast(t)
-	web := createImage(t, c.w, c.console, c.sc.project.ID, "web", nginxSpec)
-	entryID, _ := web["id"].(string)
+	createImage(t, c.w, c.console, c.sc.project.ID, "web", nginxSpec)
 	project := c.sc.project.ID.String()
-	host := c.sc.host.ID.String()
+	_ = c.sc.host.ID.String()
 	status, env, _ := mustCall(t, c.w, c.tok, http.MethodPut, catalogItem(c.sc.project.ID, "web")+"/permissions", `{"grants":[]}`)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
-	status, env, _ = mustCall(t, c.w, c.tok, http.MethodPost, "/v1/hosts/"+host+"/catalog-approvals", `{"entry_id":"`+entryID+`","spec_hash":"`+web["spec_hash"].(string)+`"}`)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
-	status, env, _ = mustCall(t, c.w, c.tok, http.MethodDelete, "/v1/hosts/"+host+"/catalog-approvals/"+entryID, "")
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodPut, "/v1/projects/"+project+"/env-sets/svc", `{"dotenv":"TOKEN=super-secret-value-zz"}`)
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
@@ -406,18 +398,11 @@ func TestDelegatedCatalogConsoleOnly(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodGet, catalogItem(c.sc.project.ID, "web")+"/permissions", "")
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	status, env, _ = mustCall(t, c.w, c.tok, http.MethodGet, "/v1/hosts/"+host+"/catalog-approvals", "")
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	outsider := tokenKind(t, c.w, c.extra.ID, store.KindDelegated)
 	status, env, _ = mustCall(t, c.w, outsider, http.MethodPut, catalogItem(c.sc.project.ID, "web")+"/permissions", `{"grants":[]}`)
 	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
-	if len(listApprovals(t, c.w, c.owner.ID, c.sc.host.ID)) != 0 {
-		t.Fatal("forbidden approval wrote a row")
-	}
 	rows := auditRows(t, c.w, c.sc.project.ID)
 	requireDelegatedDenial(t, rows, audit.ActionCatalogPermissions, 1)
-	requireDelegatedDenial(t, rows, audit.ActionCatalogApprove, 1)
-	requireDelegatedDenial(t, rows, audit.ActionCatalogApprovalRevoke, 1)
 	requireDelegatedDenial(t, rows, audit.ActionEnvSetReplace, 1)
 	requireDelegatedDenial(t, rows, audit.ActionEnvSetDelete, 1)
 	requireDelegatedDenial(t, rows, audit.ActionEnvSetList, 1)
@@ -599,19 +584,6 @@ func createImagePut(t *testing.T, c catalogCast, name, spec string) map[string]a
 	status, env, _ := mustCall(t, c.w, c.console, http.MethodPut, catalogItem(c.sc.project.ID, name), catalogImagePutBody(spec, ""))
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	return objectPayload(t, env)
-}
-
-func approveEntry(t *testing.T, c catalogCast, entry map[string]any) {
-	t.Helper()
-	id, _ := entry["id"].(string)
-	hash, _ := entry["spec_hash"].(string)
-	eid, err := uuid.Parse(id)
-	if err != nil || hash == "" {
-		t.Fatalf("entry id %q hash %q", id, hash)
-	}
-	if _, err := c.w.mem.ApproveCatalog(context.Background(), c.sc.host.ID, eid, hash, c.owner.ID, c.w.now); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func catalogNameCount(t *testing.T, c catalogCast, name string) int {

@@ -19,7 +19,7 @@ func TestImageRehashVoidsApproval(t *testing.T) {
 	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	owner := catalogUser(t, m, "image-owner")
 	home := catalogProject(t, m, owner.ID, "Home", "home", at)
-	host := catalogHost(t, m, home, owner.ID, "pi", at)
+	_ = catalogHost(t, m, home, owner.ID, "pi", at)
 	box, err := seal.New(bytes.Repeat([]byte{9}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -44,15 +44,8 @@ func TestImageRehashVoidsApproval(t *testing.T) {
 	if !grantHas(grants, "role:admin", admin...) || !grantHas(grants, "role:viewer", viewer...) {
 		t.Fatalf("grants %#v", grants)
 	}
-	if _, err := m.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := m.PutEnvSet(ctx, home.ID, "svc", []store.EnvSecret{sealKey(t, box, home.ID.String(), "svc", "A", "one")}, owner.ID, at, true); err != nil {
 		t.Fatal(err)
-	}
-	kept, err := m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || len(kept) != 1 || kept[0].Status != "approved" || kept[0].SpecHash != hash {
-		t.Fatalf("value change voided approval %#v %v", kept, err)
 	}
 	got, err := m.GetCatalogEntry(ctx, home.ID, "web")
 	if err != nil || got.SpecHash != hash {
@@ -68,13 +61,6 @@ func TestImageRehashVoidsApproval(t *testing.T) {
 	if err != nil || next.SpecHash == hash {
 		t.Fatalf("added key left hash %s", next.SpecHash)
 	}
-	left, err := m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || len(left) != 0 {
-		t.Fatalf("approvals %#v %v", left, err)
-	}
-	if _, err := m.ApproveCatalog(ctx, host.ID, entry.ID, next.SpecHash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := m.PutEnvSet(ctx, home.ID, "svc", []store.EnvSecret{
 		sealKey(t, box, home.ID.String(), "svc", "B", "other"),
 		sealKey(t, box, home.ID.String(), "svc", "A", "other"),
@@ -82,9 +68,8 @@ func TestImageRehashVoidsApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, err := m.GetCatalogEntry(ctx, home.ID, "web")
-	kept, err2 := m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || err2 != nil || again.SpecHash != next.SpecHash || len(kept) != 1 || kept[0].Status != "approved" {
-		t.Fatalf("value rewrite hash %s approvals %#v %v %v", again.SpecHash, kept, err, err2)
+	if err != nil || again.SpecHash != next.SpecHash {
+		t.Fatalf("value rewrite hash %s %v", again.SpecHash, err)
 	}
 	view, err := m.GetEnvSet(ctx, home.ID, "svc")
 	if err != nil || len(view.Keys) != 2 || view.Keys[0].Value != nil || view.Keys[1].Value != nil {
@@ -98,7 +83,7 @@ func TestEnvReplaceKeepsWave2aHash(t *testing.T) {
 	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	owner := catalogUser(t, m, "image-2a")
 	home := catalogProject(t, m, owner.ID, "Home", "home", at)
-	host := catalogHost(t, m, home, owner.ID, "pi", at)
+	_ = catalogHost(t, m, home, owner.ID, "pi", at)
 	box, err := seal.New(bytes.Repeat([]byte{3}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -112,23 +97,19 @@ func TestEnvReplaceKeepsWave2aHash(t *testing.T) {
 	if bytes.Contains(raw, []byte(`"files"`)) {
 		t.Fatalf("2a spec %s", raw)
 	}
-	entry, err := m.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+	_, err = m.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "web", Kind: "image", ImageRaw: raw,
 		SpecHash: hash, CommandDisplay: img.Image, Actor: owner.ID, At: at,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := m.PutEnvSet(ctx, home.ID, "svc", []store.EnvSecret{sealKey(t, box, home.ID.String(), "svc", "A", "other")}, owner.ID, at, true); err != nil {
 		t.Fatal(err)
 	}
 	got, err := m.GetCatalogEntry(ctx, home.ID, "web")
-	kept, err2 := m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || err2 != nil || got.SpecHash != hash || len(kept) != 1 || kept[0].Status != "approved" {
-		t.Fatalf("hash %s approvals %#v %v %v", got.SpecHash, kept, err, err2)
+	if err != nil || got.SpecHash != hash {
+		t.Fatalf("hash %s %v", got.SpecHash, err)
 	}
 }
 
@@ -338,7 +319,7 @@ func TestEnvKeyUpsertDelete(t *testing.T) {
 	at := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
 	owner := catalogUser(t, m, "env-key")
 	home := catalogProject(t, m, owner.ID, "Home", "home", at)
-	host := catalogHost(t, m, home, owner.ID, "pi", at)
+	_ = catalogHost(t, m, home, owner.ID, "pi", at)
 	box, err := seal.New(bytes.Repeat([]byte{4}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -365,14 +346,11 @@ func TestEnvKeyUpsertDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := catalog.ImageHash(img, map[string]string{"svc": catalog.EnvKeyDigest([]string{"NOTE", "TOKEN"})})
-	entry, err := m.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+	_, err = m.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "web", Kind: "image", ImageRaw: []byte(catalog.SpecJSON(img)),
 		SpecHash: hash, CommandDisplay: img.Image, Actor: owner.ID, At: at,
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	before, err := m.ListEnvMaterial(ctx, home.ID, "svc")
@@ -391,10 +369,9 @@ func TestEnvKeyUpsertDelete(t *testing.T) {
 		t.Fatalf("value %#v %v %v", stored, created, err)
 	}
 	got, err := m.GetCatalogEntry(ctx, home.ID, "web")
-	kept, err2 := m.ListCatalogApprovals(ctx, host.ID)
 	view, err3 := m.GetEnvSet(ctx, home.ID, "svc")
-	if err != nil || err2 != nil || err3 != nil || got.SpecHash != hash || len(kept) != 1 || !view.UpdatedAt.Equal(at.Add(time.Minute)) {
-		t.Fatalf("value-only hash %s approvals %d at %s %v %v", got.SpecHash, len(kept), view.UpdatedAt, err, err2)
+	if err != nil || err3 != nil || got.SpecHash != hash || !view.UpdatedAt.Equal(at.Add(time.Minute)) {
+		t.Fatalf("value-only hash %s at %s %v %v", got.SpecHash, view.UpdatedAt, err, err3)
 	}
 	mats, err := m.ListEnvMaterial(ctx, home.ID, "svc")
 	if err != nil {
@@ -458,20 +435,15 @@ func TestEnvKeyUpsertDelete(t *testing.T) {
 		t.Fatalf("add %#v %v %v", stored, created, err)
 	}
 	got, err = m.GetCatalogEntry(ctx, home.ID, "web")
-	kept, err2 = m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || err2 != nil || got.SpecHash == hash || len(kept) != 0 {
-		t.Fatalf("add hash %s approvals %#v %v", got.SpecHash, kept, err)
-	}
-	if _, err := m.ApproveCatalog(ctx, host.ID, entry.ID, got.SpecHash, owner.ID, at); err != nil {
-		t.Fatal(err)
+	if err != nil || got.SpecHash == hash {
+		t.Fatalf("add hash %s %v", got.SpecHash, err)
 	}
 	if err := m.DeleteEnvKey(ctx, home.ID, "svc", "EXTRA", owner.ID, at.Add(5*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	got, err = m.GetCatalogEntry(ctx, home.ID, "web")
-	kept, err2 = m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || err2 != nil || got.SpecHash != hash || len(kept) != 0 {
-		t.Fatalf("delete hash %s approvals %#v %v", got.SpecHash, kept, err)
+	if err != nil || got.SpecHash != hash {
+		t.Fatalf("delete hash %s %v", got.SpecHash, err)
 	}
 	if err := m.DeleteEnvKey(ctx, home.ID, "svc", "GONE", owner.ID, at); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing key %v", err)

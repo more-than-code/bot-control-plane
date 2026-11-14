@@ -22,7 +22,7 @@ func autoFixture(t *testing.T) (*Mem, store.User, store.CatalogEntry, store.Host
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := m.CreateProject(ctx, user.ID, "P", "p", at)
+	project, err := m.CreateProject(ctx, m.PersonalOrg(user.ID), user.ID, "P", "p", at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func autoFixture(t *testing.T) (*Mem, store.User, store.CatalogEntry, store.Host
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.CreateJoinToken(ctx, project.ID, joinHash, nil, user.ID, at.Add(time.Hour), at); err != nil {
+	if _, err := m.CreateJoinToken(ctx, project.OrgID, joinHash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, user.ID, at.Add(time.Hour), at); err != nil {
 		t.Fatal(err)
 	}
 	_, credHash, err := secret.NewToken()

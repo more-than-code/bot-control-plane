@@ -109,7 +109,7 @@ func (s *Server) handleCatalogDeploys(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "bad_request", "kind must be image")
 		return
 	}
-	role, err := s.Store.Role(r.Context(), projectID, p.User.ID)
+	role, err := s.callerRole(r.Context(), projectID, p.User.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -152,7 +152,7 @@ func (s *Server) imageMutate(w http.ResponseWriter, r *http.Request, action stri
 	if !ok {
 		return
 	}
-	role, err := s.Store.Role(r.Context(), projectID, p.User.ID)
+	role, err := s.callerRole(r.Context(), projectID, p.User.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -173,24 +173,9 @@ func (s *Server) imageMutate(w http.ResponseWriter, r *http.Request, action stri
 		writeCode(w, "bad_request", "invalid digest")
 		return
 	}
-	host, rel, ok := s.programHost(w, r, p, projectID, body.HostID, entry, action, true)
+	host, ok := s.programHost(w, r, p, projectID, body.HostID, entry, action, true)
 	if !ok {
 		return
-	}
-	if rel == "deploy" {
-		approved, err := s.approvalCurrent(r.Context(), entry, host.ID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if !approved {
-			if err := s.Store.UpsertPendingApproval(r.Context(), entry.ID, host.ID, entry.SpecHash, p.User.ID, s.now()); err != nil {
-				s.fail(w, err)
-				return
-			}
-			s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "forbidden", reasonWaiting)
-			return
-		}
 	}
 	if !containersReady(host) {
 		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "bad_request", reasonNoContainers)
@@ -301,24 +286,9 @@ func (s *Server) finishImageShort(w http.ResponseWriter, r *http.Request, p prin
 }
 
 func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principal, c store.CatalogConfirmation, entry store.CatalogEntry) {
-	host, rel, ok := s.programHost(w, r, p, c.ProjectID, c.HostID, entry, c.Action, true)
+	host, ok := s.programHost(w, r, p, c.ProjectID, c.HostID, entry, c.Action, true)
 	if !ok {
 		return
-	}
-	if rel == "deploy" {
-		approved, err := s.approvalCurrent(r.Context(), entry, host.ID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if !approved {
-			if err := s.Store.UpsertPendingApproval(r.Context(), entry.ID, host.ID, entry.SpecHash, p.User.ID, s.now()); err != nil {
-				s.fail(w, err)
-				return
-			}
-			s.imageDeny(w, r, p, c.ProjectID, host.ID, host.Name, entry.Name, c.Action, "forbidden", reasonWaiting)
-			return
-		}
 	}
 	if !containersReady(host) {
 		s.imageDeny(w, r, p, c.ProjectID, host.ID, host.Name, entry.Name, c.Action, "bad_request", reasonNoContainers)

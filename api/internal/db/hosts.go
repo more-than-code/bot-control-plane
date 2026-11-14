@@ -11,44 +11,60 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-func (d *DB) CreateJoinToken(ctx context.Context, projectID uuid.UUID, hash []byte, hint *string, createdBy uuid.UUID, expiresAt, at time.Time) (store.JoinToken, error) {
-	id := uuid.New()
-	tok, err := scanJoin(d.pool.QueryRow(ctx, `
-INSERT INTO app.join_tokens (
-    id, project_id, token_hash, host_name_hint, created_by, created_at, expires_at
-)
-SELECT $1::uuid, p.id, $2, $3, $4::uuid, $5, $6
-FROM app.projects p
-WHERE p.id = $7::uuid AND p.deleted_at IS NULL
-RETURNING id::text, project_id::text, host_name_hint, created_by::text, created_at, expires_at,
-          used_at, used_by_host_id::text, revoked_at
-`, id.String(), hash, optString(hint), createdBy.String(), at, expiresAt, projectID.String()))
-	if err != nil {
-		return store.JoinToken{}, err
+const joinCols = `id::text, org_id::text, grant_project_id::text, grant_level, host_name_hint,
+       created_by::text, created_at, expires_at, used_at, used_by_host_id::text, revoked_at`
+
+func (d *DB) CreateJoinToken(ctx context.Context, orgID uuid.UUID, hash []byte, hint *string, grant *store.TokenGrant, createdBy uuid.UUID, expiresAt, at time.Time) (store.JoinToken, error) {
+	var grantProject, grantLevel any
+	if grant != nil {
+		if !store.ValidAccessLevel(grant.Level) {
+			return store.JoinToken{}, store.ErrInvalid
+		}
+		grantProject, grantLevel = grant.ProjectID.String(), grant.Level
 	}
-	return tok, nil
+	// project_id mirrors the grant for one release, so v0.2.29 still reads
+	// the row after the 0015 down script.
+	return scanJoin(d.pool.QueryRow(ctx, `
+INSERT INTO app.join_tokens (
+    id, org_id, project_id, grant_project_id, grant_level, token_hash, host_name_hint,
+    created_by, created_at, expires_at
+)
+SELECT $1::uuid, o.id, CAST($2 AS uuid), CAST($2 AS uuid), $3, $4, $5, $6::uuid, $7, $8
+FROM app.orgs o
+WHERE o.id = $9::uuid AND o.deleted_at IS NULL
+  AND (
+    CAST($2 AS uuid) IS NULL
+    OR EXISTS (
+        SELECT 1 FROM app.projects p
+        WHERE p.id = CAST($2 AS uuid) AND p.org_id = o.id AND p.deleted_at IS NULL
+    )
+  )
+RETURNING `+joinCols,
+		uuid.New().String(), grantProject, grantLevel, hash, optString(hint), createdBy.String(), at, expiresAt, orgID.String()))
 }
 
-func (d *DB) ListJoinTokens(ctx context.Context, projectID uuid.UUID, limit int, cursor *store.Cursor) ([]store.JoinToken, *store.Cursor, error) {
+func (d *DB) ListJoinTokens(ctx context.Context, orgID uuid.UUID, grantProject *uuid.UUID, limit int, cursor *store.Cursor) ([]store.JoinToken, *store.Cursor, error) {
 	lim := pageLimit(limit)
-	var atArg any
-	var idArg any
+	var atArg, idArg, projectArg any
 	if cursor != nil {
 		atArg = cursor.At
 		idArg = cursor.ID
 	}
+	if grantProject != nil {
+		projectArg = grantProject.String()
+	}
 	rows, err := d.pool.Query(ctx, `
-SELECT id::text, project_id::text, host_name_hint, created_by::text, created_at, expires_at,
-       used_at, used_by_host_id::text, revoked_at
+SELECT `+joinCols+`
 FROM app.join_tokens
-WHERE project_id = $1::uuid
+WHERE org_id = $1::uuid
+  AND (CAST($5 AS uuid) IS NULL OR grant_project_id = CAST($5 AS uuid))
   AND (
     CAST($2 AS timestamptz) IS NULL
     OR (created_at, id) > (CAST($2 AS timestamptz), CAST($3 AS uuid))
   )
 ORDER BY created_at ASC, id ASC
 LIMIT $4
-`, projectID.String(), atArg, idArg, lim+1)
+`, orgID.String(), atArg, idArg, lim+1, projectArg)
 	if err != nil {
 		return nil, nil, mapErr(err)
 	}
@@ -67,12 +83,17 @@ LIMIT $4
 	return cutPage(items, lim, func(t store.JoinToken) time.Time { return t.CreatedAt }, func(t store.JoinToken) string { return t.ID.String() })
 }
 
-func (d *DB) RevokeJoinToken(ctx context.Context, projectID, tokenID uuid.UUID, at time.Time) error {
+func (d *DB) RevokeJoinToken(ctx context.Context, orgID uuid.UUID, grantProject *uuid.UUID, tokenID uuid.UUID, at time.Time) error {
+	var projectArg any
+	if grantProject != nil {
+		projectArg = grantProject.String()
+	}
 	tag, err := d.pool.Exec(ctx, `
 UPDATE app.join_tokens
 SET revoked_at = COALESCE(revoked_at, $3)
-WHERE id = $2::uuid AND project_id = $1::uuid
-`, projectID.String(), tokenID.String(), at)
+WHERE id = $2::uuid AND org_id = $1::uuid
+  AND (CAST($4 AS uuid) IS NULL OR grant_project_id = CAST($4 AS uuid))
+`, orgID.String(), tokenID.String(), at, projectArg)
 	if err != nil {
 		return mapErr(err)
 	}
@@ -90,14 +111,15 @@ func (d *DB) ConsumeJoinToken(ctx context.Context, tokenHash []byte, in store.En
 	defer tx.Rollback(ctx)
 
 	var tok store.JoinToken
-	var idText, projectText string
+	var idText, orgText string
+	var grantText, grantLevel *string
 	var stored []byte
 	err = tx.QueryRow(ctx, `
-SELECT id::text, project_id::text, token_hash, used_at, revoked_at, expires_at
+SELECT id::text, org_id::text, grant_project_id::text, grant_level, token_hash, used_at, revoked_at, expires_at, created_by::text
 FROM app.join_tokens
 WHERE token_hash = $1
 FOR UPDATE
-`, tokenHash).Scan(&idText, &projectText, &stored, &tok.UsedAt, &tok.RevokedAt, &tok.ExpiresAt)
+`, tokenHash).Scan(&idText, &orgText, &grantText, &grantLevel, &stored, &tok.UsedAt, &tok.RevokedAt, &tok.ExpiresAt, new(string))
 	if errors.Is(err, pgx.ErrNoRows) {
 		secret.Equal(tokenHash, missHash)
 		return store.Host{}, store.ErrUnauthorized
@@ -111,16 +133,38 @@ FOR UPDATE
 	if tok.ID, err = parseID(idText); err != nil {
 		return store.Host{}, err
 	}
-	if tok.ProjectID, err = parseID(projectText); err != nil {
+	if tok.OrgID, err = parseID(orgText); err != nil {
 		return store.Host{}, err
 	}
 	var deleted *time.Time
-	err = tx.QueryRow(ctx, `SELECT deleted_at FROM app.projects WHERE id = $1::uuid`, tok.ProjectID.String()).Scan(&deleted)
+	err = tx.QueryRow(ctx, `SELECT deleted_at FROM app.orgs WHERE id = $1::uuid`, tok.OrgID.String()).Scan(&deleted)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && deleted != nil) {
 		return store.Host{}, store.ErrUnauthorized
 	}
 	if err != nil {
 		return store.Host{}, mapErr(err)
+	}
+	// A grant whose project has since been deleted is dropped; the host
+	// still joins the org.
+	var grant *store.TokenGrant
+	if grantText != nil && grantLevel != nil {
+		var live bool
+		if err := tx.QueryRow(ctx, `
+SELECT EXISTS (SELECT 1 FROM app.projects WHERE id = $1::uuid AND org_id = $2::uuid AND deleted_at IS NULL)
+`, *grantText, tok.OrgID.String()).Scan(&live); err != nil {
+			return store.Host{}, mapErr(err)
+		}
+		if live {
+			pid, err := parseID(*grantText)
+			if err != nil {
+				return store.Host{}, err
+			}
+			grant = &store.TokenGrant{ProjectID: pid, Level: *grantLevel}
+		}
+	}
+	var projectArg any
+	if grant != nil {
+		projectArg = grant.ProjectID.String()
 	}
 
 	var takenErr error
@@ -130,8 +174,8 @@ FOR UPDATE
 		}
 		var exists bool
 		qerr := tx.QueryRow(ctx, `
-SELECT EXISTS (SELECT 1 FROM app.hosts WHERE project_id = $1::uuid AND name = $2)
-`, tok.ProjectID.String(), candidate).Scan(&exists)
+SELECT EXISTS (SELECT 1 FROM app.hosts WHERE org_id = $1::uuid AND name = $2)
+`, tok.OrgID.String(), candidate).Scan(&exists)
 		if qerr != nil {
 			takenErr = qerr
 			return true
@@ -153,9 +197,9 @@ SELECT EXISTS (SELECT 1 FROM app.hosts WHERE project_id = $1::uuid AND name = $2
 	for {
 		_, err = tx.Exec(ctx, `
 INSERT INTO app.hosts (
-    id, project_id, name, node_type, os, arch, always_on, agent_version, last_seen_at, enrolled_at
-) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $9)
-`, hostID.String(), tok.ProjectID.String(), name, in.NodeType, in.OS, in.Arch, in.AlwaysOn, in.AgentVersion, at)
+    id, org_id, project_id, name, node_type, os, arch, always_on, agent_version, last_seen_at, enrolled_at
+) VALUES ($1::uuid, $2::uuid, CAST($3 AS uuid), $4, $5, $6, $7, $8, $9, $10, $10)
+`, hostID.String(), tok.OrgID.String(), projectArg, name, in.NodeType, in.OS, in.Arch, in.AlwaysOn, in.AgentVersion, at)
 		if err == nil {
 			break
 		}
@@ -170,6 +214,15 @@ INSERT INTO app.hosts (
 		}
 		name = store.WithSuffix(in.Name, n, 63)
 		n++
+	}
+	if grant != nil {
+		if err := exec(ctx, tx, `
+INSERT INTO app.host_access (host_id, project_id, level, granted_by, granted_at)
+SELECT $1::uuid, $2::uuid, $3, t.created_by, $4
+FROM app.join_tokens t WHERE t.id = $5::uuid
+`, hostID.String(), grant.ProjectID.String(), grant.Level, at, tok.ID.String()); err != nil {
+			return store.Host{}, mapErr(err)
+		}
 	}
 	if err := exec(ctx, tx, `
 INSERT INTO app.agent_credentials (id, host_id, credential_hash, created_at)
@@ -188,9 +241,9 @@ WHERE id = $1::uuid
 		return store.Host{}, mapErr(err)
 	}
 	seen := at
-	return store.Host{
+	host := store.Host{
 		ID:           hostID,
-		ProjectID:    tok.ProjectID,
+		OrgID:        tok.OrgID,
 		Name:         name,
 		NodeType:     in.NodeType,
 		OS:           in.OS,
@@ -199,19 +252,57 @@ WHERE id = $1::uuid
 		AgentVersion: in.AgentVersion,
 		LastSeenAt:   &seen,
 		EnrolledAt:   at,
-	}, nil
+	}
+	if grant != nil {
+		pid := grant.ProjectID
+		host.ProjectID = &pid
+	}
+	return host, nil
 }
+
+const hostCols = `h.id::text, h.org_id::text, h.project_id::text, h.name, h.node_type, h.os, h.arch,
+       h.always_on, h.agent_version, h.last_seen_at, h.enrolled_at, h.revoked_at, h.programs`
 
 func (d *DB) GetHost(ctx context.Context, id uuid.UUID) (store.Host, error) {
 	return scanHost(d.pool.QueryRow(ctx, `
-SELECT id::text, project_id::text, name, node_type, os, arch, always_on, agent_version,
-       last_seen_at, enrolled_at, revoked_at, programs
-FROM app.hosts
-WHERE id = $1::uuid
+SELECT `+hostCols+`
+FROM app.hosts h
+WHERE h.id = $1::uuid
 `, id.String()))
 }
 
+// ListHosts is the hosts projectID has access to, by name (byte order,
+// matching memstore), then id. Resume compares (name, id) with the cursor,
+// written out with COLLATE "C" so it cannot fall back to the database
+// locale. An old rank-1 cursor (shared hosts before v1.24) is past the end.
 func (d *DB) ListHosts(ctx context.Context, projectID uuid.UUID, limit int, cursor *store.Cursor) ([]store.Host, *store.Cursor, error) {
+	return d.listHosts(ctx, `JOIN app.host_access a ON a.host_id = h.id AND a.project_id = $1::uuid`, `a.level`, projectID, limit, cursor)
+}
+
+func (d *DB) ListOrgHosts(ctx context.Context, orgID uuid.UUID, limit int, cursor *store.Cursor) ([]store.Host, *store.Cursor, error) {
+	var deleted *time.Time
+	err := d.pool.QueryRow(ctx, `SELECT deleted_at FROM app.orgs WHERE id = $1::uuid`, orgID.String()).Scan(&deleted)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && deleted != nil) {
+		return nil, nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, nil, mapErr(err)
+	}
+	items, next, err := d.listHosts(ctx, `JOIN app.orgs o ON o.id = h.org_id AND o.id = $1::uuid`, `NULL::text`, orgID, limit, cursor)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range items {
+		access, err := d.ListHostAccess(ctx, items[i].ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		items[i].Access = &access
+	}
+	return items, next, nil
+}
+
+func (d *DB) listHosts(ctx context.Context, join, level string, id uuid.UUID, limit int, cursor *store.Cursor) ([]store.Host, *store.Cursor, error) {
 	lim := pageLimit(limit)
 	var rankArg, nameArg, idArg any
 	if cursor != nil && cursor.Rank != nil {
@@ -219,46 +310,23 @@ func (d *DB) ListHosts(ctx context.Context, projectID uuid.UUID, limit int, curs
 		nameArg = cursor.Name
 		idArg = cursor.ID
 	}
-	// Owned hosts (rank 0) come before shares (rank 1). Each group is name, id.
-	// Name uses COLLATE "C" (byte order), matching memstore. Resume is the
-	// same (rel_rank, name, id) comparison, with that collation on the name,
-	// written out so the cursor predicate cannot fall back to the database
-	// locale. A host that is no longer visible does not make it fail.
 	rows, err := d.pool.Query(ctx, `
-WITH visible AS (
-    SELECT h.id, h.project_id, h.name, h.node_type, h.os, h.arch, h.always_on,
-           h.agent_version, h.last_seen_at, h.enrolled_at, h.revoked_at, h.programs,
-           0 AS rel_rank, NULL::text AS share_level
-    FROM app.hosts h
-    WHERE h.project_id = $1::uuid
-    UNION ALL
-    SELECT h.id, h.project_id, h.name, h.node_type, h.os, h.arch, h.always_on,
-           h.agent_version, h.last_seen_at, h.enrolled_at, h.revoked_at, h.programs,
-           1 AS rel_rank, s.level AS share_level
-    FROM app.host_shares s
-    JOIN app.hosts h ON h.id = s.host_id
-    WHERE s.project_id = $1::uuid
-      AND h.project_id <> $1::uuid
-)
-SELECT id::text, project_id::text, name, node_type, os, arch, always_on, agent_version,
-       last_seen_at, enrolled_at, revoked_at, programs, rel_rank, share_level
-FROM visible v
+SELECT `+hostCols+`, `+level+`
+FROM app.hosts h
+`+join+`
 WHERE (
     CAST($2 AS int) IS NULL
-    OR v.rel_rank > CAST($2 AS int)
+    OR CAST($2 AS int) < 0
+    OR (CAST($2 AS int) = 0 AND (h.name COLLATE "C") > (CAST($3 AS text) COLLATE "C"))
     OR (
-        v.rel_rank = CAST($2 AS int)
-        AND (v.name COLLATE "C") > (CAST($3 AS text) COLLATE "C")
-    )
-    OR (
-        v.rel_rank = CAST($2 AS int)
-        AND (v.name COLLATE "C") = (CAST($3 AS text) COLLATE "C")
-        AND v.id > CAST($4 AS uuid)
+        CAST($2 AS int) = 0
+        AND (h.name COLLATE "C") = (CAST($3 AS text) COLLATE "C")
+        AND h.id > CAST($4 AS uuid)
     )
 )
-ORDER BY v.rel_rank ASC, v.name COLLATE "C" ASC, v.id ASC
+ORDER BY h.name COLLATE "C" ASC, h.id ASC
 LIMIT $5
-`, projectID.String(), rankArg, nameArg, idArg, lim+1)
+`, id.String(), rankArg, nameArg, idArg, lim+1)
 	if err != nil {
 		return nil, nil, mapErr(err)
 	}
@@ -277,46 +345,19 @@ LIMIT $5
 	if len(items) > lim {
 		items = items[:lim]
 		last := items[len(items)-1]
-		rank := 1
-		if last.Relation == "owner" {
-			rank = 0
-		}
+		rank := 0
 		return items, &store.Cursor{Rank: &rank, Name: last.Name, ID: last.ID.String()}, nil
-	}
-	if items == nil {
-		items = []store.Host{}
 	}
 	return items, nil, nil
 }
 
 func scanListedHost(row pgx.Row) (store.Host, error) {
-	var h store.Host
-	var id, projectID string
-	var programs []byte
-	var rank int
 	var level *string
-	if err := row.Scan(
-		&id, &projectID, &h.Name, &h.NodeType, &h.OS, &h.Arch, &h.AlwaysOn,
-		&h.AgentVersion, &h.LastSeenAt, &h.EnrolledAt, &h.RevokedAt, &programs, &rank, &level,
-	); err != nil {
-		return store.Host{}, mapErr(err)
-	}
-	if err := applyPrograms(&h, programs); err != nil {
+	h, err := scanHostRow(row, &level)
+	if err != nil {
 		return store.Host{}, err
 	}
-	var err error
-	if h.ID, err = parseID(id); err != nil {
-		return store.Host{}, err
-	}
-	if h.ProjectID, err = parseID(projectID); err != nil {
-		return store.Host{}, err
-	}
-	if rank == 0 {
-		h.Relation = "owner"
-		return h, nil
-	}
-	h.Relation = "shared"
-	h.ShareLevel = level
+	h.AccessLevel = level
 	return h, nil
 }
 
@@ -383,21 +424,15 @@ WHERE id = $1::uuid
 
 func (d *DB) LookupCredential(ctx context.Context, hash []byte) (store.Credential, store.Host, error) {
 	var cred store.Credential
-	var host store.Host
-	var credID, hostID, projectID string
-	var stored, programs []byte
+	var credID string
+	var stored []byte
+	var revoked *time.Time
+	var hostID string
 	err := d.pool.QueryRow(ctx, `
-SELECT c.id::text, c.host_id::text, c.credential_hash, c.revoked_at,
-       h.project_id::text, h.name, h.node_type, h.os, h.arch, h.always_on,
-       h.agent_version, h.last_seen_at, h.enrolled_at, h.revoked_at, h.programs
+SELECT c.id::text, c.host_id::text, c.credential_hash, c.revoked_at
 FROM app.agent_credentials c
-JOIN app.hosts h ON h.id = c.host_id
 WHERE c.credential_hash = $1
-`, hash).Scan(
-		&credID, &hostID, &stored, &cred.RevokedAt,
-		&projectID, &host.Name, &host.NodeType, &host.OS, &host.Arch, &host.AlwaysOn,
-		&host.AgentVersion, &host.LastSeenAt, &host.EnrolledAt, &host.RevokedAt, &programs,
-	)
+`, hash).Scan(&credID, &hostID, &stored, &revoked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		secret.Equal(hash, missHash)
 		return store.Credential{}, store.Host{}, store.ErrUnauthorized
@@ -414,12 +449,13 @@ WHERE c.credential_hash = $1
 	if cred.HostID, err = parseID(hostID); err != nil {
 		return store.Credential{}, store.Host{}, err
 	}
-	if host.ProjectID, err = parseID(projectID); err != nil {
-		return store.Credential{}, store.Host{}, err
-	}
 	cred.Hash = stored
-	host.ID = cred.HostID
-	if err = applyPrograms(&host, programs); err != nil {
+	cred.RevokedAt = revoked
+	host, err := d.GetHost(ctx, cred.HostID)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Credential{}, store.Host{}, store.ErrUnauthorized
+	}
+	if err != nil {
 		return store.Credential{}, store.Host{}, err
 	}
 	return cred, host, nil
@@ -427,17 +463,24 @@ WHERE c.credential_hash = $1
 
 func scanJoin(row pgx.Row) (store.JoinToken, error) {
 	var t store.JoinToken
-	var id, projectID, createdBy string
-	var usedBy *string
-	if err := row.Scan(&id, &projectID, &t.HostNameHint, &createdBy, &t.CreatedAt, &t.ExpiresAt, &t.UsedAt, &usedBy, &t.RevokedAt); err != nil {
+	var id, orgID, createdBy string
+	var grantProject, grantLevel, usedBy *string
+	if err := row.Scan(&id, &orgID, &grantProject, &grantLevel, &t.HostNameHint, &createdBy, &t.CreatedAt, &t.ExpiresAt, &t.UsedAt, &usedBy, &t.RevokedAt); err != nil {
 		return store.JoinToken{}, mapErr(err)
 	}
 	var err error
 	if t.ID, err = parseID(id); err != nil {
 		return store.JoinToken{}, err
 	}
-	if t.ProjectID, err = parseID(projectID); err != nil {
+	if t.OrgID, err = parseID(orgID); err != nil {
 		return store.JoinToken{}, err
+	}
+	if grantProject != nil && grantLevel != nil {
+		pid, err := parseID(*grantProject)
+		if err != nil {
+			return store.JoinToken{}, err
+		}
+		t.Grant = &store.TokenGrant{ProjectID: pid, Level: *grantLevel}
 	}
 	if t.CreatedBy, err = parseID(createdBy); err != nil {
 		return store.JoinToken{}, err
@@ -449,13 +492,20 @@ func scanJoin(row pgx.Row) (store.JoinToken, error) {
 }
 
 func scanHost(row pgx.Row) (store.Host, error) {
+	return scanHostRow(row)
+}
+
+// scanHostRow reads hostCols, then any extra destinations.
+func scanHostRow(row pgx.Row, extra ...any) (store.Host, error) {
 	var h store.Host
-	var id, projectID string
+	var id, orgID string
+	var projectID *string
 	var programs []byte
-	if err := row.Scan(
-		&id, &projectID, &h.Name, &h.NodeType, &h.OS, &h.Arch, &h.AlwaysOn,
+	dest := []any{
+		&id, &orgID, &projectID, &h.Name, &h.NodeType, &h.OS, &h.Arch, &h.AlwaysOn,
 		&h.AgentVersion, &h.LastSeenAt, &h.EnrolledAt, &h.RevokedAt, &programs,
-	); err != nil {
+	}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return store.Host{}, mapErr(err)
 	}
 	if err := applyPrograms(&h, programs); err != nil {
@@ -465,7 +515,10 @@ func scanHost(row pgx.Row) (store.Host, error) {
 	if h.ID, err = parseID(id); err != nil {
 		return store.Host{}, err
 	}
-	if h.ProjectID, err = parseID(projectID); err != nil {
+	if h.OrgID, err = parseID(orgID); err != nil {
+		return store.Host{}, err
+	}
+	if h.ProjectID, err = parseOptID(projectID); err != nil {
 		return store.Host{}, err
 	}
 	return h, nil

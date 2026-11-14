@@ -23,7 +23,7 @@ import (
 
 type deps struct {
 	open    func(context.Context, string) (*db.DB, error)
-	migrate func(context.Context, string) error
+	migrate func(ctx context.Context, url, orgMappingFile string) error
 	serve   func(addr string, h http.Handler, stop func()) error
 }
 
@@ -34,7 +34,7 @@ func Run(ctx context.Context, args []string) int {
 	slog.SetDefault(log)
 	err := run(ctx, args, os.Getenv, deps{
 		open:    db.Open,
-		migrate: db.Migrate,
+		migrate: migrate,
 		serve:   serve,
 	})
 	if err != nil {
@@ -42,6 +42,20 @@ func Run(ctx context.Context, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// migrate loads the org mapping file when one is named, then applies the
+// embedded migrations.
+func migrate(ctx context.Context, url, orgMappingFile string) error {
+	var mapping *db.OrgMapping
+	if orgMappingFile != "" {
+		m, err := db.LoadOrgMapping(orgMappingFile)
+		if err != nil {
+			return err
+		}
+		mapping = m
+	}
+	return db.MigrateWith(ctx, url, mapping)
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string, d deps) error {
@@ -57,7 +71,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		return err
 	}
 	if migrateOnly {
-		return d.migrate(ctx, cfg.MigrateDatabaseURL)
+		return d.migrate(ctx, cfg.MigrateDatabaseURL, cfg.OrgMappingFile)
 	}
 	var mcpSecret string
 	if cfg.MCPResource != "" {

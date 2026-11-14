@@ -69,10 +69,10 @@ func catalogCreatePlan(project, name string, img catalog.Image) string {
 	return head + "; " + strings.Join(parts, "; ")
 }
 
-// catalogUpdatePlan lists only the fields whose phrases differ, then the
-// number of host approvals the write will void. A changed inline env key
-// shows the old value and the new value.
-func catalogUpdatePlan(name string, old, next catalog.Image, voids int) string {
+// catalogUpdatePlan lists only the fields whose phrases differ. A changed
+// inline env key shows the old value and the new value. Host approvals are
+// gone (api-v1 v1.24 item 4), so the plan no longer counts voided ones.
+func catalogUpdatePlan(name string, old, next catalog.Image) string {
 	var parts []string
 	add := func(field, before, after string) {
 		if before == after {
@@ -101,15 +101,14 @@ func catalogUpdatePlan(name string, old, next catalog.Image, voids int) string {
 	add("memory", memoryPhrase(old.MemoryMB), memoryPhrase(next.MemoryMB))
 	add("timeout_sec", strconv.Itoa(old.TimeoutSec), strconv.Itoa(next.TimeoutSec))
 	head := "will update image entry " + planText(name) + ":"
-	tail := "voids " + hostApprovals(voids)
 	if len(parts) == 0 {
-		return head + " " + tail
+		return head + " no field changes"
 	}
-	return head + " " + strings.Join(parts, "; ") + "; " + tail
+	return head + " " + strings.Join(parts, "; ")
 }
 
-func catalogDeletePlan(name string, approvals int) string {
-	return "will delete image entry " + planText(name) + "; " + hostApprovals(approvals) + " and its grants are removed; running containers are not stopped"
+func catalogDeletePlan(name string) string {
+	return "will delete image entry " + planText(name) + "; its grants are removed; running containers are not stopped"
 }
 
 func defaultRestart(kind string) string {
@@ -117,13 +116,6 @@ func defaultRestart(kind string) string {
 		return "no"
 	}
 	return "unless-stopped"
-}
-
-func hostApprovals(n int) string {
-	if n == 1 {
-		return "1 host approval"
-	}
-	return strconv.Itoa(n) + " host approvals"
 }
 
 func planText(s string) string {

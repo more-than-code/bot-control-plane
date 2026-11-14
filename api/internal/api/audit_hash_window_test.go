@@ -108,7 +108,7 @@ func TestHashesAtRest(t *testing.T) {
 	}
 
 	tok := w.token(owner.ID)
-	p, err := w.mem.CreateProject(ctx, owner.ID, "Proj", "proj", w.now)
+	p, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Proj", "proj", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestHashesAtRest(t *testing.T) {
 func mustJoin(t *testing.T, w *world, owner uuid.UUID) string {
 	t.Helper()
 	ctx := context.Background()
-	p, err := w.mem.CreateProject(ctx, owner, "Join", "join", w.now)
+	p, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner), owner, "Join", "join", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}

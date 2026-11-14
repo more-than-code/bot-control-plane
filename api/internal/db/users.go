@@ -161,6 +161,10 @@ INSERT INTO app.user_identities (
 `, uuid.New().String(), user.ID.String(), in.Subject, in.Email, in.At); err != nil {
 		return store.User{}, err
 	}
+	// D-8: a new user gets a personal org, so "create a project" always has one.
+	if _, err := createOrgTx(ctx, tx, user.ID, store.PersonalOrgName(user.Name, user.Email), store.PersonalOrgSlug(user.ID), in.At); err != nil {
+		return store.User{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.User{}, err
 	}

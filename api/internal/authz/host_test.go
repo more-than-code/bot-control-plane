@@ -8,248 +8,187 @@ import (
 	"github.com/google/uuid"
 )
 
-// TestAuthorizeHostMatrix is the §4 matrix at the authz function.
-// HTTP coverage of the same cells is in the api package.
+// TestAuthorizeHostMatrix is spec-organizations §3.2 (api-v1 v1.24 item 2) at
+// the authz function. The expected codes are written out per cell so the test
+// does not echo hostAllows back at itself. HTTP coverage of the same cells is
+// in the api package.
 func TestAuthorizeHostMatrix(t *testing.T) {
-	shareID := uuid.MustParse("00000000-0000-4000-8000-0000000000b1")
-	otherID := uuid.MustParse("00000000-0000-4000-8000-0000000000c2")
-	ownerViewer := Relation{Kind: RelOwner, OwnerRole: RoleViewer}
-	ownerAdmin := Relation{Kind: RelOwner, OwnerRole: RoleAdmin}
-	ownerOwner := Relation{Kind: RelOwner, OwnerRole: RoleOwner}
-	metrics := shareRel(ShareMetrics, RoleAdmin, shareID)
-	deployViewer := shareRel(ShareDeploy, RoleViewer, shareID)
-	deployAdmin := shareRel(ShareDeploy, RoleAdmin, shareID)
-	none := Relation{Kind: RelNone}
+	own := uuid.MustParse("00000000-0000-4000-8000-0000000000b1")
+	other := uuid.MustParse("00000000-0000-4000-8000-0000000000c2")
+	org := uuid.MustParse("00000000-0000-4000-8000-0000000000a0")
 
-	ok := ""
-	no := "forbidden"
-	miss := "not_found"
+	orgOwner := Relate(org, OrgOwner, nil)
+	orgAdmin := Relate(org, OrgAdmin, nil)
+	deployAdmin := Relate(org, "", []Access{{ProjectID: own, Level: LevelDeploy, Role: RoleAdmin}})
+	deployViewer := Relate(org, "", []Access{{ProjectID: own, Level: LevelDeploy, Role: RoleViewer}})
+	metrics := Relate(org, "", []Access{{ProjectID: own, Level: LevelMetrics, Role: RoleOwner}})
+	orgMember := Relate(org, OrgMember, nil)
+	none := Relate(org, "", nil)
+
+	ok, no, miss := "", "forbidden", "not_found"
 	actors := []struct {
 		name string
 		rel  Relation
 	}{
-		{"owner_viewer", ownerViewer},
-		{"owner_admin", ownerAdmin},
-		{"owner_owner", ownerOwner},
-		{"metrics", metrics},
-		{"deploy_viewer", deployViewer},
+		{"org_owner", orgOwner},
+		{"org_admin", orgAdmin},
 		{"deploy_admin", deployAdmin},
+		{"deploy_viewer", deployViewer},
+		{"metrics", metrics},
+		{"org_member", orgMember},
 		{"none", none},
 	}
+	ownP, otherP := &own, &other
+	var orgLevel *uuid.UUID
 	// cap, service project, then one code per actor in the order above.
-	// "ok" is allow. Phase 2 logs and deploy have no capabilities here.
-	rows := []struct {
+	cases := []struct {
 		cap     string
-		service uuid.UUID
+		project *uuid.UUID
 		want    []string
 	}{
-		{CapHostView, uuid.Nil, []string{ok, ok, ok, ok, ok, ok, miss}},
-		{CapHostServices, uuid.Nil, []string{ok, ok, ok, no, ok, ok, miss}},
-		{CapServiceRead, shareID, []string{ok, ok, ok, no, ok, ok, miss}},
-		{CapServiceRead, otherID, []string{ok, ok, ok, no, no, no, miss}},
-		{CapServiceWrite, shareID, []string{no, ok, ok, no, no, ok, miss}},
-		{CapServiceWrite, otherID, []string{no, ok, ok, no, no, no, miss}},
-		{CapHostAdmin, uuid.Nil, []string{no, ok, ok, no, no, no, miss}},
+		{CapHostView, nil, []string{ok, ok, ok, ok, ok, miss, miss}},
+		{CapHostServices, nil, []string{ok, ok, ok, ok, no, miss, miss}},
+		{CapServiceRead, ownP, []string{ok, ok, ok, ok, no, miss, miss}},
+		{CapServiceRead, otherP, []string{ok, ok, no, no, no, miss, miss}},
+		{CapServiceRead, orgLevel, []string{ok, ok, no, no, no, miss, miss}},
+		{CapServiceWrite, ownP, []string{ok, ok, ok, no, no, miss, miss}},
+		{CapServiceWrite, otherP, []string{ok, ok, no, no, no, miss, miss}},
+		{CapServiceWrite, orgLevel, []string{ok, ok, no, no, no, miss, miss}},
+		{CapHostAdmin, nil, []string{ok, ok, no, no, no, miss, miss}},
+		{"nope", nil, []string{no, no, no, no, no, miss, miss}},
 	}
-	if len(rows) == 0 {
-		t.Fatal("empty matrix")
-	}
-	for _, row := range rows {
-		if len(row.want) != len(actors) {
-			t.Fatalf("%s: %d wants", row.cap, len(row.want))
-		}
-		for i, actor := range actors {
-			err := AuthorizeHost(actor.rel, row.cap, row.service)
+	for _, tc := range cases {
+		for i, a := range actors {
+			err := AuthorizeHost(a.rel, tc.cap, tc.project)
 			got := ""
 			var denied *Denied
 			if errors.As(err, &denied) {
 				got = denied.Code
 			} else if err != nil {
-				t.Fatalf("%s/%s: %v", row.cap, actor.name, err)
+				t.Fatalf("%s %s: unexpected %v", a.name, tc.cap, err)
 			}
-			if got != row.want[i] {
-				t.Fatalf("%s/%s service %s: got %q, want %q", row.cap, actor.name, row.service, got, row.want[i])
+			if got != tc.want[i] {
+				t.Fatalf("%s %s project=%v: got %q, want %q", a.name, tc.cap, tc.project, got, tc.want[i])
 			}
 		}
 	}
 }
 
-func TestAuthorizeUnshare(t *testing.T) {
-	target := uuid.MustParse("00000000-0000-4000-8000-0000000000d3")
-	other := uuid.MustParse("00000000-0000-4000-8000-0000000000e4")
-	ownerAdmin := Relation{Kind: RelOwner, OwnerRole: RoleAdmin}
-	ownerViewer := Relation{Kind: RelOwner, OwnerRole: RoleViewer}
-	metricsAdmin := shareRel(ShareMetrics, RoleAdmin, target)
-	deployViewer := shareRel(ShareDeploy, RoleViewer, target)
-	none := Relation{Kind: RelNone}
+func TestRelateDropsUnusableRows(t *testing.T) {
+	p := uuid.New()
+	rel := Relate(uuid.New(), "", []Access{
+		{ProjectID: uuid.Nil, Level: LevelDeploy, Role: RoleAdmin},
+		{ProjectID: p, Level: "owner", Role: RoleAdmin},
+		{ProjectID: p, Level: LevelDeploy, Role: ""},
+	})
+	if rel.Sees() || len(rel.Access) != 0 {
+		t.Fatalf("kept %+v", rel)
+	}
+}
 
+func TestServiceProjectFilter(t *testing.T) {
+	a, b := uuid.New(), uuid.New()
+	if got := ServiceProjectFilter(Relate(uuid.New(), OrgAdmin, nil)); got != nil {
+		t.Fatalf("org admin filter %v, want nil (every service)", got)
+	}
+	// An org admin who is also a deploy member still sees every service.
+	if got := ServiceProjectFilter(Relate(uuid.New(), OrgOwner, []Access{{ProjectID: a, Level: LevelDeploy, Role: RoleViewer}})); got != nil {
+		t.Fatalf("org owner filter %v", got)
+	}
+	got := ServiceProjectFilter(Relate(uuid.New(), OrgMember, []Access{
+		{ProjectID: a, Level: LevelDeploy, Role: RoleViewer},
+		{ProjectID: b, Level: LevelMetrics, Role: RoleAdmin},
+	}))
+	if len(got) != 1 || got[0] != a {
+		t.Fatalf("member filter %v", got)
+	}
+	got = ServiceProjectFilter(Relate(uuid.New(), "", []Access{{ProjectID: b, Level: LevelMetrics, Role: RoleAdmin}}))
+	if got == nil || len(got) != 0 {
+		t.Fatalf("metrics filter %v, want empty non-nil", got)
+	}
+}
+
+func TestHighestLevel(t *testing.T) {
+	p := uuid.New()
+	if HighestLevel(nil) != "" {
+		t.Fatal("empty")
+	}
+	if HighestLevel([]Access{{ProjectID: p, Level: LevelMetrics}}) != LevelMetrics {
+		t.Fatal("metrics")
+	}
+	if HighestLevel([]Access{{ProjectID: p, Level: LevelMetrics}, {ProjectID: p, Level: LevelDeploy}}) != LevelDeploy {
+		t.Fatal("deploy")
+	}
+}
+
+// TestAuthorizeAccessRemove is the DELETE /v1/hosts/{id}/access/{project_id}
+// rule: org admin+, or an admin+ of that project leaving.
+func TestAuthorizeAccessRemove(t *testing.T) {
+	p := uuid.New()
 	cases := []struct {
-		name   string
-		rel    Relation
-		target uuid.UUID
-		role   string
-		member bool
-		want   string
+		name string
+		rel  Relation
+		role string
+		want string
 	}{
-		{"owner admin removes any share", ownerAdmin, other, "", false, ""},
-		{"owner viewer cannot", ownerViewer, target, RoleViewer, true, "forbidden"},
-		{"owner viewer who admins the share can leave", ownerViewer, target, RoleAdmin, true, ""},
-		{"metrics admin leaves", metricsAdmin, target, RoleAdmin, true, ""},
-		{"deploy viewer cannot leave", deployViewer, target, RoleViewer, true, "forbidden"},
-		{"admin of a different project cannot", metricsAdmin, other, "", false, "forbidden"},
-		{"none", none, target, RoleAdmin, true, "not_found"},
+		{"org admin", Relate(uuid.New(), OrgAdmin, nil), "", ""},
+		{"project admin leaving", Relate(uuid.New(), "", []Access{{ProjectID: p, Level: LevelMetrics, Role: RoleAdmin}}), RoleAdmin, ""},
+		{"project owner leaving", Relate(uuid.New(), "", []Access{{ProjectID: p, Level: LevelDeploy, Role: RoleOwner}}), RoleOwner, ""},
+		{"project viewer", Relate(uuid.New(), "", []Access{{ProjectID: p, Level: LevelDeploy, Role: RoleViewer}}), RoleViewer, "forbidden"},
+		{"admin of another project", Relate(uuid.New(), "", []Access{{ProjectID: uuid.New(), Level: LevelDeploy, Role: RoleAdmin}}), "", "forbidden"},
+		{"stranger", Relate(uuid.New(), "", nil), RoleAdmin, "not_found"},
+		{"org member", Relate(uuid.New(), OrgMember, nil), "", "not_found"},
 	}
 	for _, tc := range cases {
-		err := AuthorizeUnshare(tc.rel, tc.target, tc.role, tc.member)
+		err := AuthorizeAccessRemove(tc.rel, tc.role)
 		got := ""
 		var denied *Denied
 		if errors.As(err, &denied) {
 			got = denied.Code
-		} else if err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
 		}
 		if got != tc.want {
-			t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
+			t.Fatalf("%s: got %q want %q", tc.name, got, tc.want)
 		}
 	}
 }
 
-func TestRelateOwnerWins(t *testing.T) {
-	shareID := uuid.New()
-	otherID := uuid.New()
-	shares := []Share{
-		{ProjectID: shareID, Level: ShareDeploy, Role: RoleAdmin},
-		{ProjectID: otherID, Level: ShareMetrics, Role: RoleViewer},
+func TestProjectServiceVisible(t *testing.T) {
+	p, q := uuid.New(), uuid.New()
+	if !ProjectServiceVisible(LevelDeploy, &p, p) {
+		t.Fatal("own deploy row hidden")
 	}
-	got := Relate(RoleViewer, shares)
-	if got.Kind != RelOwner || got.OwnerRole != RoleViewer || len(got.Shares) != 0 {
-		t.Fatalf("owner wins: %+v", got)
+	if ProjectServiceVisible(LevelDeploy, &q, p) {
+		t.Fatal("another project's row shown")
 	}
-	got = Relate("", shares)
-	if got.Kind != RelShare || len(got.Shares) != 2 || got.Shares[0].ProjectID != shareID || got.Shares[1].ProjectID != otherID {
-		t.Fatalf("shares: %+v", got)
+	if ProjectServiceVisible(LevelDeploy, nil, p) {
+		t.Fatal("org-level row shown in a project list")
 	}
-	if HighestShareLevel(got.Shares) != ShareDeploy {
-		t.Fatalf("highest %s", HighestShareLevel(got.Shares))
+	if ProjectServiceVisible(LevelMetrics, &p, p) {
+		t.Fatal("metrics access shows services")
 	}
-	got = Relate("", nil)
-	if got.Kind != RelNone || len(got.Shares) != 0 {
-		t.Fatal("none")
+	if ProjectServiceVisible("", &p, p) || ProjectServiceVisible(LevelDeploy, &p, uuid.Nil) {
+		t.Fatal("no access shown")
 	}
-	if HighestShareLevel(nil) != "" {
-		t.Fatal("highest of none")
+	if !ProjectHostReached(LevelDeploy) || ProjectHostReached(LevelMetrics) || ProjectHostReached("") {
+		t.Fatal("reached")
 	}
 }
 
-func TestAuthorizeHostSeveralShares(t *testing.T) {
-	metricsID := uuid.MustParse("00000000-0000-4000-8000-0000000000a1")
-	deployID := uuid.MustParse("00000000-0000-4000-8000-0000000000a2")
-	otherID := uuid.MustParse("00000000-0000-4000-8000-0000000000a3")
-	// Metrics is first so a check that keeps only Shares[0] fails the deploy cells.
-	mixed := Relation{Kind: RelShare, Shares: []Share{
-		{ProjectID: metricsID, Level: ShareMetrics, Role: RoleAdmin},
-		{ProjectID: deployID, Level: ShareDeploy, Role: RoleViewer},
-	}}
-	two := Relation{Kind: RelShare, Shares: []Share{
-		{ProjectID: metricsID, Level: ShareDeploy, Role: RoleViewer},
-		{ProjectID: deployID, Level: ShareDeploy, Role: RoleAdmin},
-	}}
-	if got := codes(AuthorizeHost(mixed, CapHostView, uuid.Nil)); got != "" {
-		t.Fatalf("mixed view %s", got)
-	}
-	if got := codes(AuthorizeHost(mixed, CapHostServices, uuid.Nil)); got != "" {
-		t.Fatalf("mixed services %s", got)
-	}
-	if got := codes(AuthorizeHost(mixed, CapServiceRead, deployID)); got != "" {
-		t.Fatalf("mixed read deploy %s", got)
-	}
-	if got := codes(AuthorizeHost(mixed, CapServiceRead, metricsID)); got != "forbidden" {
-		t.Fatalf("mixed read metrics %s", got)
-	}
-	if got := codes(AuthorizeHost(mixed, CapServiceRead, otherID)); got != "forbidden" {
-		t.Fatalf("mixed read other %s", got)
-	}
-	if got := codes(AuthorizeHost(mixed, CapServiceWrite, deployID)); got != "forbidden" {
-		t.Fatalf("mixed write deploy viewer %s", got)
-	}
-	filter := ServiceProjectFilter(mixed)
-	if len(filter) != 1 || filter[0] != deployID {
-		t.Fatalf("mixed filter %v", filter)
-	}
-	if got := codes(AuthorizeHost(two, CapServiceRead, metricsID)); got != "" {
-		t.Fatalf("two read first %s", got)
-	}
-	if got := codes(AuthorizeHost(two, CapServiceRead, deployID)); got != "" {
-		t.Fatalf("two read second %s", got)
-	}
-	if got := codes(AuthorizeHost(two, CapServiceWrite, metricsID)); got != "forbidden" {
-		t.Fatalf("two write viewer %s", got)
-	}
-	if got := codes(AuthorizeHost(two, CapServiceWrite, deployID)); got != "" {
-		t.Fatalf("two write admin %s", got)
-	}
-	if got := codes(AuthorizeHost(two, CapServiceRead, otherID)); got != "forbidden" {
-		t.Fatalf("two read other %s", got)
-	}
-	both := ServiceProjectFilter(two)
-	if len(both) != 2 || both[0] != metricsID || both[1] != deployID {
-		t.Fatalf("two filter %v", both)
-	}
-	if ServiceProjectFilter(Relation{Kind: RelOwner, OwnerRole: RoleViewer}) != nil {
-		t.Fatal("owner filter")
-	}
-	home := uuid.MustParse("00000000-0000-4000-8000-0000000000a1")
-	other := uuid.MustParse("00000000-0000-4000-8000-0000000000a2")
-	if !ProjectServiceVisible(true, "", other, home) {
-		t.Fatal("owning project hides a service")
-	}
-	if !ProjectServiceVisible(false, ShareDeploy, home, home) {
-		t.Fatal("deploy share hides its own service")
-	}
-	if ProjectServiceVisible(false, ShareDeploy, other, home) {
-		t.Fatal("deploy share shows another project's service")
-	}
-	if ProjectServiceVisible(false, ShareMetrics, home, home) {
-		t.Fatal("metrics share shows its own service")
-	}
-	if ProjectServiceVisible(false, "", home, home) || ProjectServiceVisible(true, ShareDeploy, home, uuid.Nil) {
-		t.Fatal("no relation or a nil project shows a service")
-	}
-	if !ProjectHostReached(true, "") || !ProjectHostReached(false, ShareDeploy) {
-		t.Fatal("owned host or deploy share is not reached")
-	}
-	if ProjectHostReached(false, ShareMetrics) || ProjectHostReached(false, "") {
-		t.Fatal("metrics share or no relation is reached")
-	}
-
-	if empty := ServiceProjectFilter(shareRel(ShareMetrics, RoleAdmin, metricsID)); len(empty) != 0 {
-		t.Fatalf("metrics filter %v", empty)
-	}
-}
-
-func shareRel(level, role string, project uuid.UUID) Relation {
-	return Relation{Kind: RelShare, Shares: []Share{{ProjectID: project, Level: level, Role: role}}}
-}
-
-func codes(err error) string {
-	if err == nil {
-		return ""
-	}
-	var denied *Denied
-	if errors.As(err, &denied) {
-		return denied.Code
-	}
-	return err.Error()
-}
-
-func TestHostRelationRequiresLookup(t *testing.T) {
+func TestHostRelationNeedsUserAndLookup(t *testing.T) {
 	_, err := HostRelation(context.Background(), uuid.Nil, uuid.New())
 	var denied *Denied
 	if !errors.As(err, &denied) || denied.Code != "unauthorized" {
 		t.Fatalf("nil user: %v", err)
 	}
-	_, err = HostRelation(context.Background(), uuid.New(), uuid.New())
-	if err == nil || errors.As(err, &denied) {
-		t.Fatalf("missing lookup: %v", err)
+	if _, err := HostRelation(context.Background(), uuid.New(), uuid.New()); err == nil {
+		t.Fatal("missing lookup accepted")
+	}
+	want := Relate(uuid.New(), OrgAdmin, nil)
+	ctx := WithHostLookup(context.Background(), func(context.Context, uuid.UUID, uuid.UUID) (Relation, error) {
+		return want, nil
+	})
+	got, err := HostRelation(ctx, uuid.New(), uuid.New())
+	if err != nil || got.OrgRole != OrgAdmin {
+		t.Fatalf("lookup: %+v %v", got, err)
 	}
 }

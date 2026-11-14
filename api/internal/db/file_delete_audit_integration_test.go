@@ -60,7 +60,7 @@ func TestFileDeleteAudit(t *testing.T) {
 		cctx, ccancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer ccancel()
 		_, _ = d.pool.Exec(cctx, `DELETE FROM app.audit_log WHERE project_id = $1::uuid`, project.ID.String())
-		_, _ = d.DeleteProject(cctx, project.ID, time.Now().UTC())
+		_ = d.DeleteProject(cctx, project.ID, time.Now().UTC())
 	})
 	if _, err := d.PutProjectFile(ctx, project.ID, "key.json", store.FileWrite{
 		Plain: content, SHA256: contentHash, Size: len(content),

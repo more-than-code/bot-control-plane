@@ -80,7 +80,7 @@ func TestAutoActionThrottle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := mem.CreateProject(ctx, user.ID, "P", "p", clock.now())
+	project, err := mem.CreateProject(ctx, mem.PersonalOrg(user.ID), user.ID, "P", "p", clock.now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestAutoActionThrottle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mem.CreateJoinToken(ctx, project.ID, joinHash, nil, user.ID, clock.now().Add(time.Hour), clock.now()); err != nil {
+	if _, err := mem.CreateJoinToken(ctx, project.OrgID, joinHash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, user.ID, clock.now().Add(time.Hour), clock.now()); err != nil {
 		t.Fatal(err)
 	}
 	enrollConn := dial(t, url, "")

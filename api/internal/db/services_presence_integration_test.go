@@ -393,6 +393,11 @@ func assertStatusSortGoneLast(t *testing.T, d *DB, ctx context.Context) {
 	}, at, true, true); err != nil {
 		t.Fatal(err)
 	}
+	// v1.24: discovered rows are org-level; place them on the project to
+	// test the project list order.
+	if _, err := d.pool.Exec(ctx, `UPDATE app.services SET project_id = $1::uuid WHERE host_id = $2::uuid`, project.ID.String(), host.ID.String()); err != nil {
+		t.Fatal(err)
+	}
 	ids := map[string]uuid.UUID{}
 	for _, name := range []string{"a-gone", "a-present", "b-gone", "b-present"} {
 		ids[name] = serviceByNameDB(t, d, ctx, host.ID, name, at).ID
@@ -442,7 +447,7 @@ func assertServiceViewFilters(t *testing.T, d *DB, ctx context.Context) {
 	insertPresenceRow(t, d, ctx, host.ID, guest.ID, "found", "discovered", nil, at)
 	insertPresenceRow(t, d, ctx, host.ID, home.ID, "found-old", "discovered", &gone, at)
 	insertPresenceRow(t, d, ctx, other.ID, home.ID, "api-remote", "declared", nil, at)
-	if _, _, err := d.PutHostShare(ctx, host.ID, guest.ID, "deploy", homeUser.ID, at); err != nil {
+	if _, _, err := shareDB(t, d, ctx, host.ID, guest.ID, "deploy", homeUser.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	list := func(project uuid.UUID, q store.ServiceListQuery) []string {
@@ -457,7 +462,8 @@ func assertServiceViewFilters(t *testing.T, d *DB, ctx context.Context) {
 	homeAPI := base
 	homeAPI.Q = "api"
 	homeAPI.View = "deploybot"
-	if got := list(home.ID, homeAPI); !sameLive(got, []string{"api", "api-old", "api-remote"}) {
+	// v1.24: api and found are guest's; home lists only its own rows.
+	if got := list(home.ID, homeAPI); !sameLive(got, []string{"api-old", "api-remote"}) {
 		t.Fatalf("q api deploybot %v", got)
 	}
 	homeFound := base
@@ -467,7 +473,7 @@ func assertServiceViewFilters(t *testing.T, d *DB, ctx context.Context) {
 		t.Fatalf("q found deploybot %v", got)
 	}
 	homeFound.View = "deploybot_and_discovered"
-	if got := list(home.ID, homeFound); !sameLive(got, []string{"found"}) {
+	if got := list(home.ID, homeFound); len(got) != 0 {
 		t.Fatalf("q found with discovered %v", got)
 	}
 	hostID := host.ID
@@ -475,7 +481,7 @@ func assertServiceViewFilters(t *testing.T, d *DB, ctx context.Context) {
 	hosted.Q = "api"
 	hosted.View = "deploybot"
 	hosted.HostID = &hostID
-	if got := list(home.ID, hosted); !sameLive(got, []string{"api", "api-old"}) {
+	if got := list(home.ID, hosted); !sameLive(got, []string{"api-old"}) {
 		t.Fatalf("host_id %v", got)
 	}
 	guestDeploy := base
@@ -499,6 +505,9 @@ func assertPresencePlacedName(t *testing.T, d *DB, ctx context.Context) {
 	home := catalogProject(t, d, ctx, owner.ID, "Home", "placed-"+tag, at)
 	box := catalogProject(t, d, ctx, boxOwner.ID, "Box", "placedbox-"+tag, at)
 	host := enrollHostDB(t, d, ctx, box.ID, boxOwner.ID, "placed-"+tag, at)
+	if _, _, err := shareDB(t, d, ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
+		t.Fatal(err)
+	}
 	spec, hash, display := catalogSpec(t, "pnpm run dev")
 	if _, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "webapp", Spec: spec, SpecHash: hash, CommandDisplay: display, Actor: owner.ID, At: at,
@@ -513,7 +522,7 @@ func assertPresencePlacedName(t *testing.T, d *DB, ctx context.Context) {
 		t.Fatal(err)
 	}
 	placed := serviceByNameDB(t, d, ctx, host.ID, "webapp", at)
-	if placed.Source != "owned" || placed.GoneAt != nil || placed.ProjectID != home.ID {
+	if placed.Source != "owned" || placed.GoneAt != nil || !sameID(placed.ProjectID, &home.ID) {
 		t.Fatalf("placed source %s gone %v project %s", placed.Source, placed.GoneAt, placed.ProjectID)
 	}
 	if _, ok := findServiceDB(t, d, ctx, host.ID, "not-the-entry", at); ok {
@@ -755,20 +764,16 @@ func assertProjectDeleteMarksGone(t *testing.T, d *DB, ctx context.Context) {
 	foreign := insertPresenceRow(t, d, ctx, foreignHost.ID, project.ID, "foreign", "discovered", nil, at)
 
 	deleteAt := at.Add(time.Minute)
-	if _, err := d.DeleteProject(ctx, project.ID, deleteAt); err != nil {
+	if err := d.DeleteProject(ctx, project.ID, deleteAt); err != nil {
 		t.Fatal(err)
 	}
 	assertGoneAt(t, d, ctx, present, &deleteAt)
 	assertGoneAt(t, d, ctx, already, &keptGone)
-	assertGoneAt(t, d, ctx, straggler, &earlyRevoke)
-	assertGoneAt(t, d, ctx, foreign, nil)
-	var projectID string
-	if err := d.pool.QueryRow(ctx, `SELECT project_id::text FROM app.services WHERE id = $1::uuid`, foreign.String()).Scan(&projectID); err != nil {
-		t.Fatal(err)
-	}
-	if projectID != other.ID.String() {
-		t.Fatalf("foreign project %s", projectID)
-	}
+	// v1.24 item 7: the project's services are gone wherever they run;
+	// still-present rows on an early-revoked host are gone at the delete.
+	assertGoneAt(t, d, ctx, straggler, &deleteAt)
+	assertGoneAt(t, d, ctx, foreign, &deleteAt)
+	_ = earlyRevoke
 	var foreignRevoked, hostRevoked *time.Time
 	if err := d.pool.QueryRow(ctx, `SELECT revoked_at FROM app.hosts WHERE id = $1::uuid`, foreignHost.ID.String()).Scan(&foreignRevoked); err != nil {
 		t.Fatal(err)
@@ -779,8 +784,8 @@ func assertProjectDeleteMarksGone(t *testing.T, d *DB, ctx context.Context) {
 	if err := d.pool.QueryRow(ctx, `SELECT revoked_at FROM app.hosts WHERE id = $1::uuid`, host.ID.String()).Scan(&hostRevoked); err != nil {
 		t.Fatal(err)
 	}
-	if hostRevoked == nil || !hostRevoked.Equal(deleteAt) {
-		t.Fatalf("deleted host revoked_at %v", hostRevoked)
+	if hostRevoked != nil {
+		t.Fatalf("project delete revoked its host at %v", hostRevoked)
 	}
 }
 
@@ -853,6 +858,9 @@ func assertOwnershipEnds(t *testing.T, d *DB, ctx context.Context) {
 	home := catalogProject(t, d, ctx, owner.ID, "Home", "ownend"+tag, at)
 	box := catalogProject(t, d, ctx, boxOwner.ID, "Box", "boxend"+tag, at)
 	host := enrollHostDB(t, d, ctx, box.ID, boxOwner.ID, "end-"+tag, at)
+	if _, _, err := shareDB(t, d, ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
+		t.Fatal(err)
+	}
 	spec, hash, display := catalogSpec(t, "pnpm run dev")
 	for _, name := range []string{"redis", "kept"} {
 		if _, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
@@ -885,7 +893,7 @@ func assertOwnershipEnds(t *testing.T, d *DB, ctx context.Context) {
 		t.Fatal(err)
 	}
 	redis := serviceByNameDB(t, d, ctx, host.ID, "redis", at)
-	if redis.Source != "owned" || redis.ProjectID != home.ID || redis.CatalogEntry == nil || *redis.CatalogEntry != "redis" {
+	if redis.Source != "owned" || !sameID(redis.ProjectID, &home.ID) || redis.CatalogEntry == nil || *redis.CatalogEntry != "redis" {
 		t.Fatalf("owned %+v", redis)
 	}
 	assertDeclaredUnchangedDB(t, d, ctx, declared, box.ID, declaredChecks[0].ID, at)
@@ -908,7 +916,7 @@ func assertOwnershipEnds(t *testing.T, d *DB, ctx context.Context) {
 		t.Fatal(err)
 	}
 	ended := mustServiceDB(t, d, ctx, redis.ID, t2)
-	if ended.ID != redis.ID || ended.Source != "discovered" || ended.CatalogEntry != nil || ended.ProjectID != box.ID {
+	if ended.ID != redis.ID || ended.Source != "discovered" || ended.CatalogEntry != nil || ended.ProjectID != nil {
 		t.Fatalf("ended %+v", ended)
 	}
 	if ended.DisplayName == nil || *ended.DisplayName != "Redis" || ended.ContainerName == nil || *ended.ContainerName != "redis" {
@@ -926,7 +934,7 @@ func assertOwnershipEnds(t *testing.T, d *DB, ctx context.Context) {
 		t.Fatal(err)
 	}
 	again := mustServiceDB(t, d, ctx, redis.ID, t3)
-	if again.ID != redis.ID || again.Source != "owned" || again.ProjectID != home.ID || again.CatalogEntry == nil || *again.CatalogEntry != "redis" {
+	if again.ID != redis.ID || again.Source != "owned" || !sameID(again.ProjectID, &home.ID) || again.CatalogEntry == nil || *again.CatalogEntry != "redis" {
 		t.Fatalf("reowned %+v", again)
 	}
 	if again.DisplayName == nil || *again.DisplayName != "Redis" {
@@ -944,7 +952,7 @@ func assertOwnershipEnds(t *testing.T, d *DB, ctx context.Context) {
 func assertDeclaredUnchangedDB(t *testing.T, d *DB, ctx context.Context, id, project uuid.UUID, checkID uuid.UUID, at time.Time) {
 	t.Helper()
 	got := mustServiceDB(t, d, ctx, id, at)
-	if got.Source != "declared" || got.ProjectID != project || got.CatalogEntry != nil || got.Kind != "process" || got.GoneAt != nil || got.ContainerName != nil {
+	if got.Source != "declared" || !sameID(got.ProjectID, &project) || got.CatalogEntry != nil || got.Kind != "process" || got.GoneAt != nil || got.ContainerName != nil {
 		t.Fatalf("declared %+v", got)
 	}
 	if len(got.Ports) != 1 || got.Ports[0] != 9 {

@@ -106,7 +106,6 @@ func (s *Server) issueCatalogImage(w http.ResponseWriter, r *http.Request, p pri
 	action := "create"
 	var base string
 	var oldImg catalog.Image
-	voids := 0
 	if replace {
 		action = "update"
 		existing, err := s.Store.GetCatalogEntry(r.Context(), projectID, name)
@@ -125,13 +124,6 @@ func (s *Server) issueCatalogImage(w http.ResponseWriter, r *http.Request, p pri
 		}
 		oldImg = parsed
 		base = existing.SpecHash
-		if hash != existing.SpecHash {
-			voids, err = s.Store.CountEntryApprovals(r.Context(), projectID, name)
-			if err != nil {
-				s.fail(w, err)
-				return
-			}
-		}
 	} else {
 		_, err := s.Store.GetCatalogEntry(r.Context(), projectID, name)
 		if err == nil {
@@ -156,7 +148,7 @@ func (s *Server) issueCatalogImage(w http.ResponseWriter, r *http.Request, p pri
 	spec := []byte(catalog.SpecJSON(img))
 	var plan string
 	if replace {
-		plan = catalogUpdatePlan(name, oldImg, img, voids)
+		plan = catalogUpdatePlan(name, oldImg, img)
 	} else {
 		project, err := s.Store.GetProject(r.Context(), projectID)
 		if err != nil {
@@ -202,12 +194,7 @@ func (s *Server) issueCatalogDelete(w http.ResponseWriter, r *http.Request, p pr
 		writeCode(w, "bad_request", "invalid idempotency_key")
 		return
 	}
-	n, err := s.Store.CountEntryApprovals(r.Context(), projectID, name)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	plan := catalogDeletePlan(entry.Name, n)
+	plan := catalogDeletePlan(entry.Name)
 	reqHash := catalogWriteRequestHash("delete", projectID, name, nil)
 	if !s.claimOrReplay(w, r, p.User.ID, body.Key, reqHash) {
 		return

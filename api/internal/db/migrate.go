@@ -12,12 +12,23 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/migrations"
 )
 
+// migrateLockKey is the advisory lock id that serializes Migrate runs.
+const migrateLockKey int64 = 0x6465706c6f79 // "deploy"
+
 // Migrate applies embedded SQL files in lexical order using databaseURL.
 // It is the only path that runs DDL. A normal server start does not call it.
 // The caller is deploybot_migrator. SET ROLE deploybot_owner runs first, so
 // new objects are owned by that role. roles.sql.example must already have
 // created the role, the schemas, and the timescaledb extension.
 func Migrate(ctx context.Context, databaseURL string) error {
+	return MigrateWith(ctx, databaseURL, nil)
+}
+
+// MigrateWith is Migrate with the org mapping that 0015 reads (nil: the
+// default rule only). Every file runs on this one connection: the mapping
+// lives in session settings (deploybot.org_mapping), which a pool would not
+// carry from one statement to the next. Do not switch this to a pool.
+func MigrateWith(ctx context.Context, databaseURL string, mapping *OrgMapping) error {
 	conn, err := pgx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("migrate: connect failed")
@@ -30,6 +41,17 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	var ext int
 	if err := conn.QueryRow(ctx, `SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'`).Scan(&ext); err != nil {
 		return fmt.Errorf("migrate: timescaledb extension is not installed; run migrations/roles.sql.example as superuser first")
+	}
+
+	// Two --migrate runs (or two test processes on one database) must not
+	// apply files at the same time: a session advisory lock serializes them
+	// and is released when the connection closes.
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrateLockKey); err != nil {
+		return fmt.Errorf("migrate: cannot take the migration lock")
+	}
+
+	if err := loadMappingSettings(ctx, conn, mapping); err != nil {
+		return err
 	}
 
 	applied, err := appliedNames(ctx, conn)

@@ -98,7 +98,7 @@ func TestAutoActionsMigration(t *testing.T) {
 	home := catalogProject(t, d, ctx, owner.ID, "Auto", "auto"+tag, at)
 	viewer := catalogProject(t, d, ctx, owner.ID, "AutoView", "autoview"+tag, at)
 	host := enrollHostDB(t, d, ctx, home.ID, owner.ID, "auto-host-"+tag, at)
-	if _, _, err := d.PutHostShare(ctx, host.ID, viewer.ID, "metrics", owner.ID, at); err != nil {
+	if _, _, err := shareDB(t, d, ctx, host.ID, viewer.ID, "metrics", owner.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	img, err := catalog.BuildImage("web", []byte(`{"kind":"service","image":"redis","healthcheck":{"test":["redis-cli","ping"]},"health_policy":{"on_unhealthy":"restart"}}`), nil, nil)

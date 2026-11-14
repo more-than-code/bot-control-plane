@@ -21,7 +21,7 @@ func assertEnvMakeSecret(t *testing.T, d *DB, ctx context.Context, at time.Time)
 	t.Helper()
 	owner := catalogUser(t, d, ctx, "env-secret", at)
 	home := catalogProject(t, d, ctx, owner.ID, "Secret", "envsecret", at)
-	host := enrollHostDB(t, d, ctx, home.ID, owner.ID, "secret-host", at)
+	_ = enrollHostDB(t, d, ctx, home.ID, owner.ID, "secret-host", at)
 	box, err := seal.New(bytes.Repeat([]byte{5}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -45,14 +45,11 @@ func assertEnvMakeSecret(t *testing.T, d *DB, ctx context.Context, at time.Time)
 		t.Fatal(err)
 	}
 	hash := catalog.ImageHash(img, map[string]string{"svc": catalog.EnvKeyDigest([]string{"A", "B", "C"})})
-	entry, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+	_, err = d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "web", Kind: "image", ImageRaw: []byte(catalog.SpecJSON(img)),
 		SpecHash: hash, CommandDisplay: img.Image, Actor: owner.ID, At: at,
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	sealer := func(key, plain string) (store.EnvSecret, error) {
@@ -156,8 +153,8 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key IN ('A', 'B')
 	}
 
 	got, err := d.GetCatalogEntry(ctx, home.ID, "web")
-	if err != nil || got.SpecHash != hash || catalogApprovalCount(t, d, ctx, entry.ID) != 1 {
-		t.Fatalf("hash %s approvals %d %v", got.SpecHash, catalogApprovalCount(t, d, ctx, entry.ID), err)
+	if err != nil || got.SpecHash != hash {
+		t.Fatalf("hash %s %v", got.SpecHash, err)
 	}
 	assertEnvMakeSecretGrants(t, d, ctx)
 	assertEnvMakeSecretMany(t, d, ctx, home.ID, owner.ID, box, at)

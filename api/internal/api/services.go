@@ -38,7 +38,7 @@ func (s *Server) handleServiceGet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceRead, &svc.ProjectID, idPtr(svc.ID), ""); !ok {
+	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceRead, svc.ProjectID, idPtr(svc.ID), ""); !ok {
 		return
 	}
 	checks, err := s.Store.ListHealthChecks(r.Context(), svc.ID)
@@ -74,7 +74,7 @@ func (s *Server) handleServicePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := authz.AuthorizeHost(rel, authz.CapServiceWrite, svc.ProjectID); err != nil {
-		s.denyDetail(w, r, p, idPtr(host.ProjectID), idPtr(host.ID), idPtr(svc.ID), audit.ActionServiceRename, detail, err)
+		s.denyRow(w, r, p, idPtr(host.OrgID), svc.ProjectID, idPtr(host.ID), idPtr(svc.ID), audit.ActionServiceRename, detail, err)
 		return
 	}
 	if parseMsg != "" {
@@ -87,7 +87,8 @@ func (s *Server) handleServicePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auditOK(r.Context(), p, store.AuditRow{
-		ProjectID: idPtr(host.ProjectID),
+		OrgID:     idPtr(host.OrgID),
+		ProjectID: svc.ProjectID,
 		HostID:    idPtr(host.ID),
 		ServiceID: idPtr(svc.ID),
 		Action:    audit.ActionServiceRename,
@@ -102,7 +103,7 @@ func (s *Server) handleServicePatch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) finishRenameAuth(w http.ResponseWriter, r *http.Request, p principal, host store.Host, svc store.Service, detail map[string]any, err error) {
 	var denied *authz.Denied
 	if errors.As(err, &denied) {
-		s.denyDetail(w, r, p, idPtr(host.ProjectID), idPtr(host.ID), idPtr(svc.ID), audit.ActionServiceRename, detail, err)
+		s.denyRow(w, r, p, idPtr(host.OrgID), svc.ProjectID, idPtr(host.ID), idPtr(svc.ID), audit.ActionServiceRename, detail, err)
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
@@ -163,7 +164,7 @@ func (s *Server) handleHealthPut(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceWrite, &svc.ProjectID, idPtr(svc.ID), audit.ActionHealthChecks); !ok {
+	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceWrite, svc.ProjectID, idPtr(svc.ID), audit.ActionHealthChecks); !ok {
 		return
 	}
 	var body struct {

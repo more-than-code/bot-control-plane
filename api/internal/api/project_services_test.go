@@ -18,10 +18,11 @@ func TestProjectServiceList(t *testing.T) {
 	fx := newProjectServiceFixture(t)
 	home := fx.home.ID.String()
 	full := fx.list(t, fx.tok["home"], home, url.Values{})
-	if !sameStrings(itemNames(t, full), []string{"nap", "web", "api", "met"}) {
+	// v1.24: a project lists only its own services, also on its deploy hosts.
+	if !sameStrings(itemNames(t, full), []string{"nap", "api"}) {
 		t.Fatalf("home %v", itemNames(t, full))
 	}
-	if int(objectPayload(t, full)["total"].(float64)) != 4 {
+	if int(objectPayload(t, full)["total"].(float64)) != 2 {
 		t.Fatalf("total %#v", objectPayload(t, full)["total"])
 	}
 	viewer := fx.list(t, fx.tok["viewer"], home, url.Values{})
@@ -51,7 +52,7 @@ func TestProjectServiceList(t *testing.T) {
 	if api["host_name"] != "pi-home" || api["host_status"] != "offline" || api["project_name"] != "Home" || api["display_name"] != "Alpha" || api["owner_user"] != "root" {
 		t.Fatalf("api row %#v", api)
 	}
-	web := findItem(t, listItems(t, full), "name", "web")
+	web := findItem(t, listItems(t, deploy), "name", "web")
 	if web["project_name"] != "Deploy" || web["display_name"] != "a_b" || web["host_status"] != "offline" {
 		t.Fatalf("web row %#v", web)
 	}
@@ -59,13 +60,11 @@ func TestProjectServiceList(t *testing.T) {
 	if nap["host_name"] != "pi-asleep" || nap["host_status"] != "asleep" || nap["display_name"] != "100%" {
 		t.Fatalf("nap row %#v", nap)
 	}
-	met := findItem(t, listItems(t, full), "name", "met")
-	if _, present := met["display_name"]; !present || met["display_name"] != nil || met["owner_user"] != nil || met["project_name"] != "Metrics" {
-		t.Fatalf("met row %#v", met)
+	if code, env := fx.w.do(fx.tok["viewer"], http.MethodGet, "/v1/services/"+fx.webID.String(), ""); code != http.StatusForbidden {
+		t.Fatalf("home viewer read deploy's service %d %s", code, env.Code)
 	}
-
-	if code, env := fx.w.do(fx.tok["viewer"], http.MethodGet, "/v1/services/"+fx.webID.String(), ""); code != http.StatusOK {
-		t.Fatalf("owner viewer read shared service %d %s", code, env.Code)
+	if code, env := fx.w.do(fx.tok["home"], http.MethodGet, "/v1/services/"+fx.metID.String(), ""); code != http.StatusOK {
+		t.Fatalf("org owner read metrics' service %d %s", code, env.Code)
 	}
 	if code, env := fx.w.do(fx.tok["deploy_viewer"], http.MethodGet, "/v1/services/"+fx.webID.String(), ""); code != http.StatusOK {
 		t.Fatalf("deploy viewer read own service %d %s", code, env.Code)
@@ -87,7 +86,7 @@ func TestProjectServiceList(t *testing.T) {
 		t.Fatalf("percent %v", got)
 	}
 	q.Set("q", "_")
-	if got := itemNames(t, fx.list(t, fx.tok["home"], home, q)); !sameStrings(got, []string{"web"}) {
+	if got := itemNames(t, fx.list(t, fx.tok["deploy"], fx.deploy.ID.String(), q)); !sameStrings(got, []string{"web"}) {
 		t.Fatalf("underscore %v", got)
 	}
 	q.Set("q", "  alpha  ")
@@ -97,20 +96,20 @@ func TestProjectServiceList(t *testing.T) {
 	q.Set("q", "pi")
 	q.Set("limit", "1")
 	piPage := fx.list(t, fx.tok["home"], home, q)
-	if total := int(objectPayload(t, piPage)["total"].(float64)); total != 4 || len(listItems(t, piPage)) != 1 || total <= 1 {
+	if total := int(objectPayload(t, piPage)["total"].(float64)); total != 2 || len(listItems(t, piPage)) != 1 || total <= 1 {
 		t.Fatalf("q total %v items %d", objectPayload(t, piPage)["total"], len(listItems(t, piPage)))
 	}
 	hostLimited := url.Values{}
 	hostLimited.Set("host_id", fx.homeHost.ID.String())
 	hostLimited.Set("limit", "1")
 	hostPage := fx.list(t, fx.tok["home"], home, hostLimited)
-	if total := int(objectPayload(t, hostPage)["total"].(float64)); total != 3 || len(listItems(t, hostPage)) != 1 || total <= 1 {
+	if total := int(objectPayload(t, hostPage)["total"].(float64)); total != 1 || len(listItems(t, hostPage)) != 1 {
 		t.Fatalf("host total %v items %d", objectPayload(t, hostPage)["total"], len(listItems(t, hostPage)))
 	}
 
 	hostQ := url.Values{}
 	hostQ.Set("host_id", fx.homeHost.ID.String())
-	if got := itemNames(t, fx.list(t, fx.tok["home"], home, hostQ)); !sameStrings(got, []string{"web", "api", "met"}) {
+	if got := itemNames(t, fx.list(t, fx.tok["home"], home, hostQ)); !sameStrings(got, []string{"api"}) {
 		t.Fatalf("host filter %v", got)
 	}
 	hostQ.Set("host_id", fx.homeHost.ID.String())
@@ -177,16 +176,16 @@ func TestProjectServiceList(t *testing.T) {
 	desc := url.Values{}
 	desc.Set("sort", "name")
 	desc.Set("dir", "desc")
-	if got := itemNames(t, fx.list(t, fx.tok["home"], home, desc)); !sameStrings(got, []string{"met", "api", "web", "nap"}) {
+	if got := itemNames(t, fx.list(t, fx.tok["home"], home, desc)); !sameStrings(got, []string{"api", "nap"}) {
 		t.Fatalf("name desc %v", got)
 	}
 	seen := url.Values{}
 	seen.Set("sort", "last_seen")
-	if got := itemNames(t, fx.list(t, fx.tok["home"], home, seen)); !sameStrings(got, []string{"met", "web", "api", "nap"}) {
+	if got := itemNames(t, fx.list(t, fx.tok["home"], home, seen)); !sameStrings(got, []string{"api", "nap"}) {
 		t.Fatalf("last_seen default %v", got)
 	}
 	seen.Set("dir", "asc")
-	if got := itemNames(t, fx.list(t, fx.tok["home"], home, seen)); !sameStrings(got, []string{"nap", "api", "web", "met"}) {
+	if got := itemNames(t, fx.list(t, fx.tok["home"], home, seen)); !sameStrings(got, []string{"nap", "api"}) {
 		t.Fatalf("last_seen asc %v", got)
 	}
 
@@ -205,7 +204,7 @@ func TestProjectServiceList(t *testing.T) {
 			t.Fatalf("page %d %d %s", page, code, env.Msg)
 		}
 		payload := objectPayload(t, env)
-		if int(payload["total"].(float64)) != 4 {
+		if int(payload["total"].(float64)) != 2 {
 			t.Fatalf("page total %#v", payload["total"])
 		}
 		items := listItems(t, env)
@@ -220,7 +219,7 @@ func TestProjectServiceList(t *testing.T) {
 		}
 		walked = append(walked, items[0]["name"].(string))
 		next, _ := payload["next_cursor"].(string)
-		if page == 3 {
+		if page == 1 {
 			if payload["next_cursor"] != nil {
 				t.Fatal("next_cursor after the last row")
 			}
@@ -230,14 +229,14 @@ func TestProjectServiceList(t *testing.T) {
 			back.Set("limit", "1")
 			back.Set("cursor", prev)
 			got := fx.list(t, fx.tok["home"], home, back)
-			if itemNames(t, got)[0] != walked[2] || objectPayload(t, got)["prev_cursor"] == nil {
+			if itemNames(t, got)[0] != walked[0] || objectPayload(t, got)["prev_cursor"] != nil {
 				t.Fatalf("prev %v", itemNames(t, got))
 			}
 			break
 		}
 		cursor = next
 	}
-	if !sameStrings(walked, []string{"nap", "web", "api", "met"}) {
+	if !sameStrings(walked, []string{"nap", "api"}) {
 		t.Fatalf("walked %v", walked)
 	}
 
@@ -326,7 +325,7 @@ func TestProjectServiceCursorWalk(t *testing.T) {
 	home := fx.home.ID.String()
 	full := fx.list(t, fx.tok["home"], home, url.Values{"sort": {"name"}})
 	want := itemIDs(t, full)
-	if len(want) < 5 || !sameStrings(itemNames(t, full), []string{"nap", "web", "api", "met", "extra"}) {
+	if len(want) < 3 || !sameStrings(itemNames(t, full), []string{"nap", "api", "extra"}) {
 		t.Fatalf("rows %v", itemNames(t, full))
 	}
 	var forward [][]string
@@ -407,7 +406,7 @@ func TestProjectServiceSortKeys(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
 	owner := w.user("sort@ex.com", "Sort")
-	project, err := w.mem.CreateProject(ctx, owner.ID, "Sort", "sort", w.now)
+	project, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Sort", "sort", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,14 +473,14 @@ func newProjectServiceFixture(t *testing.T) *projectServiceFixture {
 	deployViewer := w.user("deploy-viewer@ex.com", "DeployViewer")
 	metricsOwner := w.user("metrics@ex.com", "Metrics")
 	outsider := w.user("outsider@ex.com", "Outsider")
-	home, err := w.mem.CreateProject(ctx, owner.ID, "Home", "home", w.now)
+	home, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Home", "home", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := w.mem.AddMember(ctx, home.ID, viewer.ID, "viewer", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	deploy, err := w.mem.CreateProject(ctx, deployOwner.ID, "Deploy", "deploy", w.now)
+	deploy, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(deployOwner.ID), deployOwner.ID, "Deploy", "deploy", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +490,7 @@ func newProjectServiceFixture(t *testing.T) *projectServiceFixture {
 	if _, err := w.mem.AddMember(ctx, deploy.ID, deployViewer.ID, "viewer", deployOwner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	metrics, err := w.mem.CreateProject(ctx, metricsOwner.ID, "Metrics", "metrics", w.now)
+	metrics, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(metricsOwner.ID), metricsOwner.ID, "Metrics", "metrics", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,10 +498,10 @@ func newProjectServiceFixture(t *testing.T) *projectServiceFixture {
 	asleepHost := enrollAPIHost(t, w, home.ID, owner.ID, "pi-asleep", false)
 	deployHost := enrollAPIHost(t, w, deploy.ID, deployOwner.ID, "pi-deploy", true)
 	metricsHost := enrollAPIHost(t, w, metrics.ID, metricsOwner.ID, "pi-metrics", true)
-	if _, _, err := w.mem.PutHostShare(ctx, homeHost.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.share(ctx, homeHost.ID, deploy.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(ctx, homeHost.ID, metrics.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.share(ctx, homeHost.ID, metrics.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	api := putProjectService(t, w, homeHost.ID, home.ID, "api", "process", []int{8080}, strPtr("root"), strPtr("Alpha"), w.now)
@@ -616,7 +615,7 @@ func TestProjectServiceIncludeHealthChecks(t *testing.T) {
 		t.Fatalf("batch calls %d", counter.n)
 	}
 	items := listItems(t, with)
-	if len(items) != 4 {
+	if len(items) != 2 {
 		t.Fatalf("items %d", len(items))
 	}
 	for _, item := range items {

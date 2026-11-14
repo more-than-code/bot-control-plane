@@ -55,7 +55,7 @@ func (s *Server) handleCatalogList(w http.ResponseWriter, r *http.Request) {
 		s.deny(w, r, p, idPtr(id), nil, nil, "", err)
 		return
 	}
-	role, err := s.Store.Role(r.Context(), id, p.User.ID)
+	role, err := s.callerRole(r.Context(), id, p.User.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -432,100 +432,6 @@ func (s *Server) handleCatalogPermPut(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, http.StatusOK, map[string]any{"grants": stored})
 }
 
-func (s *Server) handleCatalogApprovals(w http.ResponseWriter, r *http.Request) {
-	p, host, ok := s.loadCatalogHost(w, r)
-	if !ok {
-		return
-	}
-	if err := authz.Authorize(r.Context(), p.User.ID, host.ProjectID, authz.CapMembers); err != nil {
-		s.deny(w, r, p, idPtr(host.ProjectID), idPtr(host.ID), nil, "", err)
-		return
-	}
-	items, err := s.Store.ListCatalogApprovals(r.Context(), host.ID)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if err := s.withSetValues(r.Context(), items); err != nil {
-		s.fail(w, err)
-		return
-	}
-	writeOK(w, http.StatusOK, map[string]any{"items": items})
-}
-
-func (s *Server) handleCatalogApprove(w http.ResponseWriter, r *http.Request) {
-	p, host, ok := s.loadCatalogHost(w, r)
-	if !ok {
-		return
-	}
-	if err := authz.Authorize(r.Context(), p.User.ID, host.ProjectID, authz.CapMembers); err != nil {
-		s.deny(w, r, p, idPtr(host.ProjectID), idPtr(host.ID), nil, audit.ActionCatalogApprove, err)
-		return
-	}
-	if s.refuseDelegated(w, r, p, idPtr(host.ProjectID), idPtr(host.ID), audit.ActionCatalogApprove) {
-		return
-	}
-	var body struct {
-		EntryID  string `json:"entry_id"`
-		SpecHash string `json:"spec_hash"`
-	}
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	entryID, err := uuid.Parse(body.EntryID)
-	if err != nil {
-		writeCode(w, "bad_request", "invalid id")
-		return
-	}
-	item, err := s.Store.ApproveCatalog(r.Context(), host.ID, entryID, body.SpecHash, p.User.ID, s.now())
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.auditOK(r.Context(), p, store.AuditRow{
-		ProjectID: idPtr(host.ProjectID),
-		HostID:    idPtr(host.ID),
-		Action:    audit.ActionCatalogApprove,
-		Detail:    map[string]any{"entry_id": entryID.String(), "spec_hash": body.SpecHash},
-	})
-	one := []store.CatalogApproval{item}
-	if err := s.withSetValues(r.Context(), one); err != nil {
-		s.fail(w, err)
-		return
-	}
-	writeOK(w, http.StatusOK, one[0])
-}
-
-func (s *Server) handleCatalogApprovalDelete(w http.ResponseWriter, r *http.Request) {
-	p, host, ok := s.loadCatalogHost(w, r)
-	if !ok {
-		return
-	}
-	if err := authz.Authorize(r.Context(), p.User.ID, host.ProjectID, authz.CapMembers); err != nil {
-		s.deny(w, r, p, idPtr(host.ProjectID), idPtr(host.ID), nil, audit.ActionCatalogApprovalRevoke, err)
-		return
-	}
-	if s.refuseDelegated(w, r, p, idPtr(host.ProjectID), idPtr(host.ID), audit.ActionCatalogApprovalRevoke) {
-		return
-	}
-	entryID, err := uuid.Parse(r.PathValue("entry_id"))
-	if err != nil {
-		writeCode(w, "bad_request", "invalid id")
-		return
-	}
-	if err := s.Store.DeleteCatalogApproval(r.Context(), host.ID, entryID); err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.auditOK(r.Context(), p, store.AuditRow{
-		ProjectID: idPtr(host.ProjectID),
-		HostID:    idPtr(host.ID),
-		Action:    audit.ActionCatalogApprovalRevoke,
-		Detail:    map[string]any{"entry_id": entryID.String()},
-	})
-	writeOK(w, http.StatusOK, nil)
-}
-
 func (s *Server) handleCatalogRun(w http.ResponseWriter, r *http.Request) {
 	p, id, ok := s.catalogProject(w, r)
 	if !ok {
@@ -616,7 +522,7 @@ func (s *Server) loadCatalogHost(w http.ResponseWriter, r *http.Request) (princi
 }
 
 func (s *Server) visibleEntry(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, name string) (store.CatalogEntry, string, bool) {
-	role, err := s.Store.Role(r.Context(), projectID, p.User.ID)
+	role, err := s.callerRole(r.Context(), projectID, p.User.ID)
 	if err != nil {
 		s.fail(w, err)
 		return store.CatalogEntry{}, "", false
@@ -795,7 +701,7 @@ func myActions(held map[string]bool) []string {
 }
 
 func (s *Server) callerActions(r *http.Request, projectID, userID uuid.UUID, entry store.CatalogEntry) ([]string, error) {
-	role, err := s.Store.Role(r.Context(), projectID, userID)
+	role, err := s.callerRole(r.Context(), projectID, userID)
 	if err != nil {
 		return nil, err
 	}

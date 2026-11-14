@@ -21,13 +21,13 @@ import (
 )
 
 const (
-	reasonNoPrograms = "host does not allow programs"
-	reasonDisabled   = "programs are disabled on this host"
-	reasonRunAs      = "run_as is not allowed on this host"
-	reasonShell      = "shell is not allowed on this host"
-	reasonWaiting    = "waiting for the host owner's approval"
-	reasonInProgress = "request in progress"
-	reasonNoSecrets  = "this host's agent does not support program secrets"
+	reasonNoPrograms     = "host does not allow programs"
+	reasonDisabled       = "programs are disabled on this host"
+	reasonRunAs          = "run_as is not allowed on this host"
+	reasonShell          = "shell is not allowed on this host"
+	reasonNoDeployAccess = "this project has no deploy access to the host"
+	reasonInProgress     = "request in progress"
+	reasonNoSecrets      = "this host's agent does not support program secrets"
 	// reasonProgramEnvTooLarge is api-v1 v1.22 item 4: the agent caps a
 	// program task spec at 64 KiB (agent-protocol v1.3).
 	reasonProgramEnvTooLarge = "the resolved environment is too large for one task"
@@ -44,7 +44,7 @@ func (s *Server) catalogAct(w http.ResponseWriter, r *http.Request, p principal,
 	if !ok {
 		return
 	}
-	role, err := s.Store.Role(r.Context(), projectID, p.User.ID)
+	role, err := s.callerRole(r.Context(), projectID, p.User.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -71,28 +71,9 @@ func (s *Server) catalogAct(w http.ResponseWriter, r *http.Request, p principal,
 	if !actionInputOK(w, action, key, lines, entry.Kind) {
 		return
 	}
-	host, rel, ok := s.programHost(w, r, p, projectID, hostID, entry, action, entry.Kind == "image")
+	host, ok := s.programHost(w, r, p, projectID, hostID, entry, action, entry.Kind == "image")
 	if !ok {
 		return
-	}
-	if rel == "deploy" {
-		approved, err := s.approvalCurrent(r.Context(), entry, host.ID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if !approved {
-			if err := s.Store.UpsertPendingApproval(r.Context(), entry.ID, host.ID, entry.SpecHash, p.User.ID, s.now()); err != nil {
-				s.fail(w, err)
-				return
-			}
-			if entry.Kind == "image" {
-				writeCode(w, "forbidden", reasonWaiting)
-				return
-			}
-			s.programDeny(w, r, p, projectID, host.ID, entry.Name, action, "forbidden", reasonWaiting)
-			return
-		}
 	}
 	if entry.Kind == "image" {
 		s.finishImageShort(w, r, p, projectID, host, entry, action, key, lines)
@@ -166,7 +147,7 @@ func (s *Server) handleConfirmation(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "conflict", "idempotency_key does not match the request that issued this confirmation")
 		return
 	}
-	role, err := s.Store.Role(r.Context(), c.ProjectID, p.User.ID)
+	role, err := s.callerRole(r.Context(), c.ProjectID, p.User.ID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeCode(w, "not_found", "not found")
@@ -197,24 +178,9 @@ func (s *Server) handleConfirmation(w http.ResponseWriter, r *http.Request) {
 		s.confirmImage(w, r, p, c, entry)
 		return
 	}
-	host, rel, ok := s.programHost(w, r, p, c.ProjectID, c.HostID, entry, c.Action, false)
+	host, ok := s.programHost(w, r, p, c.ProjectID, c.HostID, entry, c.Action, false)
 	if !ok {
 		return
-	}
-	if rel == "deploy" {
-		approved, err := s.approvalCurrent(r.Context(), entry, host.ID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if !approved {
-			if err := s.Store.UpsertPendingApproval(r.Context(), entry.ID, host.ID, entry.SpecHash, p.User.ID, now); err != nil {
-				s.fail(w, err)
-				return
-			}
-			s.programDeny(w, r, p, c.ProjectID, host.ID, entry.Name, c.Action, "forbidden", reasonWaiting)
-			return
-		}
 	}
 	code, msg, err := s.programGate(r.Context(), c.ProjectID, host, entry, c.Action)
 	if err != nil {
@@ -321,43 +287,40 @@ func parseHostID(w http.ResponseWriter, raw string) (uuid.UUID, bool) {
 	return id, true
 }
 
-func (s *Server) programHost(w http.ResponseWriter, r *http.Request, p principal, projectID, hostID uuid.UUID, entry store.CatalogEntry, action string, image bool) (store.Host, string, bool) {
-	rel, err := s.Store.HostProjectRelation(r.Context(), projectID, hostID)
+// programHost is the v1.24 item 4 host check for a catalog action: the
+// entry's project needs deploy access to the host. Without it the answer is
+// forbidden reasonNoDeployAccess when the caller can see the host, and
+// not_found otherwise. The host's allowlist pre-check (v1.23) comes after
+// this, in programGate or the image path.
+func (s *Server) programHost(w http.ResponseWriter, r *http.Request, p principal, projectID, hostID uuid.UUID, entry store.CatalogEntry, action string, image bool) (store.Host, bool) {
+	level, err := s.Store.HostProjectAccess(r.Context(), projectID, hostID)
 	if err != nil {
 		s.fail(w, err)
-		return store.Host{}, "", false
+		return store.Host{}, false
 	}
-	if rel == "" {
-		writeCode(w, "not_found", "not found")
-		return store.Host{}, "", false
-	}
-	if rel == "metrics" {
-		if image {
-			s.imageDeny(w, r, p, projectID, hostID, "", entry.Name, action, "forbidden", "forbidden")
-			return store.Host{}, "", false
+	if level != authz.LevelDeploy {
+		rel, err := authz.HostRelation(r.Context(), p.User.ID, hostID)
+		if err != nil {
+			s.fail(w, err)
+			return store.Host{}, false
 		}
-		s.programDeny(w, r, p, projectID, hostID, entry.Name, action, "forbidden", "forbidden")
-		return store.Host{}, "", false
+		if !rel.Sees() {
+			writeCode(w, "not_found", "not found")
+			return store.Host{}, false
+		}
+		if image {
+			s.imageDeny(w, r, p, projectID, hostID, "", entry.Name, action, "forbidden", reasonNoDeployAccess)
+			return store.Host{}, false
+		}
+		s.programDeny(w, r, p, projectID, hostID, entry.Name, action, "forbidden", reasonNoDeployAccess)
+		return store.Host{}, false
 	}
 	host, err := s.Store.GetHost(r.Context(), hostID)
 	if err != nil {
 		s.fail(w, err)
-		return store.Host{}, "", false
+		return store.Host{}, false
 	}
-	return host, rel, true
-}
-
-func (s *Server) approvalCurrent(ctx context.Context, entry store.CatalogEntry, hostID uuid.UUID) (bool, error) {
-	items, err := s.Store.ListCatalogApprovals(ctx, hostID)
-	if err != nil {
-		return false, err
-	}
-	for _, item := range items {
-		if item.EntryID == entry.ID && item.Status == "approved" && item.SpecHash == entry.SpecHash {
-			return true, nil
-		}
-	}
-	return false, nil
+	return host, true
 }
 
 func policyReason(host store.Host, runAs, exec string, shell bool) string {

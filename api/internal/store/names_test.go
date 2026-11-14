@@ -3,6 +3,8 @@ package store
 import (
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestNormalizeOwnerUser(t *testing.T) {
@@ -39,3 +41,28 @@ func TestNormalizeOwnerUser(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestOrgNames(t *testing.T) {
+	if got := OrgSlug("More Than Code"); got != "more-than-code" {
+		t.Fatalf("slug %q", got)
+	}
+	if got := OrgSlug("!!!"); got != "org" {
+		t.Fatalf("empty slug %q", got)
+	}
+	if got := OrgSlug(strings.Repeat("a", 90)); len(got) != MaxOrgSlug || !OrgSlugRe.MatchString(got) {
+		t.Fatalf("long slug %q", got)
+	}
+	id := uuid.MustParse("3aec6e15-4951-4886-a9f8-7ca0b6ac3e46")
+	if got := PersonalOrgSlug(id); got != "u-3aec6e154951" || !OrgSlugRe.MatchString(got) {
+		t.Fatalf("personal slug %q", got)
+	}
+	if got := PersonalOrgName("Joe", "j@example.com"); got != "Joe's org" {
+		t.Fatalf("name %q", got)
+	}
+	if got := PersonalOrgName(" ", "pat@example.com"); got != "pat's org" {
+		t.Fatalf("email name %q", got)
+	}
+	if got := PersonalOrgName(strings.Repeat("é", 100), ""); !ValidName(got) {
+		t.Fatalf("long name %q", got)
+	}
+}

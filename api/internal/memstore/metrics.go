@@ -104,12 +104,17 @@ func (m *Mem) LatestProcesses(_ context.Context, hostID uuid.UUID, since time.Ti
 	return &t, items, nil
 }
 
-func projectVisible(projectID uuid.UUID, projects []uuid.UUID) bool {
+// projectVisible: nil projects is every row; otherwise an org-level row
+// (nil project) never matches.
+func projectVisible(projectID *uuid.UUID, projects []uuid.UUID) bool {
 	if projects == nil {
 		return true
 	}
+	if projectID == nil {
+		return false
+	}
 	for _, id := range projects {
-		if projectID == id {
+		if *projectID == id {
 			return true
 		}
 	}
@@ -179,6 +184,7 @@ func (m *Mem) InsertAudit(_ context.Context, row store.AuditRow) error {
 		At:          row.At,
 		ActorUserID: row.ActorUserID,
 		Via:         row.Via,
+		OrgID:       row.OrgID,
 		ProjectID:   row.ProjectID,
 		HostID:      row.HostID,
 		ServiceID:   row.ServiceID,
@@ -193,11 +199,19 @@ func (m *Mem) InsertAudit(_ context.Context, row store.AuditRow) error {
 }
 
 func (m *Mem) ListAudit(_ context.Context, projectID uuid.UUID, limit int, cursor *store.Cursor) ([]store.AuditEntry, *store.Cursor, error) {
+	return m.listAudit(func(a store.AuditEntry) bool { return a.ProjectID != nil && *a.ProjectID == projectID }, limit, cursor)
+}
+
+func (m *Mem) ListOrgAudit(_ context.Context, orgID uuid.UUID, limit int, cursor *store.Cursor) ([]store.AuditEntry, *store.Cursor, error) {
+	return m.listAudit(func(a store.AuditEntry) bool { return a.OrgID != nil && *a.OrgID == orgID }, limit, cursor)
+}
+
+func (m *Mem) listAudit(keep func(store.AuditEntry) bool, limit int, cursor *store.Cursor) ([]store.AuditEntry, *store.Cursor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var items []store.AuditEntry
 	for _, a := range m.audits {
-		if a.ProjectID == nil || *a.ProjectID != projectID {
+		if !keep(a) {
 			continue
 		}
 		items = append(items, a)

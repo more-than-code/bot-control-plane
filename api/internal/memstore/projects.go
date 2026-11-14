@@ -8,10 +8,13 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-func (m *Mem) CreateProject(_ context.Context, ownerID uuid.UUID, name, baseSlug string, at time.Time) (store.Project, error) {
+func (m *Mem) CreateProject(_ context.Context, orgID, ownerID uuid.UUID, name, baseSlug string, at time.Time) (store.Project, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.users[ownerID]; !ok {
+		return store.Project{}, store.ErrNotFound
+	}
+	if _, ok := m.liveOrgLocked(orgID); !ok {
 		return store.Project{}, store.ErrNotFound
 	}
 	slug, err := store.Unique(baseSlug, 80, func(s string) bool {
@@ -23,13 +26,17 @@ func (m *Mem) CreateProject(_ context.Context, ownerID uuid.UUID, name, baseSlug
 	}
 	p := store.Project{
 		ID:        uuid.New(),
+		OrgID:     orgID,
 		Name:      name,
 		Slug:      slug,
 		Role:      storeRoleOwner,
+		Via:       "member",
 		CreatedBy: ownerID,
 		CreatedAt: at,
 	}
-	m.projects[p.ID] = p
+	stored := p
+	stored.Role, stored.Via = "", ""
+	m.projects[p.ID] = stored
 	m.bySlug[slug] = p.ID
 	m.members[memberKey(p.ID, ownerID)] = memberRec{
 		ProjectID: p.ID,
@@ -43,28 +50,56 @@ func (m *Mem) CreateProject(_ context.Context, ownerID uuid.UUID, name, baseSlug
 
 const storeRoleOwner = "owner"
 
+// reachableLocked returns the project with the caller's role and via, and
+// whether the caller reaches it (api-v1 v1.24 item 1). A membership wins.
+func (m *Mem) reachableLocked(p store.Project, userID uuid.UUID) (store.Project, bool) {
+	if mem, ok := m.members[memberKey(p.ID, userID)]; ok {
+		p.Role, p.Via = mem.Role, "member"
+		return p, true
+	}
+	if store.OrgAdmin(m.orgRoleLocked(p.OrgID, userID)) {
+		p.Role, p.Via = "admin", "org"
+		return p, true
+	}
+	return p, false
+}
+
+func (m *Mem) reachableProjectsLocked(userID uuid.UUID, orgID *uuid.UUID) []store.Project {
+	var items []store.Project
+	for _, p := range m.projects {
+		if p.DeletedAt != nil || (orgID != nil && p.OrgID != *orgID) {
+			continue
+		}
+		if r, ok := m.reachableLocked(p, userID); ok {
+			items = append(items, r)
+		}
+	}
+	return items
+}
+
 func (m *Mem) ListProjects(_ context.Context, userID uuid.UUID, limit int, cursor *store.Cursor) ([]store.Project, *store.Cursor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var items []store.Project
-	for _, mem := range m.members {
-		if mem.UserID != userID {
-			continue
-		}
-		p, ok := m.projects[mem.ProjectID]
-		if !ok || p.DeletedAt != nil {
-			continue
-		}
-		p.Role = mem.Role
-		items = append(items, p)
-	}
-	out, next := pageProjects(items, limit, cursor)
+	out, next := pageProjects(m.reachableProjectsLocked(userID, nil), limit, cursor)
 	return out, next, nil
 }
 
 func (m *Mem) ListAllProjects(ctx context.Context, userID uuid.UUID) ([]store.Project, error) {
 	items, _, err := m.ListProjects(ctx, userID, 10000, nil)
 	return items, err
+}
+
+func (m *Mem) ListOrgProjects(_ context.Context, orgID, userID uuid.UUID) ([]store.Project, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.liveOrgLocked(orgID); !ok {
+		return nil, store.ErrNotFound
+	}
+	out, _ := pageProjects(m.reachableProjectsLocked(userID, &orgID), 10000, nil)
+	if out == nil {
+		out = []store.Project{}
+	}
+	return out, nil
 }
 
 func (m *Mem) GetProject(_ context.Context, id uuid.UUID) (store.Project, error) {
@@ -91,6 +126,20 @@ func (m *Mem) Role(_ context.Context, projectID, userID uuid.UUID) (string, erro
 	return mem.Role, nil
 }
 
+func (m *Mem) ProjectAccess(_ context.Context, projectID, userID uuid.UUID) (store.ProjectAccess, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.projects[projectID]
+	if !ok || p.DeletedAt != nil {
+		return store.ProjectAccess{}, store.ErrNotFound
+	}
+	return store.ProjectAccess{
+		OrgID:      p.OrgID,
+		MemberRole: m.members[memberKey(projectID, userID)].Role,
+		OrgRole:    m.orgRoleLocked(p.OrgID, userID),
+	}, nil
+}
+
 func (m *Mem) RenameProject(_ context.Context, id uuid.UUID, name string) (store.Project, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -103,56 +152,46 @@ func (m *Mem) RenameProject(_ context.Context, id uuid.UUID, name string) (store
 	return p, nil
 }
 
-func (m *Mem) DeleteProject(_ context.Context, id uuid.UUID, at time.Time) ([]uuid.UUID, error) {
+func (m *Mem) DeleteProject(_ context.Context, id uuid.UUID, at time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.projects[id]
 	if !ok || p.DeletedAt != nil {
-		return nil, store.ErrNotFound
+		return store.ErrNotFound
 	}
+	m.deleteProjectLocked(id, at)
+	return nil
+}
+
+// deleteProjectLocked is api-v1 v1.24 item 7: no host is revoked. The
+// project's access rows go, join tokens granting it are revoked, and its
+// services are marked gone (a gone row keeps its time).
+func (m *Mem) deleteProjectLocked(id uuid.UUID, at time.Time) {
+	p := m.projects[id]
 	p.DeletedAt = &at
 	m.projects[id] = p
-	var ids []uuid.UUID
-	for hid, h := range m.hosts {
-		if h.ProjectID != id {
-			continue
+	for key, a := range m.access {
+		if a.ProjectID == id {
+			delete(m.access, key)
 		}
-		ids = append(ids, hid)
-		if h.RevokedAt == nil {
-			h.RevokedAt = &at
-			m.hosts[hid] = h
-		}
-		m.revokeCredsLocked(hid, at)
-		m.markHostServicesGoneLocked(hid)
 	}
-	m.cascadeProjectLocked(id)
+	for tid, tok := range m.tokens {
+		if tok.Grant != nil && tok.Grant.ProjectID == id && tok.RevokedAt == nil && tok.UsedAt == nil {
+			t := at
+			tok.RevokedAt = &t
+			m.tokens[tid] = tok
+		}
+	}
+	for sid, svc := range m.services {
+		if svc.ProjectID != nil && *svc.ProjectID == id && svc.GoneAt == nil {
+			t := at
+			svc.GoneAt = &t
+			m.services[sid] = svc
+		}
+	}
 	m.deleteInvitesLocked(id)
 	m.deleteCatalogLocked(id)
 	m.deleteSecretsLocked(id)
-	sortUUIDs(ids)
-	return ids, nil
-}
-
-// cascadeProjectLocked moves this project's services on other hosts back to
-// those hosts' owners, and drops shares of this project and of its hosts.
-func (m *Mem) cascadeProjectLocked(projectID uuid.UUID) {
-	for id, svc := range m.services {
-		if svc.ProjectID != projectID {
-			continue
-		}
-		h, ok := m.hosts[svc.HostID]
-		if !ok || h.ProjectID == projectID {
-			continue
-		}
-		svc.ProjectID = h.ProjectID
-		m.services[id] = svc
-	}
-	for key, sh := range m.shares {
-		h, ok := m.hosts[sh.HostID]
-		if sh.ProjectID == projectID || (ok && h.ProjectID == projectID) {
-			delete(m.shares, key)
-		}
-	}
 }
 
 func (m *Mem) revokeCredsLocked(hostID uuid.UUID, at time.Time) {

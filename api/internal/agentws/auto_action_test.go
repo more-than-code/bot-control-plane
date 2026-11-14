@@ -138,7 +138,7 @@ func TestAutoActionIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	mk := func(name, slug string) store.Project {
-		p, err := st.CreateProject(ctx, user.ID, name, slug, now())
+		p, err := st.CreateProject(ctx, st.PersonalOrg(user.ID), user.ID, name, slug, now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -158,7 +158,7 @@ func TestAutoActionIngest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateJoinToken(ctx, project.ID, joinHash, nil, user.ID, now().Add(time.Hour), now()); err != nil {
+	if _, err := st.CreateJoinToken(ctx, project.OrgID, joinHash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, user.ID, now().Add(time.Hour), now()); err != nil {
 		t.Fatal(err)
 	}
 	enrollConn := dial(t, url, "")
@@ -173,10 +173,10 @@ func TestAutoActionIngest(t *testing.T) {
 	}
 	credID := enrolled["credential_id"].(string)
 	credential := enrolled["credential"].(string)
-	if _, _, err := st.PutHostShare(ctx, hostID, viewer.ID, "metrics", user.ID, now()); err != nil {
+	if _, _, err := st.PutHostAccess(ctx, hostID, viewer.ID, "metrics", user.ID, now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.PutHostShare(ctx, hostID, deployer.ID, "deploy", user.ID, now()); err != nil {
+	if _, _, err := st.PutHostAccess(ctx, hostID, deployer.ID, "deploy", user.ID, now()); err != nil {
 		t.Fatal(err)
 	}
 

@@ -174,17 +174,12 @@ LIMIT $%d OFFSET $%d
 func (d *DB) projectHostReached(ctx context.Context, projectID, hostID uuid.UUID) (bool, error) {
 	var ok bool
 	err := d.pool.QueryRow(ctx, `
-SELECT
-    EXISTS (
-        SELECT 1 FROM app.hosts h
-        WHERE h.id = $1::uuid AND h.project_id = $2::uuid
-    )
-    OR EXISTS (
-        SELECT 1 FROM app.host_shares hs
-        WHERE hs.host_id = $1::uuid
-          AND hs.project_id = $2::uuid
-          AND hs.level = 'deploy'
-    )
+SELECT EXISTS (
+    SELECT 1 FROM app.host_access a
+    WHERE a.host_id = $1::uuid
+      AND a.project_id = $2::uuid
+      AND a.level = 'deploy'
+)
 `, hostID.String(), projectID.String()).Scan(&ok)
 	if err != nil {
 		return false, mapErr(err)
@@ -192,7 +187,9 @@ SELECT
 	return ok, nil
 }
 
-// projectServiceWhere is the v1.3 row rule plus optional host and search.
+// projectServiceWhere is the v1.3 row rule as amended by v1.24 (the
+// project's own services on hosts where it has deploy access) plus
+// optional host and search.
 // Search parameters are bound. % _ and \ in q match literally.
 func projectServiceWhere(projectID uuid.UUID, q store.ServiceListQuery) (string, []any) {
 	args := []any{projectID.String()}
@@ -203,15 +200,12 @@ func projectServiceWhere(projectID uuid.UUID, q store.ServiceListQuery) (string,
 	}
 	where := `
 WHERE (
-    h.project_id = $1::uuid
-    OR (
-        s.project_id = $1::uuid
-        AND EXISTS (
-            SELECT 1 FROM app.host_shares hs
-            WHERE hs.host_id = h.id
-              AND hs.project_id = $1::uuid
-              AND hs.level = 'deploy'
-        )
+    s.project_id = $1::uuid
+    AND EXISTS (
+        SELECT 1 FROM app.host_access a
+        WHERE a.host_id = h.id
+          AND a.project_id = $1::uuid
+          AND a.level = 'deploy'
     )
 )
 AND ` + hostPred
@@ -326,18 +320,10 @@ func (d *DB) UpsertDiscovered(ctx context.Context, hostID uuid.UUID, items []sto
 		return mapErr(err)
 	}
 	defer tx.Rollback(ctx)
-	var hostProject string
-	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM app.hosts WHERE id = $1::uuid`, hostID.String()).Scan(&hostProject); err != nil {
-		return mapErr(err)
-	}
-	ownerProject, err := parseID(hostProject)
-	if err != nil {
-		return err
-	}
 	names := make([]string, 0, len(items))
 	for _, item := range items {
-		name, source, projectID, catalogEntry := store.PlaceDiscovered(item, ownerProject, func(slug, entry, kind string) (uuid.UUID, bool) {
-			return d.catalogLookup(ctx, tx, slug, entry, kind)
+		name, source, projectID, catalogEntry := store.PlaceDiscovered(item, func(slug, entry, kind string) (uuid.UUID, bool) {
+			return d.ownerLookup(ctx, tx, hostID, slug, entry, kind)
 		})
 		names = append(names, name)
 		if err := exec(ctx, tx, `
@@ -348,7 +334,7 @@ INSERT INTO app.services (
 ) VALUES (
     $1::uuid, $2::uuid, $3, $4, $5, $6::integer[],
     $7, $8, $9, $10, $11,
-    $12, $12, $13::uuid, $14, $15
+    $12, $12, CAST($13 AS uuid), $14, $15
 )
 ON CONFLICT (host_id, name) DO UPDATE SET
     last_seen_at = EXCLUDED.last_seen_at,
@@ -381,7 +367,7 @@ ON CONFLICT (host_id, name) DO UPDATE SET
     process_match = CASE WHEN app.services.source <> 'declared' THEN EXCLUDED.process_match ELSE app.services.process_match END
 `, uuid.New().String(), hostID.String(), name, source, item.Kind, intsTo32(item.Ports),
 			optString(item.SystemdUnit), optString(item.SystemdScope), optString(item.ContainerName), optString(item.ImageDigest), optString(item.ProcessName),
-			at, projectID.String(), optString(store.NormalizeOwnerUser(item.OwnerUser)), optString(catalogEntry)); err != nil {
+			at, optID(projectID), optString(store.NormalizeOwnerUser(item.OwnerUser)), optString(catalogEntry)); err != nil {
 			return mapErr(err)
 		}
 	}
@@ -596,7 +582,8 @@ type projectServiceExtra struct {
 
 func scanServiceInto(row pgx.Row, now time.Time, extra *projectServiceExtra) (store.ProjectService, error) {
 	var s store.Service
-	var id, hostID, projectID string
+	var id, hostID string
+	var projectID *string
 	var ports []int32
 	var checked *time.Time
 	var result *string
@@ -625,7 +612,7 @@ func scanServiceInto(row pgx.Row, now time.Time, extra *projectServiceExtra) (st
 	if s.HostID, err = parseID(hostID); err != nil {
 		return store.ProjectService{}, err
 	}
-	if s.ProjectID, err = parseID(projectID); err != nil {
+	if s.ProjectID, err = parseOptID(projectID); err != nil {
 		return store.ProjectService{}, err
 	}
 	s.Ports = intsFrom32(ports)

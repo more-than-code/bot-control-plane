@@ -21,18 +21,19 @@ func TestListProjectServices(t *testing.T) {
 	deployUser := mustUser(t, mem, "deploy@ex.com", now)
 	metricsUser := mustUser(t, mem, "metrics@ex.com", now)
 	home := makeProject(t, mem, homeUser.ID, "Home", "home", now)
-	deploy := makeProject(t, mem, deployUser.ID, "Deploy", "deploy", now)
-	metrics := makeProject(t, mem, metricsUser.ID, "Metrics", "metrics", now)
+	// All three projects are in home's org (api-v1 v1.24 item 2, D-3).
+	deploy := mustProject(t, mem, home.OrgID, deployUser.ID, "Deploy", "deploy", now)
+	metrics := mustProject(t, mem, home.OrgID, metricsUser.ID, "Metrics", "metrics", now)
 	alpha := enrollMem(t, mem, home.ID, homeUser.ID, "alpha-host", now)
 	beta := enrollMem(t, mem, deploy.ID, deployUser.ID, "beta-host", now)
 	gamma := enrollMem(t, mem, metrics.ID, metricsUser.ID, "gamma-host", now)
 	delta := enrollMem(t, mem, home.ID, homeUser.ID, "delta-host", now)
 	epsilon := enrollMem(t, mem, home.ID, homeUser.ID, "epsilon-host", now)
 	zeta := enrollMem(t, mem, home.ID, homeUser.ID, "zeta-host", now)
-	if _, _, err := mem.PutHostShare(ctx, alpha.ID, deploy.ID, "deploy", homeUser.ID, now); err != nil {
+	if _, _, err := mem.PutHostAccess(ctx, alpha.ID, deploy.ID, "deploy", homeUser.ID, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := mem.PutHostShare(ctx, alpha.ID, metrics.ID, "metrics", homeUser.ID, now); err != nil {
+	if _, _, err := mem.PutHostAccess(ctx, alpha.ID, metrics.ID, "metrics", homeUser.ID, now); err != nil {
 		t.Fatal(err)
 	}
 
@@ -40,9 +41,6 @@ func TestListProjectServices(t *testing.T) {
 	put := func(host store.Host, project uuid.UUID, name, kind string, ports []int, owner *string, display *string, at time.Time) {
 		t.Helper()
 		svc := discoverService(t, mem, host.ID, name, kind, ports, owner, at)
-		if svc.ProjectID != host.ProjectID {
-			t.Fatalf("%s project %s", name, svc.ProjectID)
-		}
 		mem.SetServiceProject(svc.ID, project)
 		if display != nil {
 			if _, err := mem.SetServiceDisplayName(ctx, svc.ID, display, now); err != nil {
@@ -52,8 +50,13 @@ func TestListProjectServices(t *testing.T) {
 		ids[name] = svc.ID
 	}
 	put(alpha, home.ID, "svc-name", "process", []int{8080}, strp("owner-one"), strp("Label One"), now)
-	put(alpha, deploy.ID, "other-name", "container", []int{9}, strp("owner-two"), strp("100%"), now.Add(time.Second))
-	put(alpha, metrics.ID, "met-name", "systemd", []int{443}, nil, nil, now.Add(2*time.Second))
+	// v1.24: a project sees only its own services on a deploy host, so
+	// the sort fixture rows on alpha are home's, and deploy's and metrics'
+	// rows on alpha are hidden from home.
+	put(alpha, home.ID, "other-name", "container", []int{9}, strp("owner-two"), strp("100%"), now.Add(time.Second))
+	put(alpha, home.ID, "met-name", "systemd", []int{443}, nil, nil, now.Add(2*time.Second))
+	put(alpha, deploy.ID, "dep-row", "container", []int{19}, nil, nil, now.Add(2*time.Second))
+	put(alpha, metrics.ID, "met-hidden", "systemd", []int{29}, nil, nil, now.Add(2*time.Second))
 	put(alpha, home.ID, "slash-svc", "process", []int{7}, nil, strp(`a\b`), now.Add(3*time.Second))
 	put(beta, deploy.ID, "local-name", "process", []int{80}, strp("local-user"), strp("Local"), now.Add(4*time.Second))
 	put(gamma, metrics.ID, "mine-name", "process", []int{5555}, strp("mine-user"), strp("a_b"), now.Add(5*time.Second))
@@ -160,7 +163,7 @@ func TestListProjectServices(t *testing.T) {
 		t.Fatalf("underscore %v", got)
 	}
 	deployGot := projectNames(t, mem, deploy.ID, sq("name", "asc", 50, 0), now)
-	if !sameNames(deployGot, []string{"other-name", "local-name"}) {
+	if !sameNames(deployGot, []string{"dep-row", "local-name"}) {
 		t.Fatalf("deploy rows %v", deployGot)
 	}
 
@@ -189,7 +192,7 @@ func TestListProjectServices(t *testing.T) {
 		t.Fatalf("missing host %v", err)
 	}
 	onlyDeploy := projectNames(t, mem, deploy.ID, store.ServiceListQuery{HostID: &alphaID, Sort: "name", Dir: "asc", Limit: 50}, now)
-	if !sameNames(onlyDeploy, []string{"other-name"}) {
+	if !sameNames(onlyDeploy, []string{"dep-row"}) {
 		t.Fatalf("deploy host filter %v", onlyDeploy)
 	}
 
@@ -223,7 +226,7 @@ func TestListProjectServices(t *testing.T) {
 	}
 
 	row := findRow(t, mem, home.ID, "other-name", now)
-	if row.HostName != "alpha-host" || row.ProjectName != "Deploy" || row.DisplayName == nil || *row.DisplayName != "100%" {
+	if row.HostName != "alpha-host" || row.ProjectName != "Home" || row.DisplayName == nil || *row.DisplayName != "100%" {
 		t.Fatalf("row %+v", row)
 	}
 	if row.Health.Status != "down" {
@@ -541,7 +544,7 @@ func derefStr(v *string) string {
 
 func makeProject(t *testing.T, mem *Mem, owner uuid.UUID, name, slug string, at time.Time) store.Project {
 	t.Helper()
-	p, err := mem.CreateProject(context.Background(), owner, name, slug, at)
+	p, err := mem.CreateProject(context.Background(), mem.PersonalOrg(owner), owner, name, slug, at)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -282,149 +282,6 @@ func TestCatalogPermissionsMatrix(t *testing.T) {
 	}
 }
 
-func TestCatalogHostRelation(t *testing.T) {
-	w := newWorld(t)
-	ctx := context.Background()
-	owner := w.user("owner@ex.com", "Owner")
-	admin := w.user("admin@ex.com", "Admin")
-	viewer := w.user("viewer@ex.com", "Viewer")
-	spare := w.user("spare@ex.com", "Spare")
-	extra := w.user("extra@ex.com", "Extra")
-	sc := w.scene(owner, admin, viewer, spare, extra)
-	boxOwner := w.user("box@ex.com", "Box")
-	boxAdmin := w.user("boxadmin@ex.com", "BoxAdmin")
-	boxViewer := w.user("boxview@ex.com", "BoxView")
-	box, err := w.mem.CreateProject(ctx, boxOwner.ID, "Box", "box", w.now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.mem.AddMember(ctx, box.ID, boxAdmin.ID, "admin", boxOwner.ID, w.now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.mem.AddMember(ctx, box.ID, boxViewer.ID, "viewer", boxOwner.ID, w.now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.mem.AddMember(ctx, sc.project.ID, boxOwner.ID, "viewer", owner.ID, w.now); err != nil {
-		t.Fatal(err)
-	}
-	boxHost, _, _ := enrollAgentHost(t, w, box, boxOwner.ID, "boxpi")
-	tok := w.token(owner.ID)
-	entry := createProgram(t, w, tok, sc.project.ID, "tra", "pnpm run dev", false)
-	entryID, _ := entry["id"].(string)
-	hash, _ := entry["spec_hash"].(string)
-	approvals := "/v1/hosts/" + boxHost.ID.String() + "/catalog-approvals"
-
-	status, env := w.do(w.token(extra.ID), http.MethodGet, approvals, "")
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
-	status, env = w.do(w.token(admin.ID), http.MethodGet, approvals, "")
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
-	status, env = w.do(w.token(boxViewer.ID), http.MethodGet, approvals, "")
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
-	status, env = w.do(w.token(boxViewer.ID), http.MethodPost, approvals, `{"entry_id":"`+entryID+`","spec_hash":"`+hash+`"}`)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodGet, approvals, "")
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if len(listItems(t, env)) != 0 {
-		t.Fatalf("approvals %#v", env.Payload)
-	}
-	status, env = w.do(tok, http.MethodGet, "/v1/hosts/"+uuid.New().String()+"/catalog-approvals", "")
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
-
-	if err := w.mem.SetHostPrograms(ctx, sc.host.ID, &store.HostPrograms{Enabled: true, RunAs: []string{"joe"}, PolicyHash: "abc"}); err != nil {
-		t.Fatal(err)
-	}
-	status, env = postAct(w, tok, sc.project.ID.String(), "tra", "run", sc.host.ID.String(), "own-1", nil)
-	mustHTTP(t, status, env, http.StatusServiceUnavailable, "unavailable", "host unavailable")
-
-	status, env = postAct(w, tok, sc.project.ID.String(), "tra", "run", boxHost.ID.String(), "rel-unrelated", nil)
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
-
-	share := "/v1/hosts/" + boxHost.ID.String() + "/shares/" + sc.project.ID.String()
-	status, env = w.do(w.token(boxOwner.ID), http.MethodPut, share, `{"level":"metrics"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	status, env = postAct(w, tok, sc.project.ID.String(), "tra", "run", boxHost.ID.String(), "rel-metrics", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodGet, approvals, "")
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if len(listItems(t, env)) != 0 {
-		t.Fatalf("metrics created an approval %#v", env.Payload)
-	}
-
-	status, env = w.do(w.token(boxOwner.ID), http.MethodPut, share, `{"level":"deploy"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if err := w.mem.SetHostPrograms(ctx, boxHost.ID, &store.HostPrograms{Enabled: true, RunAs: []string{"joe"}, PolicyHash: "abc"}); err != nil {
-		t.Fatal(err)
-	}
-	status, env = postAct(w, tok, sc.project.ID.String(), "tra", "run", boxHost.ID.String(), "rel-wait", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "waiting for the host owner's approval")
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodGet, approvals, "")
-	items := listItems(t, env)
-	if len(items) != 1 || items[0]["status"] != "pending" || items[0]["spec_hash"] != hash || items[0]["requested_by"] != owner.ID.String() {
-		t.Fatalf("pending %#v", items)
-	}
-
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodPost, approvals, `{"entry_id":"`+entryID+`","spec_hash":"`+hash+`"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	approved := objectPayload(t, env)
-	if approved["status"] != "approved" || approved["requested_by"] != owner.ID.String() || approved["approved_by"] != boxAdmin.ID.String() || approved["exec"] != "pnpm" {
-		t.Fatalf("approved %#v", approved)
-	}
-	approvedArgs, _ := approved["args"].([]any)
-	approvedEnv, _ := approved["env"].(map[string]any)
-	if len(approvedArgs) != 2 || approvedArgs[0] != "run" || approvedEnv == nil {
-		t.Fatalf("approval spec %#v", approved)
-	}
-	status, env = w.do(tok, http.MethodPut, "/v1/projects/"+sc.project.ID.String()+"/catalog/tra", `{"kind":"program","command":"pnpm run dev","shell":false,"dir":"/home/joe/app","run_as":"joe"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodGet, approvals, "")
-	kept := listItems(t, env)
-	if len(kept) != 1 || kept[0]["status"] != "approved" || kept[0]["spec_hash"] != hash {
-		t.Fatalf("same hash voided %#v", kept)
-	}
-	entryUUID, err := uuid.Parse(entryID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := w.mem.UpsertPendingApproval(ctx, entryUUID, boxHost.ID, hash, owner.ID, w.now.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodGet, approvals, "")
-	kept = listItems(t, env)
-	if len(kept) != 1 || kept[0]["status"] != "approved" || kept[0]["requested_by"] != owner.ID.String() {
-		t.Fatalf("upsert cleared approval %#v", kept)
-	}
-	status, env = postAct(w, tok, sc.project.ID.String(), "tra", "run", boxHost.ID.String(), "rel-go", nil)
-	mustHTTP(t, status, env, http.StatusServiceUnavailable, "unavailable", "host unavailable")
-
-	status, env = w.do(tok, http.MethodPut, "/v1/projects/"+sc.project.ID.String()+"/catalog/tra", `{"kind":"program","command":"pnpm run start","shell":false,"dir":"/home/joe/app","run_as":"joe"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	newHash, _ := objectPayload(t, env)["spec_hash"].(string)
-	if newHash == hash {
-		t.Fatal("spec hash did not change")
-	}
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodGet, approvals, "")
-	if len(listItems(t, env)) != 0 {
-		t.Fatalf("void left %#v", env.Payload)
-	}
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodPost, approvals, `{"entry_id":"`+entryID+`","spec_hash":"`+hash+`"}`)
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodGet, approvals, "")
-	if len(listItems(t, env)) != 0 {
-		t.Fatalf("stale approve stored %#v", env.Payload)
-	}
-	status, env = postAct(w, tok, sc.project.ID.String(), "tra", "run", boxHost.ID.String(), "rel-void", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "waiting for the host owner's approval")
-	status, env = w.do(w.token(boxAdmin.ID), http.MethodGet, approvals, "")
-	items = listItems(t, env)
-	if len(items) != 1 || items[0]["status"] != "pending" || items[0]["spec_hash"] != newHash {
-		t.Fatalf("pending after void %#v", items)
-	}
-	status, env = w.do(w.token(boxOwner.ID), http.MethodDelete, approvals+"/"+entryID, "")
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	status, env = w.do(w.token(boxViewer.ID), http.MethodDelete, approvals+"/"+entryID, "")
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
-}
-
 func TestCatalogPolicy(t *testing.T) {
 	w := newWorld(t)
 	owner := w.user("owner@ex.com", "Owner")
@@ -753,11 +610,15 @@ func TestHelloProgramsAndOwnedIngest(t *testing.T) {
 	owner := w.user("owner@ex.com", "Owner")
 	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
 	appOwner := w.user("app@ex.com", "App")
-	app, err := w.mem.CreateProject(ctx, appOwner.ID, "App", "appproj", w.now)
+	app, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(appOwner.ID), appOwner.ID, "App", "appproj", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	createProgram(t, w, w.token(appOwner.ID), app.ID, "tra", "pnpm run dev", false)
+	// api-v1 v1.24 item 6: an owner maps only for a deploy project of the host's org.
+	if _, _, err := w.share(ctx, sc.host.ID, app.ID, "deploy", owner.ID, w.now); err != nil {
+		t.Fatal(err)
+	}
 	unit := "deploybot-missing-nope.service"
 	scope := "system"
 	services := []any{
@@ -783,7 +644,7 @@ func TestHelloProgramsAndOwnedIngest(t *testing.T) {
 		t.Fatal("reported name was stored beside the entry")
 	}
 	miss := findMap(t, items, "name", unit)
-	if miss["source"] != "discovered" || miss["catalog_entry"] != nil || miss["project_id"] != sc.project.ID.String() {
+	if miss["source"] != "discovered" || miss["catalog_entry"] != nil || miss["project_id"] != nil {
 		t.Fatalf("fallback %#v", miss)
 	}
 	img := findMap(t, items, "name", "imgd")
@@ -791,7 +652,7 @@ func TestHelloProgramsAndOwnedIngest(t *testing.T) {
 		t.Fatalf("image owner %#v", img)
 	}
 	wrong := findMap(t, items, "name", "deploybot-appproj-absent.service")
-	if wrong["source"] != "discovered" || wrong["catalog_entry"] != nil || wrong["project_id"] != sc.project.ID.String() {
+	if wrong["source"] != "discovered" || wrong["catalog_entry"] != nil || wrong["project_id"] != nil {
 		t.Fatalf("wrong entry %#v", wrong)
 	}
 	writeFrame(t, conn, map[string]any{"v": 1, "type": "services", "services": []any{
@@ -820,7 +681,6 @@ func TestHelloProgramsAndOwnedIngest(t *testing.T) {
 
 func TestCatalogAuditRows(t *testing.T) {
 	w := newWorld(t)
-	ctx := context.Background()
 	owner := w.user("owner@ex.com", "Owner")
 	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
 	tok := w.token(owner.ID)
@@ -830,21 +690,7 @@ func TestCatalogAuditRows(t *testing.T) {
 	newHash, _ := objectPayload(t, env)["spec_hash"].(string)
 	status, env = w.do(tok, http.MethodPut, "/v1/projects/"+sc.project.ID.String()+"/catalog/tra/permissions", `{"grants":[{"subject":"role:viewer","actions":["logs"]}]}`)
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	boxOwner := w.user("box@ex.com", "Box")
-	box, err := w.mem.CreateProject(ctx, boxOwner.ID, "Box", "boxaudit", w.now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.mem.AddMember(ctx, box.ID, owner.ID, "admin", boxOwner.ID, w.now); err != nil {
-		t.Fatal(err)
-	}
-	host, _, _ := enrollAgentHost(t, w, box, boxOwner.ID, "auditpi")
-	entryID, _ := entry["id"].(string)
-	approvals := "/v1/hosts/" + host.ID.String() + "/catalog-approvals"
-	status, env = w.do(tok, http.MethodPost, approvals, `{"entry_id":"`+entryID+`","spec_hash":"`+newHash+`"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	status, env = w.do(tok, http.MethodDelete, approvals+"/"+entryID, "")
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	_ = entry
 	status, env = w.do(tok, http.MethodDelete, "/v1/projects/"+sc.project.ID.String()+"/catalog/tra", "")
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 
@@ -861,10 +707,6 @@ func TestCatalogAuditRows(t *testing.T) {
 	}
 	if detail["old_spec_hash"] == "" || detail["spec_hash"] != newHash || detail["old_spec_hash"] == detail["spec_hash"] {
 		t.Fatalf("update detail %#v", detail)
-	}
-	boxRows := auditRows(t, w, box.ID)
-	if auditCount(boxRows, "catalog.approve", "allowed") != 1 || auditCount(boxRows, "catalog.approval_revoke", "allowed") != 1 {
-		t.Fatalf("approval audit %#v", boxRows)
 	}
 }
 
@@ -1135,7 +977,7 @@ func enrollAgentHost(t *testing.T, w *world, project store.Project, owner uuid.U
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.mem.CreateJoinToken(ctx, project.ID, hash, nil, owner, w.now.Add(time.Hour), w.now); err != nil {
+	if _, err := w.mem.CreateJoinToken(ctx, project.OrgID, hash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, owner, w.now.Add(time.Hour), w.now); err != nil {
 		t.Fatal(err)
 	}
 	credPlain, credHash, err := secret.NewToken()

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,16 @@ import (
 // delegatedDenyPatterns is the explicit v1.12.1 deny list. A mutating
 // route left at the zero value fails the guard unless it is named here.
 var delegatedDenyPatterns = []string{
+	"POST /v1/orgs",
+	"PATCH /v1/orgs/{id}",
+	"DELETE /v1/orgs/{id}",
+	"POST /v1/orgs/{id}/members",
+	"PATCH /v1/orgs/{id}/members/{user_id}",
+	"DELETE /v1/orgs/{id}/members/{user_id}",
+	"POST /v1/orgs/{id}/transfer-ownership",
+	"POST /v1/orgs/{id}/projects",
+	"POST /v1/orgs/{id}/join-tokens",
+	"DELETE /v1/orgs/{id}/join-tokens/{token_id}",
 	"POST /v1/projects",
 	"PATCH /v1/projects/{id}",
 	"DELETE /v1/projects/{id}",
@@ -32,8 +43,8 @@ var delegatedDenyPatterns = []string{
 	"POST /v1/projects/{id}/invites",
 	"DELETE /v1/projects/{id}/invites/{invite_id}",
 	"DELETE /v1/hosts/{id}/credential",
-	"PUT /v1/hosts/{id}/shares/{project_id}",
-	"DELETE /v1/hosts/{id}/shares/{project_id}",
+	"PUT /v1/hosts/{id}/access/{project_id}",
+	"DELETE /v1/hosts/{id}/access/{project_id}",
 	"PATCH /v1/services/{id}",
 	"PUT /v1/projects/{id}/env-sets/{set}/keys/{key}",
 	"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}",
@@ -58,11 +69,11 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 	spare := w.user("spare@ex.com", "Spare")
 	extra := w.user("extra@ex.com", "Extra")
 	sc := w.scene(owner, admin, w.user("viewer@ex.com", "Viewer"), spare, extra)
-	other, err := w.mem.CreateProject(ctx, owner.ID, "Other", "other", w.now)
+	other, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Other", "other", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(ctx, sc.host.ID, other.ID, "metrics", owner.ID, w.now); err != nil {
+	if _, _, err := w.share(ctx, sc.host.ID, other.ID, "metrics", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	_, inviteHash, err := secret.NewToken()
@@ -76,6 +87,14 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 	tok := tokenKind(t, w, owner.ID, store.KindDelegated)
 	project := sc.project.ID.String()
 	host := sc.host.ID.String()
+	if _, err := w.mem.AddOrgMember(ctx, sc.project.OrgID, spare.ID, "member", owner.ID, w.now); err != nil {
+		t.Fatal(err)
+	}
+	org := "/v1/orgs/" + sc.project.OrgID.String()
+	orgSnap := func(t *testing.T) string {
+		t.Helper()
+		return orgState(t, w, owner.ID, sc.project.OrgID) + "|" + joinState(t, w, sc.project.ID) + "|" + projectNames(t, w, owner.ID)
+	}
 
 	cases := []struct {
 		pattern string
@@ -84,6 +103,16 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		body    string
 		read    func(t *testing.T) string
 	}{
+		{"POST /v1/orgs", http.MethodPost, "/v1/orgs", `{"name":"Nope"}`, orgSnap},
+		{"PATCH /v1/orgs/{id}", http.MethodPatch, org, `{"name":"Renamed"}`, orgSnap},
+		{"DELETE /v1/orgs/{id}", http.MethodDelete, org, "", orgSnap},
+		{"POST /v1/orgs/{id}/members", http.MethodPost, org + "/members", `{"email":"` + extra.Email + `","role":"member"}`, orgSnap},
+		{"PATCH /v1/orgs/{id}/members/{user_id}", http.MethodPatch, org + "/members/" + spare.ID.String(), `{"role":"admin"}`, orgSnap},
+		{"DELETE /v1/orgs/{id}/members/{user_id}", http.MethodDelete, org + "/members/" + spare.ID.String(), "", orgSnap},
+		{"POST /v1/orgs/{id}/transfer-ownership", http.MethodPost, org + "/transfer-ownership", `{"user_id":"` + spare.ID.String() + `"}`, orgSnap},
+		{"POST /v1/orgs/{id}/projects", http.MethodPost, org + "/projects", `{"name":"Nope"}`, orgSnap},
+		{"POST /v1/orgs/{id}/join-tokens", http.MethodPost, org + "/join-tokens", `{}`, orgSnap},
+		{"DELETE /v1/orgs/{id}/join-tokens/{token_id}", http.MethodDelete, org + "/join-tokens/" + sc.join.ID.String(), "", orgSnap},
 		{"POST /v1/projects", http.MethodPost, "/v1/projects", `{"name":"Nope"}`, func(t *testing.T) string {
 			return projectNames(t, w, owner.ID)
 		}},
@@ -126,11 +155,11 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		{"DELETE /v1/hosts/{id}/credential", http.MethodDelete, "/v1/hosts/" + host + "/credential", "", func(t *testing.T) string {
 			return credState(t, w, sc)
 		}},
-		{"PUT /v1/hosts/{id}/shares/{project_id}", http.MethodPut, "/v1/hosts/" + host + "/shares/" + other.ID.String(),
+		{"PUT /v1/hosts/{id}/access/{project_id}", http.MethodPut, "/v1/hosts/" + host + "/access/" + other.ID.String(),
 			`{"level":"deploy"}`, func(t *testing.T) string {
 				return shareState(t, w, sc.host.ID)
 			}},
-		{"DELETE /v1/hosts/{id}/shares/{project_id}", http.MethodDelete, "/v1/hosts/" + host + "/shares/" + other.ID.String(),
+		{"DELETE /v1/hosts/{id}/access/{project_id}", http.MethodDelete, "/v1/hosts/" + host + "/access/" + other.ID.String(),
 			"", func(t *testing.T) string {
 				return shareState(t, w, sc.host.ID)
 			}},
@@ -183,7 +212,7 @@ func TestDelegatedDenyUnknownProject(t *testing.T) {
 	owner := w.user("owner@ex.com", "Owner")
 	extra := w.user("extra@ex.com", "Extra")
 	sc := w.scene(owner, w.user("admin@ex.com", "Admin"), w.user("viewer@ex.com", "Viewer"), w.user("spare@ex.com", "Spare"), extra)
-	foreign, err := w.mem.CreateProject(ctx, extra.ID, "Foreign", "foreign", w.now)
+	foreign, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(extra.ID), extra.ID, "Foreign", "foreign", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +545,11 @@ func memberRole(t *testing.T, w *world, projectID, userID uuid.UUID) string {
 
 func joinState(t *testing.T, w *world, projectID uuid.UUID) string {
 	t.Helper()
-	items, _, err := w.mem.ListJoinTokens(context.Background(), projectID, 50, nil)
+	p, err := w.mem.GetProject(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, _, err := w.mem.ListJoinTokens(context.Background(), p.OrgID, nil, 50, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +586,7 @@ func credState(t *testing.T, w *world, sc scene) string {
 
 func shareState(t *testing.T, w *world, hostID uuid.UUID) string {
 	t.Helper()
-	items, err := w.mem.ListHostShares(context.Background(), hostID)
+	items, err := w.mem.ListHostAccess(context.Background(), hostID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,4 +608,24 @@ func displayName(t *testing.T, w *world, id uuid.UUID) string {
 		return ""
 	}
 	return *svc.DisplayName
+}
+
+// orgState is the org's name, members and roles, and whether it is live.
+func orgState(t *testing.T, w *world, userID, orgID uuid.UUID) string {
+	t.Helper()
+	org, err := w.mem.GetOrg(context.Background(), orgID)
+	if err != nil {
+		return "gone"
+	}
+	members, _, err := w.mem.ListOrgMembers(context.Background(), orgID, 50, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Slice(members, func(i, j int) bool { return members[i].UserID.String() < members[j].UserID.String() })
+	parts := []string{org.Name}
+	for _, m := range members {
+		parts = append(parts, m.UserID.String()+"="+m.Role)
+	}
+	orgs, _ := w.mem.ListUserOrgs(context.Background(), userID)
+	return strings.Join(parts, ",") + " orgs=" + strconv.Itoa(len(orgs))
 }

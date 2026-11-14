@@ -22,7 +22,7 @@ func TestJoinCreateInstallCommand(t *testing.T) {
 	const url = "wss://api.example/agent/v1/ws"
 	w.srv.AgentWSURL = url
 	owner := w.user("owner@ex.com", "Owner")
-	project, err := w.mem.CreateProject(context.Background(), owner.ID, "Proj", "proj", w.now)
+	project, err := w.mem.CreateProject(context.Background(), w.mem.PersonalOrg(owner.ID), owner.ID, "Proj", "proj", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}

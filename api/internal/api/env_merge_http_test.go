@@ -189,46 +189,6 @@ func TestEnvSetPutModes(t *testing.T) {
 	}
 }
 
-func TestEnvSetMergeApprovals(t *testing.T) {
-	w := newWorld(t)
-	w.srv.Secrets = testBox(t)
-	owner := w.user("owner@ex.com", "Owner")
-	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
-	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), guestUser.ID, "Guest", "guest", w.now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := w.mem.PutHostShare(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
-		t.Fatal(err)
-	}
-	tok := w.token(guestUser.ID)
-	project := guest.ID.String()
-	host := sc.host.ID.String()
-	status, env, _ := putEnvMode(t, w, tok, project, "lock", "KEY="+envSecret+"\nOTHER=1\n", strPtr("create"), nil)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	created := createImage(t, w, tok, guest.ID, "web", `{"kind":"service","image":"nginx","env_sets":["lock"]}`)
-	hash, _ := created["spec_hash"].(string)
-	entryID, _ := created["id"].(string)
-	approve := func(specHash string) {
-		t.Helper()
-		status, env, _ := mustCall(t, w, w.token(owner.ID), http.MethodPost, "/v1/hosts/"+host+"/catalog-approvals", `{"entry_id":"`+entryID+`","spec_hash":"`+specHash+`"}`)
-		mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	}
-	approve(hash)
-
-	status, env, _ = putEnvMode(t, w, tok, project, "lock", "KEY="+envSecret+"-other\n", strPtr("merge"), nil)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if createImageGet(t, w, tok, guest.ID, "web")["spec_hash"] != hash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 1 {
-		t.Fatal("value-only merge changed the hash or dropped the approval")
-	}
-	status, env, _ = putEnvMode(t, w, tok, project, "lock", "BAR=1\n", strPtr("merge"), nil)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if createImageGet(t, w, tok, guest.ID, "web")["spec_hash"] == hash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 0 {
-		t.Fatal("merge adding a key kept the hash or the approval")
-	}
-}
-
 func TestEnvSetModesDelegated(t *testing.T) {
 	w := newWorld(t)
 	w.srv.Secrets = testBox(t)

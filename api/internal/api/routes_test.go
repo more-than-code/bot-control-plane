@@ -39,6 +39,22 @@ func TestRouteTable(t *testing.T) {
 		"GET /v1/auth/device/{user_code}",
 		"POST /v1/auth/device/{user_code}/approve",
 		"POST /v1/auth/device/{user_code}/deny",
+		"POST /v1/orgs",
+		"GET /v1/orgs/{id}",
+		"PATCH /v1/orgs/{id}",
+		"DELETE /v1/orgs/{id}",
+		"GET /v1/orgs/{id}/members",
+		"POST /v1/orgs/{id}/members",
+		"PATCH /v1/orgs/{id}/members/{user_id}",
+		"DELETE /v1/orgs/{id}/members/{user_id}",
+		"POST /v1/orgs/{id}/transfer-ownership",
+		"GET /v1/orgs/{id}/projects",
+		"POST /v1/orgs/{id}/projects",
+		"GET /v1/orgs/{id}/hosts",
+		"POST /v1/orgs/{id}/join-tokens",
+		"GET /v1/orgs/{id}/join-tokens",
+		"DELETE /v1/orgs/{id}/join-tokens/{token_id}",
+		"GET /v1/orgs/{id}/audit",
 		"POST /v1/projects",
 		"GET /v1/projects",
 		"GET /v1/projects/{id}",
@@ -94,7 +110,11 @@ func TestRouteTable(t *testing.T) {
 		"GET /v1/projects/{id}/services",
 		"GET /v1/hosts/{id}",
 		"DELETE /v1/hosts/{id}/credential",
+		"GET /v1/hosts/{id}/access",
+		"PUT /v1/hosts/{id}/access/{project_id}",
+		"DELETE /v1/hosts/{id}/access/{project_id}",
 		"GET /v1/hosts/{id}/shares",
+		"GET /v1/hosts/{id}/shares/{project_id}",
 		"PUT /v1/hosts/{id}/shares/{project_id}",
 		"DELETE /v1/hosts/{id}/shares/{project_id}",
 		"GET /v1/hosts/{id}/catalog-approvals",
@@ -177,6 +197,8 @@ func TestHandlersCallAuthorize(t *testing.T) {
 		"handleOAuthToken":     true,
 		"handleOAuthRevoke":    true,
 	}
+	// The removed v1.24 routes answer 410 to any signed-in caller.
+	gone := map[string]bool{"handleSharesGone": true, "handleApprovalsGone": true}
 	matches, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -197,6 +219,9 @@ func TestHandlersCallAuthorize(t *testing.T) {
 				return true
 			}
 			seen[fd.Name.Name] = true
+			if gone[fd.Name.Name] {
+				return true
+			}
 			has := callsAuthorize(fd.Body)
 			if public[fd.Name.Name] {
 				if has {
@@ -219,7 +244,7 @@ func callsAuthorize(body *ast.BlockStmt) bool {
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
-		if ok && (sel.Sel.Name == "Authorize" || sel.Sel.Name == "AuthorizeHost" || sel.Sel.Name == "AuthorizeUnshare" || sel.Sel.Name == "gateHost" || sel.Sel.Name == "fileProject") {
+		if ok && (sel.Sel.Name == "Authorize" || sel.Sel.Name == "AuthorizeHost" || sel.Sel.Name == "AuthorizeAccessRemove" || sel.Sel.Name == "gateHost" || sel.Sel.Name == "orgGate" || sel.Sel.Name == "projectOrgAdmin" || sel.Sel.Name == "fileProject") {
 			found = true
 		}
 		return true

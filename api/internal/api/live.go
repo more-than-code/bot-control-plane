@@ -29,7 +29,7 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	res, err := s.Hub.Snapshot(ctx, host)
-	s.finishLive(w, r, p, host.ProjectID, host.ID, uuid.Nil, audit.ActionSnapshot, res, err)
+	s.finishLive(w, r, p, host, nil, uuid.Nil, audit.ActionSnapshot, res, err)
 }
 
 func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +37,7 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceRead, &svc.ProjectID, idPtr(svc.ID), audit.ActionProbe); !ok {
+	if _, ok := s.gateHost(w, r, p, host, authz.CapServiceRead, svc.ProjectID, idPtr(svc.ID), audit.ActionProbe); !ok {
 		return
 	}
 	var body struct {
@@ -69,7 +69,7 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	res, err := s.Hub.Probe(ctx, host, svc, spec)
-	s.finishLive(w, r, p, host.ProjectID, host.ID, svc.ID, audit.ActionProbe, res, err)
+	s.finishLive(w, r, p, host, svc.ProjectID, svc.ID, audit.ActionProbe, res, err)
 }
 
 func (s *Server) probeSpec(r *http.Request, svc store.Service, checkID, protocol *string, port *int, path *string) (map[string]any, string, error) {
@@ -125,13 +125,9 @@ func (s *Server) probeSpec(r *http.Request, svc store.Service, checkID, protocol
 	}, "", nil
 }
 
-func (s *Server) finishLive(w http.ResponseWriter, r *http.Request, p principal, projectID, hostID, serviceID uuid.UUID, action string, res agentws.LiveResult, err error) {
-	row := store.AuditRow{
-		ProjectID: idPtr(projectID),
-		HostID:    idPtr(hostID),
-		Action:    action,
-		Decision:  audit.DecisionAllowed,
-	}
+func (s *Server) finishLive(w http.ResponseWriter, r *http.Request, p principal, host store.Host, projectID *uuid.UUID, serviceID uuid.UUID, action string, res agentws.LiveResult, err error) {
+	row := hostAuditRow(host, projectID, action)
+	row.Decision = audit.DecisionAllowed
 	if serviceID != uuid.Nil {
 		row.ServiceID = idPtr(serviceID)
 	}

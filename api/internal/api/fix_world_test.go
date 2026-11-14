@@ -107,7 +107,7 @@ type scene struct {
 func (w *world) scene(owner, admin, viewer, spare, extra store.User) scene {
 	w.t.Helper()
 	ctx := context.Background()
-	p, err := w.mem.CreateProject(ctx, owner.ID, "Proj", "proj", w.now)
+	p, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Proj", "proj", w.now)
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func (w *world) scene(owner, admin, viewer, spare, extra store.User) scene {
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	if _, err := w.mem.CreateJoinToken(ctx, p.ID, joinHash, nil, owner.ID, w.now.Add(time.Hour), w.now); err != nil {
+	if _, err := w.mem.CreateJoinToken(ctx, p.OrgID, joinHash, nil, &store.TokenGrant{ProjectID: p.ID, Level: "deploy"}, owner.ID, w.now.Add(time.Hour), w.now); err != nil {
 		w.t.Fatal(err)
 	}
 	credPlain, credHash, err := secret.NewToken()
@@ -144,7 +144,7 @@ func (w *world) scene(owner, admin, viewer, spare, extra store.User) scene {
 		w.t.Fatal(err)
 	}
 	_ = open
-	tok, err := w.mem.CreateJoinToken(ctx, p.ID, openHash, nil, owner.ID, w.now.Add(time.Hour), w.now)
+	tok, err := w.mem.CreateJoinToken(ctx, p.OrgID, openHash, nil, &store.TokenGrant{ProjectID: p.ID, Level: "deploy"}, owner.ID, w.now.Add(time.Hour), w.now)
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -265,4 +265,15 @@ func answerTasks(c *websocket.Conn) {
 			wcancel()
 		}
 	}()
+}
+
+// share puts projectID in the host's org (D-3: no cross-org access) and
+// grants it level on the host. It replaces the v1.1 host shares in tests.
+func (w *world) share(ctx context.Context, hostID, projectID uuid.UUID, level string, by uuid.UUID, at time.Time) (store.HostAccess, bool, error) {
+	host, err := w.mem.GetHost(ctx, hostID)
+	if err != nil {
+		return store.HostAccess{}, false, err
+	}
+	w.mem.SetProjectOrg(projectID, host.OrgID)
+	return w.mem.PutHostAccess(ctx, hostID, projectID, level, by, at)
 }

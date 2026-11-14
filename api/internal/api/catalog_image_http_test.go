@@ -424,77 +424,6 @@ func TestImageSecretBoundary(t *testing.T) {
 	assertNoSecret(t, seen.String())
 }
 
-func TestImageSharedApproval(t *testing.T) {
-	w := newWorld(t)
-	w.srv.Secrets = testBox(t)
-	owner := w.user("owner@ex.com", "Owner")
-	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
-	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), guestUser.ID, "Guest", "guest", w.now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := w.mem.PutHostShare(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
-		t.Fatal(err)
-	}
-	gtok := w.token(guestUser.ID)
-	gpath := guest.ID.String()
-	putEnv(t, w, gtok, gpath, "svc", "FOO="+envSecret+"\n")
-	created := createImage(t, w, gtok, guest.ID, "web", `{"kind":"service","image":"nginx","env_sets":["svc"]}`)
-	hash, _ := created["spec_hash"].(string)
-	entryID, _ := created["id"].(string)
-	conn := helloAgent(t, w, sc.host, sc.credPlain, sc.credID, allowImages(), nil)
-	log := watchTasks(t, conn, func(msg map[string]any) map[string]any {
-		return imageDeployReply(msg, shaDigest(8))
-	})
-	host := sc.host.ID.String()
-	status, env, raw := postImage(t, w, gtok, gpath, "web", "deploy", host, "share-1", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "waiting for the host owner's approval")
-	if strings.Contains(raw, envSecret) || log.count() != 0 {
-		t.Fatal("waiting deploy leaked or dispatched")
-	}
-	status, env, _ = mustCall(t, w, w.token(owner.ID), http.MethodPost, "/v1/hosts/"+host+"/catalog-approvals", `{"entry_id":"`+entryID+`","spec_hash":"`+hash+`"}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	status, env, _ = postImage(t, w, gtok, gpath, "web", "deploy", host, "share-2", nil)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if log.count() != 1 {
-		t.Fatalf("approved tasks %d", log.count())
-	}
-	putEnv(t, w, gtok, gpath, "svc", "FOO="+envSecret+"-other\n")
-	if got := createImageGet(t, w, gtok, guest.ID, "web"); got["spec_hash"] != hash {
-		t.Fatal("value rewrite changed the hash")
-	}
-	if n := len(listApprovals(t, w, owner.ID, sc.host.ID)); n != 1 {
-		t.Fatalf("value rewrite voided the approval: %d", n)
-	}
-	putEnv(t, w, gtok, gpath, "svc", "FOO="+envSecret+"\nBAR=1\n")
-	if n := len(listApprovals(t, w, owner.ID, sc.host.ID)); n != 0 {
-		t.Fatalf("approval survived a new key: %d", n)
-	}
-	got := createImageGet(t, w, gtok, guest.ID, "web")
-	if got["spec_hash"] == hash {
-		t.Fatal("spec_hash ignored the new key")
-	}
-	status, env, _ = postImage(t, w, gtok, gpath, "web", "deploy", host, "share-3", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "waiting for the host owner's approval")
-	items := listApprovals(t, w, owner.ID, sc.host.ID)
-	if len(items) != 1 || items[0]["status"] != "pending" || items[0]["spec_hash"] != got["spec_hash"] {
-		t.Fatalf("pending %#v", items)
-	}
-	if log.count() != 1 {
-		t.Fatal("voided approval dispatched")
-	}
-	twoKey, _ := got["spec_hash"].(string)
-	putEnv(t, w, gtok, gpath, "svc", "FOO="+envSecret+"\n")
-	restored := createImageGet(t, w, gtok, guest.ID, "web")
-	if restored["spec_hash"] == twoKey {
-		t.Fatal("deleting a key did not change the hash")
-	}
-	if n := len(listApprovals(t, w, owner.ID, sc.host.ID)); n != 0 {
-		t.Fatalf("approval survived deleting a key: %d", n)
-	}
-}
-
 func TestImageFlightRollbackDisconnect(t *testing.T) {
 	w := newWorld(t)
 	owner := w.user("owner@ex.com", "Owner")
@@ -1320,7 +1249,7 @@ func TestImagePlainEnvNotRedacted(t *testing.T) {
 	w.srv.Secrets = testBox(t)
 	owner := w.user("owner@ex.com", "Owner")
 	ctx := context.Background()
-	project, err := w.mem.CreateProject(ctx, owner.ID, "Mohi Guide", plain, w.now)
+	project, err := w.mem.CreateProject(ctx, w.mem.PersonalOrg(owner.ID), owner.ID, "Mohi Guide", plain, w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1328,7 +1257,7 @@ func TestImagePlainEnvNotRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.mem.CreateJoinToken(ctx, project.ID, joinHash, nil, owner.ID, w.now.Add(time.Hour), w.now); err != nil {
+	if _, err := w.mem.CreateJoinToken(ctx, project.OrgID, joinHash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, owner.ID, w.now.Add(time.Hour), w.now); err != nil {
 		t.Fatal(err)
 	}
 	credPlain, credHash, err := secret.NewToken()
@@ -2162,55 +2091,6 @@ func TestImageEnvSetOrder(t *testing.T) {
 	}
 }
 
-func TestImageSecretEnvRehash(t *testing.T) {
-	w := newWorld(t)
-	w.srv.Secrets = testBox(t)
-	owner := w.user("owner@ex.com", "Owner")
-	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
-	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), guestUser.ID, "Guest", "guest", w.now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := w.mem.PutHostShare(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
-		t.Fatal(err)
-	}
-	gtok := w.token(guestUser.ID)
-	gpath := guest.ID.String()
-	putEnv(t, w, gtok, gpath, "lock", "KEY="+envSecret+"\n")
-	created := createImage(t, w, gtok, guest.ID, "web", `{"kind":"service","image":"nginx","secret_env":{"TOKEN":"lock.KEY"}}`)
-	hash, _ := created["spec_hash"].(string)
-	entryID, _ := created["id"].(string)
-	host := sc.host.ID.String()
-	status, env, _ := postImage(t, w, gtok, gpath, "web", "deploy", host, "sec-1", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "waiting for the host owner's approval")
-	approve := func(specHash string) {
-		t.Helper()
-		status, env, _ := mustCall(t, w, w.token(owner.ID), http.MethodPost, "/v1/hosts/"+host+"/catalog-approvals", `{"entry_id":"`+entryID+`","spec_hash":"`+specHash+`"}`)
-		mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	}
-	approve(hash)
-	putEnv(t, w, gtok, gpath, "lock", "KEY="+envSecret+"-other\n")
-	if createImageGet(t, w, gtok, guest.ID, "web")["spec_hash"] != hash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 1 {
-		t.Fatal("value rewrite changed the hash or dropped the approval")
-	}
-	putEnv(t, w, gtok, gpath, "lock", "KEY="+envSecret+"\nBAR=1\n")
-	added := createImageGet(t, w, gtok, guest.ID, "web")
-	addedHash, _ := added["spec_hash"].(string)
-	if addedHash == hash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 0 {
-		t.Fatalf("adding a secret_env key kept the hash or the approval %#v", added)
-	}
-	approve(addedHash)
-	if len(listApprovals(t, w, owner.ID, sc.host.ID)) != 1 {
-		t.Fatal("re-approval did not stick")
-	}
-	putEnv(t, w, gtok, gpath, "lock", "KEY="+envSecret+"\n")
-	removed := createImageGet(t, w, gtok, guest.ID, "web")
-	if removed["spec_hash"] == addedHash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 0 {
-		t.Fatalf("removing a secret_env key kept the hash or the approval %#v", removed)
-	}
-}
-
 func TestRedactExactBeforeKeyword(t *testing.T) {
 	secret := "s3cret token hunter22"
 	got := redactExact("line "+secret, secretForms([]string{secret}))
@@ -2468,13 +2348,6 @@ func grantJSON(grants []any, subject, actions string) bool {
 		return strings.Join(parts, ",") == actions
 	}
 	return false
-}
-
-func listApprovals(t *testing.T, w *world, owner uuid.UUID, host uuid.UUID) []map[string]any {
-	t.Helper()
-	status, env, _ := mustCall(t, w, w.token(owner), http.MethodGet, "/v1/hosts/"+host.String()+"/catalog-approvals", "")
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	return listItems(t, env)
 }
 
 func mustText(v any) string {

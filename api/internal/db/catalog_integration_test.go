@@ -27,6 +27,10 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 	home := catalogProject(t, d, ctx, owner.ID, "Catalog", "catproj", at)
 	box := catalogProject(t, d, ctx, other.ID, "Box", "boxproj", at)
 	host := enrollHostDB(t, d, ctx, box.ID, other.ID, "cat-host", at)
+	// v1.24 item 6: an owner maps only for a deploy project of the host's org.
+	if _, _, err := shareDB(t, d, ctx, host.ID, home.ID, "deploy", other.ID, at); err != nil {
+		t.Fatal(err)
+	}
 
 	spec, hash, display := catalogSpec(t, "pnpm run dev")
 	entry, err := d.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
@@ -43,30 +47,11 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 		t.Fatalf("default grants %#v", grants)
 	}
 
-	if _, err := d.ApproveCatalog(ctx, host.ID, entry.ID, hash, other.ID, at); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.UpsertPendingApproval(ctx, entry.ID, host.ID, hash, owner.ID, at.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	approved, err := d.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || len(approved) != 1 || approved[0].Status != "approved" || approved[0].RequestedBy != other.ID {
-		t.Fatalf("upsert cleared approval %#v %v", approved, err)
-	}
-	if approved[0].Exec != "pnpm" || approved[0].Env == nil || len(approved[0].Args) != 2 {
-		t.Fatalf("approval spec %#v", approved[0])
-	}
-	if n := catalogApprovalCount(t, d, ctx, entry.ID); n != 1 {
-		t.Fatalf("approvals %d", n)
-	}
 	same, sameHash, sameDisplay := catalogSpec(t, "pnpm run dev")
 	if _, _, err := d.ReplaceCatalogEntry(ctx, home.ID, "webapp", store.CatalogWrite{
 		Spec: same, SpecHash: sameHash, CommandDisplay: sameDisplay, Actor: owner.ID, At: at,
 	}); err != nil {
 		t.Fatal(err)
-	}
-	if n := catalogApprovalCount(t, d, ctx, entry.ID); n != 1 {
-		t.Fatalf("same hash voided approvals: %d", n)
 	}
 	next, nextHash, nextDisplay := catalogSpec(t, "pnpm run start")
 	if nextHash == hash {
@@ -76,9 +61,6 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 		Spec: next, SpecHash: nextHash, CommandDisplay: nextDisplay, Actor: owner.ID, At: at,
 	}); err != nil {
 		t.Fatal(err)
-	}
-	if n := catalogApprovalCount(t, d, ctx, entry.ID); n != 0 {
-		t.Fatalf("changed hash left %d approvals", n)
 	}
 
 	body := []byte(`{"code":"ok","msg":"ok","payload":null}`)
@@ -198,7 +180,7 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 		t.Fatal(err)
 	}
 	owned := catalogService(t, d, ctx, host.ID, "webapp", at)
-	if owned.Source != "owned" || owned.ProjectID != home.ID || owned.CatalogEntry == nil || *owned.CatalogEntry != "webapp" {
+	if owned.Source != "owned" || !sameID(owned.ProjectID, &home.ID) || owned.CatalogEntry == nil || *owned.CatalogEntry != "webapp" {
 		t.Fatalf("owned %+v", owned)
 	}
 	if err := d.UpsertDiscovered(ctx, host.ID, []store.Discovered{{
@@ -209,7 +191,7 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 		t.Fatal(err)
 	}
 	miss := catalogService(t, d, ctx, host.ID, unit, at)
-	if miss.Source != "discovered" || miss.ProjectID != box.ID || miss.CatalogEntry != nil {
+	if miss.Source != "discovered" || miss.ProjectID != nil || miss.CatalogEntry != nil {
 		t.Fatalf("fallback %+v", miss)
 	}
 	absent := "deploybot-catproj-absent.service"
@@ -221,7 +203,7 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 		t.Fatal(err)
 	}
 	wrong := catalogService(t, d, ctx, host.ID, absent, at)
-	if wrong.Source != "discovered" || wrong.ProjectID != box.ID || wrong.CatalogEntry != nil {
+	if wrong.Source != "discovered" || wrong.ProjectID != nil || wrong.CatalogEntry != nil {
 		t.Fatalf("wrong entry %+v", wrong)
 	}
 }
@@ -322,7 +304,7 @@ func catalogUser(t *testing.T, d *DB, ctx context.Context, subject string, at ti
 
 func catalogProject(t *testing.T, d *DB, ctx context.Context, owner uuid.UUID, name, slug string, at time.Time) store.Project {
 	t.Helper()
-	project, err := d.CreateProject(ctx, owner, name, slug, at)
+	project, err := d.CreateProject(ctx, personalOrg(t, d, ctx, owner), owner, name, slug, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,15 +321,6 @@ func catalogSpec(t *testing.T, command string) (store.ProgramSpec, string, strin
 		Dir: p.Dir, Exec: p.Exec, Args: append([]string{}, p.Args...), Shell: p.Shell,
 		RunAs: p.RunAs, Env: p.Env, Port: p.Port, Restart: p.Restart,
 	}, catalog.SpecHash(p), p.Display
-}
-
-func catalogApprovalCount(t *testing.T, d *DB, ctx context.Context, entryID uuid.UUID) int {
-	t.Helper()
-	var n int
-	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM app.catalog_host_approvals WHERE entry_id = $1::uuid`, entryID.String()).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	return n
 }
 
 func catalogService(t *testing.T, d *DB, ctx context.Context, hostID uuid.UUID, name string, at time.Time) store.Service {

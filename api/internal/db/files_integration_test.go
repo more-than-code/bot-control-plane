@@ -220,10 +220,10 @@ INSERT INTO app.project_files (
 	}, owner.ID, at); err != nil {
 		t.Fatalf("replace at the limit %v", err)
 	}
-	if _, err := d.DeleteProject(ctx, home.ID, at.Add(time.Minute)); err != nil {
+	if err := d.DeleteProject(ctx, home.ID, at.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.DeleteProject(ctx, limit.ID, at.Add(time.Minute)); err != nil {
+	if err := d.DeleteProject(ctx, limit.ID, at.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	var n int

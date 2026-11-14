@@ -308,7 +308,7 @@ func TestServiceViewFilters(t *testing.T) {
 	homeUser := mustUser(t, mem, "view-home@ex.com", at)
 	guestUser := mustUser(t, mem, "view-guest@ex.com", at)
 	home := makeProject(t, mem, homeUser.ID, "Home", "view-home", at)
-	guest := makeProject(t, mem, guestUser.ID, "Guest", "view-guest", at)
+	guest := mustProject(t, mem, home.OrgID, guestUser.ID, "Guest", "view-guest", at)
 	host := enrollMem(t, mem, home.ID, homeUser.ID, "view-host", at)
 	other := enrollMem(t, mem, home.ID, homeUser.ID, "view-other", at)
 	api := mem.PutDeclared(host.ID, "api", "process", nil, at)
@@ -324,14 +324,15 @@ func TestServiceViewFilters(t *testing.T) {
 	}
 	mem.SetServiceProject(api.ID, guest.ID)
 	mem.SetServiceProject(found.ID, guest.ID)
-	if _, _, err := mem.PutHostShare(ctx, host.ID, guest.ID, "deploy", homeUser.ID, at); err != nil {
+	if _, _, err := mem.PutHostAccess(ctx, host.ID, guest.ID, "deploy", homeUser.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	base := store.ServiceListQuery{Sort: "name", Dir: "asc", Limit: 50}
 	homeAPI := base
 	homeAPI.Q = "api"
 	homeAPI.View = "deploybot"
-	if got := projectNames(t, mem, home.ID, homeAPI, at); !sameNames(got, []string{"api", "api-old", "api-remote"}) {
+	// v1.24: api and found are guest's; home sees only its own rows.
+	if got := projectNames(t, mem, home.ID, homeAPI, at); !sameNames(got, []string{"api-old", "api-remote"}) {
 		t.Fatalf("q api deploybot %v", got)
 	}
 	homeFound := base
@@ -341,7 +342,7 @@ func TestServiceViewFilters(t *testing.T) {
 		t.Fatalf("q found deploybot %v", got)
 	}
 	homeFound.View = "deploybot_and_discovered"
-	if got := projectNames(t, mem, home.ID, homeFound, at); !sameNames(got, []string{"found"}) {
+	if got := projectNames(t, mem, home.ID, homeFound, at); len(got) != 0 {
 		t.Fatalf("q found with discovered %v", got)
 	}
 	hostID := host.ID
@@ -349,7 +350,7 @@ func TestServiceViewFilters(t *testing.T) {
 	hosted.Q = "api"
 	hosted.View = "deploybot"
 	hosted.HostID = &hostID
-	if got := projectNames(t, mem, home.ID, hosted, at); !sameNames(got, []string{"api", "api-old"}) {
+	if got := projectNames(t, mem, home.ID, hosted, at); !sameNames(got, []string{"api-old"}) {
 		t.Fatalf("host_id %v", got)
 	}
 	guestDeploy := base
@@ -369,10 +370,13 @@ func TestPresenceUsesPlacedName(t *testing.T) {
 	at := time.Date(2026, 10, 15, 16, 0, 0, 0, time.UTC)
 	mem := New()
 	owner := catalogUser(t, mem, "placed-own")
-	home := catalogProject(t, mem, owner.ID, "Home", "placedproj", at)
 	boxOwner := catalogUser(t, mem, "placed-box")
 	box := catalogProject(t, mem, boxOwner.ID, "Box", "placedbox", at)
+	home := mustProject(t, mem, box.OrgID, owner.ID, "Home", "placedproj", at)
 	host := catalogHost(t, mem, box, boxOwner.ID, "placed-pi", at)
+	if _, _, err := mem.PutHostAccess(ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
+		t.Fatal(err)
+	}
 	spec, hash, display := catalogSpec(t, "pnpm run dev")
 	if _, err := mem.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "webapp", Spec: spec, SpecHash: hash, CommandDisplay: display, Actor: owner.ID, At: at,
@@ -391,7 +395,7 @@ func TestPresenceUsesPlacedName(t *testing.T) {
 		t.Fatal(err)
 	}
 	placed := findService(t, items, "webapp")
-	if placed.Source != "owned" || placed.GoneAt != nil || placed.ProjectID != home.ID {
+	if placed.Source != "owned" || placed.GoneAt != nil || !sameID(placed.ProjectID, home.ID) {
 		t.Fatalf("placed %+v", placed)
 	}
 	if _, ok := findNamed(t, mem, host.ID, "not-the-entry", at); ok {
@@ -519,23 +523,23 @@ func TestDeleteProjectMarksHostServicesGone(t *testing.T) {
 	}
 
 	deleteAt := at.Add(time.Minute)
-	if _, err := mem.DeleteProject(ctx, project.ID, deleteAt); err != nil {
+	if err := mem.DeleteProject(ctx, project.ID, deleteAt); err != nil {
 		t.Fatal(err)
 	}
 	assertMemGone(t, mem, present.ID, &deleteAt, deleteAt)
 	assertMemGone(t, mem, already.ID, &keptGone, deleteAt)
-	assertMemGone(t, mem, straggler.ID, &earlyRevoke, deleteAt)
-	got := mustService(t, mem, foreign.ID, deleteAt)
-	if got.GoneAt != nil || got.ProjectID != other.ID {
-		t.Fatalf("foreign gone %v project %s", got.GoneAt, got.ProjectID)
-	}
+	// A row on a host revoked before the delete, still present, is gone at the delete.
+	assertMemGone(t, mem, straggler.ID, &deleteAt, deleteAt)
+	// api-v1 v1.24 item 7: the project's services are gone wherever they
+	// run, and no host is revoked.
+	assertMemGone(t, mem, foreign.ID, &deleteAt, deleteAt)
 	foreignHostRow, err := mem.GetHost(ctx, foreignHost.ID)
 	if err != nil || foreignHostRow.RevokedAt != nil {
 		t.Fatalf("foreign host revoked %v %v", foreignHostRow.RevokedAt, err)
 	}
 	hostRow, err := mem.GetHost(ctx, host.ID)
-	if err != nil || hostRow.RevokedAt == nil || !hostRow.RevokedAt.Equal(deleteAt) {
-		t.Fatalf("deleted host revoked_at %v %v", hostRow.RevokedAt, err)
+	if err != nil || hostRow.RevokedAt != nil {
+		t.Fatalf("project delete revoked its host %v %v", hostRow.RevokedAt, err)
 	}
 	earlyRow, err := mem.GetHost(ctx, earlyHost.ID)
 	if err != nil || earlyRow.RevokedAt == nil || !earlyRow.RevokedAt.Equal(earlyRevoke) {
@@ -549,9 +553,12 @@ func TestDiscoveredReportEndsOwnership(t *testing.T) {
 	mem := New()
 	owner := catalogUser(t, mem, "ownend")
 	boxOwner := catalogUser(t, mem, "boxend")
-	home := catalogProject(t, mem, owner.ID, "Home", "ownend", at)
 	box := catalogProject(t, mem, boxOwner.ID, "Box", "boxend", at)
+	home := mustProject(t, mem, box.OrgID, owner.ID, "Home", "ownend", at)
 	host := enrollMem(t, mem, box.ID, boxOwner.ID, "end-host", at)
+	if _, _, err := mem.PutHostAccess(ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
+		t.Fatal(err)
+	}
 	spec, hash, display := catalogSpec(t, "pnpm run dev")
 	for _, name := range []string{"redis", "kept"} {
 		if _, err := mem.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
@@ -581,7 +588,7 @@ func TestDiscoveredReportEndsOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	redis := serviceByName(t, mem, host.ID, "redis", at)
-	if redis.Source != "owned" || redis.ProjectID != home.ID || redis.CatalogEntry == nil || *redis.CatalogEntry != "redis" {
+	if redis.Source != "owned" || !sameID(redis.ProjectID, home.ID) || redis.CatalogEntry == nil || *redis.CatalogEntry != "redis" {
 		t.Fatalf("owned %+v", redis)
 	}
 	assertDeclaredUnchanged(t, mem, declared.ID, box.ID, declaredChecks[0].ID, at)
@@ -604,7 +611,7 @@ func TestDiscoveredReportEndsOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	ended := mustService(t, mem, redis.ID, t2)
-	if ended.ID != redis.ID || ended.Source != "discovered" || ended.CatalogEntry != nil || ended.ProjectID != box.ID {
+	if ended.ID != redis.ID || ended.Source != "discovered" || ended.CatalogEntry != nil || ended.ProjectID != nil {
 		t.Fatalf("ended %+v", ended)
 	}
 	if ended.DisplayName == nil || *ended.DisplayName != "Redis" || ended.ContainerName == nil || *ended.ContainerName != "redis" {
@@ -622,7 +629,7 @@ func TestDiscoveredReportEndsOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	again := mustService(t, mem, redis.ID, t3)
-	if again.ID != redis.ID || again.Source != "owned" || again.ProjectID != home.ID || again.CatalogEntry == nil || *again.CatalogEntry != "redis" {
+	if again.ID != redis.ID || again.Source != "owned" || !sameID(again.ProjectID, home.ID) || again.CatalogEntry == nil || *again.CatalogEntry != "redis" {
 		t.Fatalf("reowned %+v", again)
 	}
 	if again.DisplayName == nil || *again.DisplayName != "Redis" {
@@ -640,7 +647,7 @@ func TestDiscoveredReportEndsOwnership(t *testing.T) {
 func assertDeclaredUnchanged(t *testing.T, mem *Mem, id, project, checkID uuid.UUID, at time.Time) {
 	t.Helper()
 	got := mustService(t, mem, id, at)
-	if got.Source != "declared" || got.ProjectID != project || got.CatalogEntry != nil || got.Kind != "process" || got.GoneAt != nil || got.ContainerName != nil {
+	if got.Source != "declared" || !sameID(got.ProjectID, project) || got.CatalogEntry != nil || got.Kind != "process" || got.GoneAt != nil || got.ContainerName != nil {
 		t.Fatalf("declared %+v", got)
 	}
 	if len(got.Ports) != 1 || got.Ports[0] != 9 {
@@ -741,4 +748,8 @@ func findNamed(t *testing.T, mem *Mem, hostID uuid.UUID, name string, at time.Ti
 		}
 	}
 	return store.Service{}, false
+}
+
+func sameID(got *uuid.UUID, want uuid.UUID) bool {
+	return got != nil && *got == want
 }

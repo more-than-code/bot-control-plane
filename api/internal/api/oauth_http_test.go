@@ -991,10 +991,10 @@ func TestOAuthRevokeAndGrants(t *testing.T) {
 func TestOAuthConsent(t *testing.T) {
 	f := newOAuthFX(t)
 	user := f.user(t, "owner@example.com")
-	if _, err := f.mem.CreateProject(context.Background(), user.ID, "One", "one", f.clk.Now()); err != nil {
+	if _, err := f.mem.CreateProject(context.Background(), f.mem.PersonalOrg(user.ID), user.ID, "One", "one", f.clk.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.mem.CreateProject(context.Background(), user.ID, "Two", "two", f.clk.Now()); err != nil {
+	if _, err := f.mem.CreateProject(context.Background(), f.mem.PersonalOrg(user.ID), user.ID, "Two", "two", f.clk.Now()); err != nil {
 		t.Fatal(err)
 	}
 	bearer := f.console(t, user)

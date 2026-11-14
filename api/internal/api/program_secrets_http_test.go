@@ -232,64 +232,6 @@ func postImageLike(t *testing.T, w *world, tok, project, name, action, host, key
 	return mustCall(t, w, tok, http.MethodPost, "/v1/projects/"+project+"/catalog/"+name+"/"+action, string(raw))
 }
 
-// api-v1 v1.22 items 2 and 6: a key added to a set re-hashes the program
-// entry and voids its shared-host approval; a value change does not; the
-// approval view shows references, never a value.
-func TestProgramSecretsRehashAndApproval(t *testing.T) {
-	w := newWorld(t)
-	w.srv.Secrets = testBox(t)
-	owner := w.user("owner@ex.com", "Owner")
-	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
-	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), guestUser.ID, "Guest", "guest", w.now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := w.mem.PutHostShare(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
-		t.Fatal(err)
-	}
-	gtok := w.token(guestUser.ID)
-	gpath := guest.ID.String()
-	putEnv(t, w, gtok, gpath, "lock", "KEY="+progSecret+"\n")
-	status, env := w.do(gtok, http.MethodPost, "/v1/projects/"+gpath+"/catalog", progBody("gh", map[string]any{
-		"secret_env": map[string]string{"GH_TOKEN": "lock.KEY"}, "env": map[string]string{"MODE": "ci"},
-	}))
-	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
-	created := objectPayload(t, env)
-	hash, _ := created["spec_hash"].(string)
-	entryID, _ := created["id"].(string)
-	host := sc.host.ID.String()
-	status, env = postAct(w, gtok, gpath, "gh", "run", host, "ap-1", nil)
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "waiting for the host owner's approval")
-	status, env, raw := mustCall(t, w, w.token(owner.ID), http.MethodGet, "/v1/hosts/"+host+"/catalog-approvals", "")
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if strings.Contains(raw, progSecret) || !strings.Contains(raw, `"secret_env":{"GH_TOKEN":"lock.KEY"}`) ||
-		!strings.Contains(raw, `"env":{"MODE":"ci"}`) || !strings.Contains(raw, `"env_sets":[]`) {
-		t.Fatalf("approval view %s", raw)
-	}
-	approve := func(specHash string) {
-		t.Helper()
-		status, env, _ := mustCall(t, w, w.token(owner.ID), http.MethodPost, "/v1/hosts/"+host+"/catalog-approvals", `{"entry_id":"`+entryID+`","spec_hash":"`+specHash+`"}`)
-		mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	}
-	get := func() string {
-		t.Helper()
-		status, env := w.do(gtok, http.MethodGet, "/v1/projects/"+gpath+"/catalog/gh", "")
-		mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-		h, _ := objectPayload(t, env)["spec_hash"].(string)
-		return h
-	}
-	approve(hash)
-	putEnv(t, w, gtok, gpath, "lock", "KEY="+progSecret+"-other\n")
-	if get() != hash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 1 {
-		t.Fatal("a value-only change re-hashed or voided the approval")
-	}
-	putEnv(t, w, gtok, gpath, "lock", "KEY="+progSecret+"\nBAR=1\n")
-	if get() == hash || len(listApprovals(t, w, owner.ID, sc.host.ID)) != 0 {
-		t.Fatal("adding a key kept the hash or the approval")
-	}
-}
-
 // api-v1 v1.23 item 2: the projects pre-check for program Run and image
 // deploy, and the older-agent path.
 func TestProjectsPreCheck(t *testing.T) {
@@ -355,11 +297,11 @@ func TestHostProjectsExposure(t *testing.T) {
 	owner := w.user("owner@ex.com", "Owner")
 	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
 	guestUser := w.user("guest@ex.com", "Guest")
-	guest, err := w.mem.CreateProject(context.Background(), guestUser.ID, "Guest", "guest", w.now)
+	guest, err := w.mem.CreateProject(context.Background(), w.mem.PersonalOrg(guestUser.ID), guestUser.ID, "Guest", "guest", w.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := w.mem.PutHostShare(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
+	if _, _, err := w.share(context.Background(), sc.host.ID, guest.ID, "deploy", owner.ID, w.now); err != nil {
 		t.Fatal(err)
 	}
 	setPrograms(t, w, sc.host.ID, &store.HostPrograms{Enabled: true, RunAs: []string{"joe"}, Projects: []string{"proj", "secret-other"}})

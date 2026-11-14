@@ -226,10 +226,11 @@ JOIN app.catalog_entries e ON e.project_id = p.id
 JOIN app.hosts h ON h.id = $3::uuid
 WHERE p.slug = $1 AND p.deleted_at IS NULL
   AND e.name = $2 AND e.kind = 'image'
-  AND (h.project_id = p.id OR EXISTS (
-      SELECT 1 FROM app.host_shares s
-      WHERE s.host_id = h.id AND s.project_id = p.id AND s.level = 'deploy'
-  ))
+  AND h.org_id = p.org_id
+  AND EXISTS (
+      SELECT 1 FROM app.host_access a
+      WHERE a.host_id = h.id AND a.project_id = p.id AND a.level = 'deploy'
+  )
 `, projectSlug, entry, hostID.String()).Scan(&projectID, &entryID, &raw, &deployed)
 	if err != nil {
 		return store.AutoTarget{}, mapErr(err)

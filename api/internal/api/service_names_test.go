@@ -71,6 +71,7 @@ func TestServiceRenameMatrix(t *testing.T) {
 		{audit.DecisionDenied, nil, "Stolen"},
 		{audit.DecisionDenied, nil, "Stolen"},
 		{audit.DecisionDenied, nil, "Stolen"},
+		{audit.DecisionDenied, nil, "Stolen"},
 		{audit.DecisionAllowed, nil, "Alpha"},
 		{audit.DecisionAllowed, "Alpha", "Alpha"},
 		{audit.DecisionAllowed, nil, "Web"},
@@ -87,7 +88,12 @@ func TestServiceRenameMatrix(t *testing.T) {
 	}
 	for i, row := range rows {
 		detail := decodeRename(t, row.Detail)
-		if row.ProjectID == nil || *row.ProjectID != fx.home.ID || row.HostID == nil || *row.HostID != fx.sc.host.ID {
+		// v1.24 item 8: the service's project and the host's org.
+		wantProject := fx.home.ID
+		if audits[i].to == "Web" {
+			wantProject = fx.deploy.ID
+		}
+		if row.ProjectID == nil || *row.ProjectID != wantProject || row.OrgID == nil || *row.OrgID != fx.home.OrgID || row.HostID == nil || *row.HostID != fx.sc.host.ID {
 			t.Fatalf("audit target %+v", row)
 		}
 		if row.Decision != audits[i].decision || detail["from"] != audits[i].from || detail["to"] != audits[i].to {
@@ -276,7 +282,11 @@ func enrollAPIHost(t *testing.T, w *world, projectID, ownerID uuid.UUID, name st
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.mem.CreateJoinToken(ctx, projectID, hash, nil, ownerID, w.now.Add(time.Hour), w.now); err != nil {
+	project, err := w.mem.GetProject(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.mem.CreateJoinToken(ctx, project.OrgID, hash, nil, &store.TokenGrant{ProjectID: projectID, Level: "deploy"}, ownerID, w.now.Add(time.Hour), w.now); err != nil {
 		t.Fatal(err)
 	}
 	_, credHash, err := secret.NewToken()

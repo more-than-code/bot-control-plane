@@ -30,8 +30,8 @@ func (d *DB) PutServiceConfirmation(ctx context.Context, hash []byte, c store.Se
 INSERT INTO app.service_confirmations (
     token_hash, user_id, project_id, service_id, action,
     request_hash, current_hash, checks, idempotency_key, created_at, expires_at
-) VALUES ($1, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8::jsonb, $9, $10, $11)
-`, hash, c.UserID.String(), c.ProjectID.String(), c.ServiceID.String(), c.Action,
+) VALUES ($1, $2::uuid, CAST($3 AS uuid), $4::uuid, $5, $6, $7, $8::jsonb, $9, $10, $11)
+`, hash, c.UserID.String(), optID(c.ProjectID), c.ServiceID.String(), c.Action,
 		c.RequestHash, c.CurrentHash, raw, c.IdempotencyKey, c.CreatedAt, c.ExpiresAt)
 	return mapErr(err)
 }
@@ -48,7 +48,8 @@ func (d *DB) GetServiceConfirmation(ctx context.Context, hash []byte) (store.Ser
 
 func scanServiceConfirmation(row pgx.Row) (store.ServiceConfirmation, error) {
 	var c store.ServiceConfirmation
-	var userID, projectID, serviceID string
+	var userID, serviceID string
+	var projectID *string
 	var raw []byte
 	err := row.Scan(&userID, &projectID, &serviceID, &c.Action,
 		&c.RequestHash, &c.CurrentHash, &raw, &c.IdempotencyKey, &c.CreatedAt, &c.ExpiresAt, &c.UsedAt)
@@ -59,7 +60,7 @@ func scanServiceConfirmation(row pgx.Row) (store.ServiceConfirmation, error) {
 	if c.UserID, perr = parseID(userID); perr != nil {
 		return store.ServiceConfirmation{}, perr
 	}
-	if c.ProjectID, perr = parseID(projectID); perr != nil {
+	if c.ProjectID, perr = parseOptID(projectID); perr != nil {
 		return store.ServiceConfirmation{}, perr
 	}
 	if c.ServiceID, perr = parseID(serviceID); perr != nil {

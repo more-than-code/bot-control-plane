@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
 	"time"
 
@@ -113,4 +114,12 @@ func optString(s *string) any {
 		return nil
 	}
 	return *s
+}
+
+// optID is a nullable uuid parameter: nil, or the text form.
+func optID(id *uuid.UUID) any {
+	if id == nil {
+		return nil
+	}
+	return id.String()
 }

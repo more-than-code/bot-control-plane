@@ -22,10 +22,6 @@ func TestCatalogWriteCommitCreate(t *testing.T) {
 	project := catalogProject(t, m, owner.ID, "Proj", "cwproj", at)
 	in := imageWrite(t, "web", `{"kind":"service","image":"nginx"}`, owner.ID, at)
 
-	n, err := m.CountEntryApprovals(ctx, project.ID, "web")
-	if err != nil || n != 0 {
-		t.Fatalf("missing count %d %v", n, err)
-	}
 	hash, row := putCatalogWrite(t, m, store.CatalogWriteConfirmation{
 		UserID: owner.ID, ProjectID: project.ID, Action: "create", EntryName: "web",
 		Body: in.ImageRaw, RequestHash: bytes32(1), IdempotencyKey: "cw-create",
@@ -110,21 +106,10 @@ func TestCatalogWriteCommitUpdateAndDelete(t *testing.T) {
 	at := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 	owner := catalogUser(t, m, "cw-owner")
 	project := catalogProject(t, m, owner.ID, "Proj", "cwupd", at)
-	hostA := catalogHost(t, m, project, owner.ID, "a", at)
-	hostB := catalogHost(t, m, project, owner.ID, "b", at)
 	current := imageWrite(t, "web", `{"kind":"service","image":"nginx"}`, owner.ID, at)
 	entry, err := m.CreateCatalogEntry(ctx, project.ID, current)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if _, err := m.ApproveCatalog(ctx, hostA.ID, entry.ID, entry.SpecHash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.ApproveCatalog(ctx, hostB.ID, entry.ID, entry.SpecHash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
-	if n, err := m.CountEntryApprovals(ctx, project.ID, "web"); err != nil || n != 2 {
-		t.Fatalf("approvals %d %v", n, err)
 	}
 
 	same := current
@@ -138,9 +123,6 @@ func TestCatalogWriteCommitUpdateAndDelete(t *testing.T) {
 	}
 	if _, err := m.GetCatalogWriteConfirmation(ctx, sameHash); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("applied same-hash update kept the plan %v", err)
-	}
-	if n, err := m.CountEntryApprovals(ctx, project.ID, "web"); err != nil || n != 2 {
-		t.Fatalf("same hash voided %d %v", n, err)
 	}
 
 	next := imageWrite(t, "web", `{"kind":"service","image":"nginx:1.27"}`, owner.ID, at)
@@ -173,13 +155,7 @@ func TestCatalogWriteCommitUpdateAndDelete(t *testing.T) {
 	if _, err := m.GetCatalogWriteConfirmation(ctx, updHash); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("applied update kept the plan %v", err)
 	}
-	if n, err := m.CountEntryApprovals(ctx, project.ID, "web"); err != nil || n != 0 {
-		t.Fatalf("voided %d %v", n, err)
-	}
 
-	if _, err := m.ApproveCatalog(ctx, hostA.ID, entry.ID, updated.SpecHash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
 	grants, err := m.ListCatalogGrants(ctx, entry.ID)
 	if err != nil || len(grants) == 0 {
 		t.Fatalf("grants %#v %v", grants, err)
@@ -201,9 +177,6 @@ func TestCatalogWriteCommitUpdateAndDelete(t *testing.T) {
 	}
 	if _, err := m.ListCatalogGrants(ctx, entry.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("grants remain %v", err)
-	}
-	if n, err := m.CountEntryApprovals(ctx, project.ID, "web"); err != nil || n != 0 {
-		t.Fatalf("approvals remain %d %v", n, err)
 	}
 
 	gone := imageWrite(t, "gone", `{"kind":"service","image":"nginx"}`, owner.ID, at)
@@ -238,7 +211,7 @@ func TestCatalogWriteProjectDeleteDropsPlans(t *testing.T) {
 		Body: []byte(`{"kind":"service"}`), RequestHash: bytes32(7), IdempotencyKey: "cw-drop",
 		CreatedAt: at, ExpiresAt: at.Add(time.Minute),
 	})
-	if _, err := m.DeleteProject(ctx, project.ID, at); err != nil {
+	if err := m.DeleteProject(ctx, project.ID, at); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.GetCatalogWriteConfirmation(ctx, hash); !errors.Is(err, store.ErrNotFound) {

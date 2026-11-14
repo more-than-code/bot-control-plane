@@ -10,15 +10,27 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-func (m *Mem) CreateJoinToken(_ context.Context, projectID uuid.UUID, hash []byte, hint *string, createdBy uuid.UUID, expiresAt, at time.Time) (store.JoinToken, error) {
+func (m *Mem) CreateJoinToken(_ context.Context, orgID uuid.UUID, hash []byte, hint *string, grant *store.TokenGrant, createdBy uuid.UUID, expiresAt, at time.Time) (store.JoinToken, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if p, ok := m.projects[projectID]; !ok || p.DeletedAt != nil {
+	if _, ok := m.liveOrgLocked(orgID); !ok {
 		return store.JoinToken{}, store.ErrNotFound
+	}
+	if grant != nil {
+		if !store.ValidAccessLevel(grant.Level) {
+			return store.JoinToken{}, store.ErrInvalid
+		}
+		p, ok := m.projects[grant.ProjectID]
+		if !ok || p.DeletedAt != nil || p.OrgID != orgID {
+			return store.JoinToken{}, store.ErrNotFound
+		}
+		g := *grant
+		grant = &g
 	}
 	tok := store.JoinToken{
 		ID:           uuid.New(),
-		ProjectID:    projectID,
+		OrgID:        orgID,
+		Grant:        grant,
 		HostNameHint: hint,
 		CreatedBy:    createdBy,
 		CreatedAt:    at,
@@ -29,12 +41,22 @@ func (m *Mem) CreateJoinToken(_ context.Context, projectID uuid.UUID, hash []byt
 	return tok, nil
 }
 
-func (m *Mem) ListJoinTokens(_ context.Context, projectID uuid.UUID, limit int, cursor *store.Cursor) ([]store.JoinToken, *store.Cursor, error) {
+func tokenMatches(tok store.JoinToken, orgID uuid.UUID, grantProject *uuid.UUID) bool {
+	if tok.OrgID != orgID {
+		return false
+	}
+	if grantProject == nil {
+		return true
+	}
+	return tok.Grant != nil && tok.Grant.ProjectID == *grantProject
+}
+
+func (m *Mem) ListJoinTokens(_ context.Context, orgID uuid.UUID, grantProject *uuid.UUID, limit int, cursor *store.Cursor) ([]store.JoinToken, *store.Cursor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var items []store.JoinToken
 	for _, tok := range m.tokens {
-		if tok.ProjectID == projectID {
+		if tokenMatches(tok.JoinToken, orgID, grantProject) {
 			items = append(items, tok.JoinToken)
 		}
 	}
@@ -42,11 +64,11 @@ func (m *Mem) ListJoinTokens(_ context.Context, projectID uuid.UUID, limit int, 
 	return out, next, nil
 }
 
-func (m *Mem) RevokeJoinToken(_ context.Context, projectID, tokenID uuid.UUID, at time.Time) error {
+func (m *Mem) RevokeJoinToken(_ context.Context, orgID uuid.UUID, grantProject *uuid.UUID, tokenID uuid.UUID, at time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	tok, ok := m.tokens[tokenID]
-	if !ok || tok.ProjectID != projectID {
+	if !ok || !tokenMatches(tok.JoinToken, orgID, grantProject) {
 		return store.ErrNotFound
 	}
 	if tok.RevokedAt == nil {
@@ -68,13 +90,20 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 	if tok.UsedAt != nil || tok.RevokedAt != nil || !at.Before(tok.ExpiresAt) {
 		return store.Host{}, store.ErrUnauthorized
 	}
-	p, ok := m.projects[tok.ProjectID]
-	if !ok || p.DeletedAt != nil {
+	if _, ok := m.liveOrgLocked(tok.OrgID); !ok {
 		return store.Host{}, store.ErrUnauthorized
+	}
+	// A grant whose project has since been deleted (or moved) is dropped;
+	// the host still joins the org.
+	var grant *store.TokenGrant
+	if tok.Grant != nil {
+		if p, ok := m.projects[tok.Grant.ProjectID]; ok && p.DeletedAt == nil && p.OrgID == tok.OrgID {
+			grant = tok.Grant
+		}
 	}
 	name, err := store.Unique(in.Name, 63, func(candidate string) bool {
 		for _, h := range m.hosts {
-			if h.ProjectID == tok.ProjectID && h.Name == candidate {
+			if h.OrgID == tok.OrgID && h.Name == candidate {
 				return true
 			}
 		}
@@ -85,7 +114,7 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 	}
 	host := store.Host{
 		ID:           uuid.New(),
-		ProjectID:    tok.ProjectID,
+		OrgID:        tok.OrgID,
 		Name:         name,
 		NodeType:     in.NodeType,
 		OS:           in.OS,
@@ -94,6 +123,12 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 		AgentVersion: in.AgentVersion,
 		LastSeenAt:   &at,
 		EnrolledAt:   at,
+	}
+	if grant != nil {
+		pid := grant.ProjectID
+		host.ProjectID = &pid
+		by := tok.CreatedBy
+		m.access[accessKey(host.ID, pid)] = store.HostAccess{HostID: host.ID, ProjectID: pid, Level: grant.Level, GrantedBy: &by, GrantedAt: at}
 	}
 	m.hosts[host.ID] = host
 	m.creds[credentialID] = credRec{Credential: store.Credential{
@@ -105,7 +140,7 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 	tok.UsedAt = &at
 	tok.UsedByHostID = &host.ID
 	m.tokens[id] = tok
-	return host, nil
+	return cloneHost(host), nil
 }
 
 func (m *Mem) GetHost(_ context.Context, id uuid.UUID) (store.Host, error) {
@@ -121,7 +156,52 @@ func (m *Mem) GetHost(_ context.Context, id uuid.UUID) (store.Host, error) {
 func (m *Mem) ListHosts(_ context.Context, projectID uuid.UUID, limit int, cursor *store.Cursor) ([]store.Host, *store.Cursor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	all := m.visibleHostsLocked(projectID)
+	var all []store.Host
+	for _, a := range m.access {
+		if a.ProjectID != projectID {
+			continue
+		}
+		h, ok := m.hosts[a.HostID]
+		if !ok {
+			continue
+		}
+		h = cloneHost(h)
+		level := a.Level
+		h.AccessLevel = &level
+		all = append(all, h)
+	}
+	items, next := pageHosts(all, limit, cursor)
+	return items, next, nil
+}
+
+func (m *Mem) ListOrgHosts(_ context.Context, orgID uuid.UUID, limit int, cursor *store.Cursor) ([]store.Host, *store.Cursor, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.liveOrgLocked(orgID); !ok {
+		return nil, nil, store.ErrNotFound
+	}
+	var all []store.Host
+	for _, h := range m.hosts {
+		if h.OrgID != orgID {
+			continue
+		}
+		h = cloneHost(h)
+		access := m.hostAccessLocked(h.ID)
+		h.Access = &access
+		all = append(all, h)
+	}
+	items, next := pageHosts(all, limit, cursor)
+	return items, next, nil
+}
+
+// pageHosts sorts by (name, id) and pages with a rank-0 host cursor.
+func pageHosts(all []store.Host, limit int, cursor *store.Cursor) ([]store.Host, *store.Cursor) {
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].Name != all[j].Name {
+			return all[i].Name < all[j].Name
+		}
+		return all[i].ID.String() < all[j].ID.String()
+	})
 	items := make([]store.Host, 0, len(all))
 	for _, h := range all {
 		if hostAfter(h, cursor) {
@@ -136,72 +216,24 @@ func (m *Mem) ListHosts(_ context.Context, projectID uuid.UUID, limit int, curso
 		items = items[:limit]
 		last := items[len(items)-1]
 		rank := 0
-		if last.Relation == "shared" {
-			rank = 1
-		}
 		next = &store.Cursor{Rank: &rank, Name: last.Name, ID: last.ID.String()}
 	}
-	if items == nil {
-		items = []store.Host{}
-	}
-	return items, next, nil
-}
-
-func (m *Mem) visibleHostsLocked(projectID uuid.UUID) []store.Host {
-	var items []store.Host
-	for _, h := range m.hosts {
-		if h.ProjectID != projectID {
-			continue
-		}
-		h.Relation = "owner"
-		h.ShareLevel = nil
-		items = append(items, cloneHost(h))
-	}
-	for _, sh := range m.shares {
-		if sh.ProjectID != projectID {
-			continue
-		}
-		h, ok := m.hosts[sh.HostID]
-		if !ok || h.ProjectID == projectID {
-			continue
-		}
-		h.Relation = "shared"
-		level := sh.Level
-		h.ShareLevel = &level
-		items = append(items, cloneHost(h))
-	}
-	sort.Slice(items, func(i, j int) bool {
-		ri, rj := 0, 0
-		if items[i].Relation == "shared" {
-			ri = 1
-		}
-		if items[j].Relation == "shared" {
-			rj = 1
-		}
-		if ri != rj {
-			return ri < rj
-		}
-		if items[i].Name != items[j].Name {
-			return items[i].Name < items[j].Name
-		}
-		return items[i].ID.String() < items[j].ID.String()
-	})
-	return items
+	return items, next
 }
 
 // hostAfter reports whether h is strictly after the host-list cursor.
-// A nil cursor, or one without a rank, starts at the beginning. The cursor
-// host does not have to still be in the list.
+// A nil cursor, or one without a rank, starts at the beginning. A rank above
+// 0 (an old shared-hosts cursor) is past every host. The cursor host does
+// not have to still be in the list.
 func hostAfter(h store.Host, cursor *store.Cursor) bool {
 	if cursor == nil || cursor.Rank == nil {
 		return true
 	}
-	rank := 0
-	if h.Relation == "shared" {
-		rank = 1
+	if *cursor.Rank > 0 {
+		return false
 	}
-	if rank != *cursor.Rank {
-		return rank > *cursor.Rank
+	if *cursor.Rank < 0 {
+		return true
 	}
 	if h.Name != cursor.Name {
 		return h.Name > cursor.Name

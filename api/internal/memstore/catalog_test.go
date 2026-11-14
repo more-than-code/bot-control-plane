@@ -13,13 +13,12 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-func TestCatalogDefaultsVoidAndIdempotency(t *testing.T) {
+func TestCatalogDefaultsAndIdempotency(t *testing.T) {
 	ctx := context.Background()
 	m := New()
 	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	owner := catalogUser(t, m, "owner")
 	home := catalogProject(t, m, owner.ID, "Home", "home", at)
-	host := catalogHost(t, m, home, owner.ID, "pi", at)
 	spec, hash, display := catalogSpec(t, "pnpm run dev")
 	entry, err := m.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "web", Spec: spec, SpecHash: hash, CommandDisplay: display, Actor: owner.ID, At: at,
@@ -34,40 +33,6 @@ func TestCatalogDefaultsVoidAndIdempotency(t *testing.T) {
 	if len(grants) != 2 || grants[0].Subject != "role:admin" || grants[1].Subject != "role:viewer" || len(grants[1].Actions) != 1 || grants[1].Actions[0] != "logs" {
 		t.Fatalf("grants %#v", grants)
 	}
-	if _, err := m.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); err != nil {
-		t.Fatal(err)
-	}
-	same, sameHash, sameDisplay := catalogSpec(t, "pnpm run dev")
-	if _, _, err := m.ReplaceCatalogEntry(ctx, home.ID, "web", store.CatalogWrite{
-		Spec: same, SpecHash: sameHash, CommandDisplay: sameDisplay, Actor: owner.ID, At: at,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	kept, err := m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || len(kept) != 1 || kept[0].Status != "approved" || kept[0].Exec != "pnpm" || kept[0].RequestedBy != owner.ID {
-		t.Fatalf("same hash %#v %v", kept, err)
-	}
-	if kept[0].Env == nil || len(kept[0].Args) != 2 || kept[0].Args[0] != "run" {
-		t.Fatalf("approval spec %#v", kept[0])
-	}
-	if err := m.UpsertPendingApproval(ctx, entry.ID, host.ID, hash, owner.ID, at.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	kept, err = m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || len(kept) != 1 || kept[0].Status != "approved" || !kept[0].RequestedAt.Equal(at) {
-		t.Fatalf("upsert cleared approval %#v %v", kept, err)
-	}
-	other, otherHash, otherDisplay := catalogSpec(t, "pnpm run start")
-	if _, _, err := m.ReplaceCatalogEntry(ctx, home.ID, "web", store.CatalogWrite{
-		Spec: other, SpecHash: otherHash, CommandDisplay: otherDisplay, Actor: owner.ID, At: at,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	left, err := m.ListCatalogApprovals(ctx, host.ID)
-	if err != nil || len(left) != 0 {
-		t.Fatalf("approvals %#v %v", left, err)
-	}
-
 	body := []byte(`{"code":"ok","msg":"ok","payload":null}`)
 	var sum [32]byte
 	sum[0] = 7
@@ -92,12 +57,6 @@ func TestCatalogDefaultsVoidAndIdempotency(t *testing.T) {
 	}
 	if _, err := m.GetIdempotency(ctx, owner.ID, "k", at.Add(store.IdempotencyTTL)); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expiry %v", err)
-	}
-	if _, err := m.ApproveCatalog(ctx, host.ID, entry.ID, hash, owner.ID, at); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("stale approve %v", err)
-	}
-	if left, err := m.ListCatalogApprovals(ctx, host.ID); err != nil || len(left) != 0 {
-		t.Fatalf("stale approve stored %#v %v", left, err)
 	}
 }
 
@@ -184,10 +143,17 @@ func TestOwnedIngestMemstore(t *testing.T) {
 	m := New()
 	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	owner := catalogUser(t, m, "own")
-	home := catalogProject(t, m, owner.ID, "Home", "ownedproj", at)
 	boxOwner := catalogUser(t, m, "box")
 	box := catalogProject(t, m, boxOwner.ID, "Box", "box", at)
+	// home is in the host's org (api-v1 v1.24 item 6), owned by another user.
+	home, err := m.CreateProject(ctx, box.OrgID, owner.ID, "Home", "ownedproj", at)
+	if err != nil {
+		t.Fatal(err)
+	}
 	host := catalogHost(t, m, box, boxOwner.ID, "pi-box", at)
+	if _, _, err := m.PutHostAccess(ctx, host.ID, home.ID, "deploy", boxOwner.ID, at); err != nil {
+		t.Fatal(err)
+	}
 	spec, hash, display := catalogSpec(t, "pnpm run dev")
 	if _, err := m.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
 		Name: "webapp", Spec: spec, SpecHash: hash, CommandDisplay: display, Actor: owner.ID, At: at,
@@ -212,11 +178,11 @@ func TestOwnedIngestMemstore(t *testing.T) {
 		t.Fatal(err)
 	}
 	owned := findService(t, items, "webapp")
-	if owned.Source != "owned" || owned.ProjectID != home.ID || owned.CatalogEntry == nil || *owned.CatalogEntry != "webapp" {
+	if owned.Source != "owned" || owned.ProjectID == nil || *owned.ProjectID != home.ID || owned.CatalogEntry == nil || *owned.CatalogEntry != "webapp" {
 		t.Fatalf("owned %+v", owned)
 	}
 	miss := findService(t, items, unit)
-	if miss.Source != "discovered" || miss.ProjectID != box.ID || miss.CatalogEntry != nil {
+	if miss.Source != "discovered" || miss.ProjectID != nil || miss.CatalogEntry != nil {
 		t.Fatalf("fallback %+v", miss)
 	}
 	absent := "deploybot-ownedproj-absent.service"
@@ -232,7 +198,7 @@ func TestOwnedIngestMemstore(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrong := findService(t, items, absent)
-	if wrong.Source != "discovered" || wrong.ProjectID != box.ID || wrong.CatalogEntry != nil {
+	if wrong.Source != "discovered" || wrong.ProjectID != nil || wrong.CatalogEntry != nil {
 		t.Fatalf("wrong entry %+v", wrong)
 	}
 	huge := strings.Repeat("b", 80)
@@ -251,6 +217,34 @@ func TestOwnedIngestMemstore(t *testing.T) {
 	if kept.Source != "discovered" || kept.Name != "shortname" {
 		t.Fatalf("huge unit %+v", kept)
 	}
+	// metrics access, or a project of another org, does not own a service.
+	if _, _, err := m.PutHostAccess(ctx, host.ID, home.ID, "metrics", boxOwner.ID, at); err != nil {
+		t.Fatal(err)
+	}
+	stranger := catalogProject(t, m, owner.ID, "Stranger", "strangerproj", at)
+	if _, err := m.CreateCatalogEntry(ctx, stranger.ID, store.CatalogWrite{
+		Name: "webapp", Spec: spec, SpecHash: hash, CommandDisplay: display, Actor: owner.ID, At: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.UpsertDiscovered(ctx, host.ID, []store.Discovered{{
+		Name: "webapp", Kind: "systemd", Ports: []int{3031}, SystemdUnit: &unit, SystemdScope: &scope,
+		Owner: &store.DiscoveredOwner{Kind: "program", Project: "ownedproj", Entry: "webapp"},
+	}, {
+		Name: "x", Kind: "systemd", Ports: []int{6}, SystemdUnit: &absent, SystemdScope: &scope,
+		Owner: &store.DiscoveredOwner{Kind: "program", Project: "strangerproj", Entry: "webapp"},
+	}}, at, true, true); err != nil {
+		t.Fatal(err)
+	}
+	items, err = m.ListServices(ctx, host.ID, nil, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, svc := range items {
+		if svc.GoneAt == nil && svc.ProjectID != nil {
+			t.Fatalf("metrics or cross-org owner kept a project: %+v", svc)
+		}
+	}
 }
 
 func catalogUser(t *testing.T, m *Mem, subject string) store.User {
@@ -266,7 +260,7 @@ func catalogUser(t *testing.T, m *Mem, subject string) store.User {
 
 func catalogProject(t *testing.T, m *Mem, owner uuid.UUID, name, slug string, at time.Time) store.Project {
 	t.Helper()
-	project, err := m.CreateProject(context.Background(), owner, name, slug, at)
+	project, err := m.CreateProject(context.Background(), m.PersonalOrg(owner), owner, name, slug, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +273,7 @@ func catalogHost(t *testing.T, m *Mem, project store.Project, owner uuid.UUID, n
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.CreateJoinToken(context.Background(), project.ID, hash, nil, owner, at.Add(time.Hour), at); err != nil {
+	if _, err := m.CreateJoinToken(context.Background(), project.OrgID, hash, nil, &store.TokenGrant{ProjectID: project.ID, Level: "deploy"}, owner, at.Add(time.Hour), at); err != nil {
 		t.Fatal(err)
 	}
 	_, credHash, err := secret.NewToken()

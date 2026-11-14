@@ -20,10 +20,6 @@ func entryKey(projectID uuid.UUID, name string) string {
 	return projectID.String() + "/" + name
 }
 
-func approvalKey(entryID, hostID uuid.UUID) string {
-	return entryID.String() + "/" + hostID.String()
-}
-
 func idemKey(userID uuid.UUID, key string) string {
 	return userID.String() + "/" + key
 }
@@ -33,6 +29,18 @@ func cloneHost(h store.Host) store.Host {
 	if h.ShareLevel != nil {
 		level := *h.ShareLevel
 		h.ShareLevel = &level
+	}
+	if h.AccessLevel != nil {
+		level := *h.AccessLevel
+		h.AccessLevel = &level
+	}
+	if h.ProjectID != nil {
+		id := *h.ProjectID
+		h.ProjectID = &id
+	}
+	if h.Access != nil {
+		cp := append([]store.HostAccess{}, (*h.Access)...)
+		h.Access = &cp
 	}
 	return h
 }
@@ -162,9 +170,6 @@ func (m *Mem) replaceCatalogEntryLocked(projectID uuid.UUID, name string, in sto
 	}
 	e := m.entries[id]
 	old := e.SpecHash
-	if old != in.SpecHash {
-		m.deleteApprovalsLocked(id)
-	}
 	if e.Kind == "image" {
 		e.ImageRaw = append([]byte(nil), in.ImageRaw...)
 	} else {
@@ -306,162 +311,6 @@ func (m *Mem) ReplaceCatalogGrants(_ context.Context, projectID uuid.UUID, name 
 	return nil
 }
 
-func (m *Mem) HostProjectRelation(_ context.Context, projectID, hostID uuid.UUID) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	h, ok := m.hosts[hostID]
-	if !ok {
-		return "", store.ErrNotFound
-	}
-	if h.ProjectID == projectID {
-		return "owner", nil
-	}
-	if sh, ok := m.shares[shareKey(hostID, projectID)]; ok {
-		return sh.Level, nil
-	}
-	return "", nil
-}
-
-func (m *Mem) ListCatalogApprovals(_ context.Context, hostID uuid.UUID) ([]store.CatalogApproval, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.hosts[hostID]; !ok {
-		return nil, store.ErrNotFound
-	}
-	out := []store.CatalogApproval{}
-	for _, a := range m.approvals {
-		if a.HostID != hostID {
-			continue
-		}
-		view, ok := m.approvalViewLocked(a)
-		if ok {
-			out = append(out, view)
-		}
-	}
-	for i := 1; i < len(out); i++ {
-		j := i
-		for j > 0 && approvalBefore(out[j], out[j-1]) {
-			out[j], out[j-1] = out[j-1], out[j]
-			j--
-		}
-	}
-	return out, nil
-}
-
-func approvalBefore(a, b store.CatalogApproval) bool {
-	if !a.RequestedAt.Equal(b.RequestedAt) {
-		return a.RequestedAt.After(b.RequestedAt)
-	}
-	return a.EntryID.String() < b.EntryID.String()
-}
-
-func (m *Mem) approvalViewLocked(a store.CatalogApproval) (store.CatalogApproval, bool) {
-	e, ok := m.entries[a.EntryID]
-	if !ok {
-		return store.CatalogApproval{}, false
-	}
-	p := m.projects[e.ProjectID]
-	a.EntryName = e.Name
-	a.ProjectID = e.ProjectID
-	a.ProjectName = p.Name
-	a.CommandDisplay = e.CommandDisplay
-	a.Dir = e.Spec.Dir
-	a.Exec = e.Spec.Exec
-	a.Args = append([]string{}, e.Spec.Args...)
-	if a.Args == nil {
-		a.Args = []string{}
-	}
-	a.Env = make(map[string]string, len(e.Spec.Env))
-	for k, v := range e.Spec.Env {
-		a.Env[k] = v
-	}
-	a.EnvSets = append([]string{}, e.Spec.EnvSets...)
-	a.SecretEnv = make(map[string]string, len(e.Spec.SecretEnv))
-	for k, v := range e.Spec.SecretEnv {
-		a.SecretEnv[k] = v
-	}
-	a.RunAs = e.Spec.RunAs
-	a.Shell = e.Spec.Shell
-	if a.ApprovedBy != nil {
-		id := *a.ApprovedBy
-		a.ApprovedBy = &id
-	}
-	if a.ApprovedAt != nil {
-		t := *a.ApprovedAt
-		a.ApprovedAt = &t
-	}
-	return a, true
-}
-
-func (m *Mem) ApproveCatalog(_ context.Context, hostID, entryID uuid.UUID, specHash string, approver uuid.UUID, at time.Time) (store.CatalogApproval, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	e, ok := m.entries[entryID]
-	if !ok {
-		return store.CatalogApproval{}, store.ErrNotFound
-	}
-	if e.SpecHash != specHash {
-		return store.CatalogApproval{}, store.ErrConflict
-	}
-	if _, ok := m.hosts[hostID]; !ok {
-		return store.CatalogApproval{}, store.ErrNotFound
-	}
-	key := approvalKey(entryID, hostID)
-	row, exists := m.approvals[key]
-	if !exists {
-		row = store.CatalogApproval{
-			EntryID:     entryID,
-			HostID:      hostID,
-			RequestedBy: approver,
-			RequestedAt: at,
-		}
-	}
-	row.SpecHash = specHash
-	row.Status = "approved"
-	who := approver
-	when := at
-	row.ApprovedBy = &who
-	row.ApprovedAt = &when
-	m.approvals[key] = row
-	view, _ := m.approvalViewLocked(row)
-	return view, nil
-}
-
-func (m *Mem) DeleteCatalogApproval(_ context.Context, hostID, entryID uuid.UUID) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	key := approvalKey(entryID, hostID)
-	if _, ok := m.approvals[key]; !ok {
-		return store.ErrNotFound
-	}
-	delete(m.approvals, key)
-	return nil
-}
-
-func (m *Mem) UpsertPendingApproval(_ context.Context, entryID, hostID uuid.UUID, specHash string, userID uuid.UUID, at time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.entries[entryID]; !ok {
-		return store.ErrNotFound
-	}
-	if _, ok := m.hosts[hostID]; !ok {
-		return store.ErrNotFound
-	}
-	key := approvalKey(entryID, hostID)
-	if row, ok := m.approvals[key]; ok && row.Status == "approved" && row.SpecHash == specHash {
-		return nil
-	}
-	m.approvals[key] = store.CatalogApproval{
-		EntryID:     entryID,
-		HostID:      hostID,
-		SpecHash:    specHash,
-		Status:      "pending",
-		RequestedBy: userID,
-		RequestedAt: at,
-	}
-	return nil
-}
-
 func (m *Mem) PutConfirmation(_ context.Context, hash []byte, c store.CatalogConfirmation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -580,6 +429,21 @@ func (m *Mem) SetHostPrograms(_ context.Context, hostID uuid.UUID, programs *sto
 	return nil
 }
 
+// lookupOwnerLocked is lookupCatalogLocked for a service report on hostID:
+// the project must also be in the host's org with deploy access (api-v1
+// v1.24 item 6).
+func (m *Mem) lookupOwnerLocked(hostID uuid.UUID, slug, entry, kind string) (uuid.UUID, bool) {
+	id, ok := m.lookupCatalogLocked(slug, entry, kind)
+	if !ok {
+		return uuid.Nil, false
+	}
+	h, ok := m.hosts[hostID]
+	if !ok || m.projects[id].OrgID != h.OrgID || m.accessLevelLocked(hostID, id) != "deploy" {
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
 func (m *Mem) lookupCatalogLocked(slug, entry, kind string) (uuid.UUID, bool) {
 	id, ok := m.bySlug[slug]
 	if !ok {
@@ -624,19 +488,10 @@ func (m *Mem) deleteEntryLocked(id uuid.UUID) {
 	delete(m.entries, id)
 	delete(m.entryByName, entryKey(e.ProjectID, e.Name))
 	delete(m.grants, id)
-	m.deleteApprovalsLocked(id)
 	m.deleteDeploysLocked(id)
 	for key, rec := range m.confirmations {
 		if rec.row.EntryID == id {
 			delete(m.confirmations, key)
-		}
-	}
-}
-
-func (m *Mem) deleteApprovalsLocked(entryID uuid.UUID) {
-	for key, a := range m.approvals {
-		if a.EntryID == entryID {
-			delete(m.approvals, key)
 		}
 	}
 }
