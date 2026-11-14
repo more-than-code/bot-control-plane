@@ -245,7 +245,7 @@ func TestImageSpecForBuildRoundTrip(t *testing.T) {
 	for _, tc := range cases {
 		img := mustPlanImage(t, "web", tc.raw, tc.sets, tc.files)
 		stored := catalog.SpecJSON(img)
-		again, err := catalog.BuildImage("web", imageSpecForBuild([]byte(stored)), tc.sets, tc.files)
+		again, err := catalog.BuildImage("web", []byte(stored), tc.sets, tc.files)
 		if err != nil {
 			t.Fatalf("%s rebuild %v", tc.name, err)
 		}

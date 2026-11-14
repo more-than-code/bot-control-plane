@@ -2386,3 +2386,41 @@ func assertNoSecret(t *testing.T, blob string) {
 		}
 	}
 }
+
+// api-v1 v1.24.1: GET then PUT of an image entry round-trips. The stored spec
+// carries the other kind's field at 0, which the PUT accepts and ignores.
+func TestImageGetPutRoundTrip(t *testing.T) {
+	w := newWorld(t)
+	owner := w.user("owner@ex.com", "Owner")
+	sc := w.scene(owner, w.user("admin@ex.com", "Admin"), w.user("viewer@ex.com", "Viewer"), w.user("spare@ex.com", "Spare"), w.user("extra@ex.com", "Extra"))
+	tok := w.token(owner.ID)
+	project := sc.project.ID.String()
+	createImage(t, w, tok, sc.project.ID, "web", `{"kind":"service","image":"nginx"}`)
+	createImage(t, w, tok, sc.project.ID, "once", `{"kind":"job","image":"nginx"}`)
+	for _, name := range []string{"web", "once"} {
+		got := createImageGet(t, w, tok, sc.project.ID, name)
+		spec, ok := got["spec"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: no spec in %v", name, got)
+		}
+		if _, ok := spec["timeout_sec"]; !ok {
+			t.Fatalf("%s: stored spec lacks timeout_sec", name)
+		}
+		if _, ok := spec["healthy_after_sec"]; !ok {
+			t.Fatalf("%s: stored spec lacks healthy_after_sec", name)
+		}
+		body, err := json.Marshal(map[string]any{"kind": "image", "spec": spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, env, _ := mustCall(t, w, tok, http.MethodPut, "/v1/projects/"+project+"/catalog/"+name, string(body))
+		mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+		if again := createImageGet(t, w, tok, sc.project.ID, name); again["spec_hash"] != got["spec_hash"] {
+			t.Fatalf("%s: spec_hash changed %v -> %v", name, got["spec_hash"], again["spec_hash"])
+		}
+	}
+	status, env, _ := mustCall(t, w, tok, http.MethodPut, "/v1/projects/"+project+"/catalog/web", `{"kind":"image","spec":{"kind":"service","image":"nginx","timeout_sec":5}}`)
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "invalid timeout_sec")
+	status, env, _ = mustCall(t, w, tok, http.MethodPut, "/v1/projects/"+project+"/catalog/once", `{"kind":"image","spec":{"kind":"job","image":"nginx","healthy_after_sec":5}}`)
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "invalid healthy_after_sec")
+}

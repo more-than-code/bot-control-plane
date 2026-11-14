@@ -20,39 +20,6 @@ import (
 
 const programEntriesConsole = "program entries are edited in the console"
 
-// imageSpecForBuild drops the zero field that SpecJSON always writes for the
-// other kind. BuildImage treats a present timeout_sec as set, and a service
-// rejects that, including 0. A job rejects a present healthy_after_sec.
-// The stored body keeps both keys. Confirm removes only that zero before
-// validating again.
-func imageSpecForBuild(body []byte) []byte {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(body, &fields) != nil || fields == nil {
-		return body
-	}
-	var kind string
-	if raw, ok := fields["kind"]; ok {
-		if json.Unmarshal(raw, &kind) != nil {
-			return body
-		}
-	}
-	switch kind {
-	case "service":
-		if bytes.Equal(bytes.TrimSpace(fields["timeout_sec"]), []byte("0")) {
-			delete(fields, "timeout_sec")
-		}
-	case "job":
-		if bytes.Equal(bytes.TrimSpace(fields["healthy_after_sec"]), []byte("0")) {
-			delete(fields, "healthy_after_sec")
-		}
-	}
-	out, err := json.Marshal(fields)
-	if err != nil {
-		return body
-	}
-	return out
-}
-
 func digestMap(names map[string][]string, img catalog.Image) map[string]string {
 	return catalog.KeyDigests(catalog.ReferencedSets(img), names)
 }
@@ -393,7 +360,7 @@ func (s *Server) rebuildCatalogWrite(ctx context.Context, projectID uuid.UUID, n
 	if err != nil {
 		return store.CatalogWrite{}, err
 	}
-	img, err := catalog.BuildImage(name, imageSpecForBuild(body), names, known)
+	img, err := catalog.BuildImage(name, body, names, known)
 	if err != nil {
 		return store.CatalogWrite{}, err
 	}
