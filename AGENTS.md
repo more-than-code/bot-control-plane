@@ -8,7 +8,7 @@ Umbrella: `/Users/joe/workspace/deploybot` (cross-repo design `docs/design-bot-a
 
 ## Rules for every part
 
-- The contracts in `docs/contracts/` (`api-v1.md`, `oauth-v1.md`, `agent-protocol-v1.md`) are frozen copies of the umbrella source; report problems instead of editing them. They hold only implemented versions: api-v1 v1.20 and agent-protocol v1.10 (env generate, on hold) stay out until that work lands. bot-agent keeps its own copy of `agent-protocol-v1.md`.
+- The contracts in `docs/contracts/` (`api-v1.md`, `oauth-v1.md`, `agent-protocol-v1.md`) are frozen copies of the umbrella source; report problems instead of editing them. They hold only implemented versions: api-v1 v1.20 and agent-protocol v1.10 (env generate, on hold) stay out until that work lands. The api-v1 copy already includes v1.24 (organizations), ahead of its API implementation, from the approved spec `docs/spec-organizations.md`. bot-agent keeps its own copy of `agent-protocol-v1.md`.
 - Do not print, log, or commit `.env` or any secret. Log only a short redacted error line.
 - Do not commit unless the user asks. Do not push or add a remote.
 

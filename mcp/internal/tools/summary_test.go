@@ -433,16 +433,37 @@ func TestSummarizeProjectsOrg(t *testing.T) {
 	}
 }
 
-// list_orgs returns only the orgs array from /v1/me.
+// list_orgs returns only the orgs array from /v1/me, tells a pre-v1.24 body
+// (no orgs key) from an empty list, and refuses a malformed body.
 func TestProjectOrgs(t *testing.T) {
-	got := string(projectOrgs([]byte(`{"user":{"id":"u","email":"a@example"},"orgs":[{"id":"o1","name":"Lab","slug":"lab","role":"admin","created_at":"2026-11-14T00:00:00Z"}],"projects":[{"id":"p"}]}`)))
-	if got != `{"orgs":[{"id":"o1","name":"Lab","slug":"lab","role":"admin","created_at":"2026-11-14T00:00:00Z"}]}` {
-		t.Fatalf("projectOrgs %s", got)
+	got, found, err := projectOrgs([]byte(`{"user":{"id":"u","email":"a@example"},"orgs":[{"id":"o1","name":"Lab","slug":"lab","role":"admin","created_at":"2026-11-14T00:00:00Z"}],"projects":[{"id":"p"}]}`))
+	if err != nil || !found || string(got) != `{"orgs":[{"id":"o1","name":"Lab","slug":"lab","role":"admin","created_at":"2026-11-14T00:00:00Z"}]}` {
+		t.Fatalf("projectOrgs %s found=%v err=%v", got, found, err)
 	}
-	if got := string(projectOrgs([]byte(`{"user":{},"projects":[]}`))); got != `{"orgs":[]}` {
-		t.Fatalf("projectOrgs without orgs %s", got)
+	got, found, err = projectOrgs([]byte(`{"user":{},"projects":[]}`))
+	if err != nil || found || string(got) != `{"orgs":[]}` {
+		t.Fatalf("projectOrgs without orgs %s found=%v err=%v", got, found, err)
 	}
-	if got := summarizeOrgs(projectOrgs([]byte(`{"projects":[]}`))); got != "0 orgs" {
-		t.Fatalf("empty orgs summary %q", got)
+	got, found, err = projectOrgs([]byte(`{"orgs":[]}`))
+	if err != nil || !found || summarizeOrgs(got) != "0 orgs" {
+		t.Fatalf("empty orgs %s found=%v err=%v", got, found, err)
+	}
+	for _, bad := range []string{`[]`, `null`, `"x"`, `{"orgs":null}`, `{"orgs":{}}`, `{"orgs":[1]}`, `{"orgs":[null]}`} {
+		if _, _, err := projectOrgs([]byte(bad)); err == nil {
+			t.Errorf("projectOrgs(%s) accepted a malformed body", bad)
+		}
+	}
+}
+
+// Before v1.24 (or after a rollback to v0.2.29) a project's host list has
+// relation and share_level but no access_level; the summary keeps the
+// owned or shared detail.
+func TestSummarizeHostsRelationFallback(t *testing.T) {
+	old := []byte(`{"items":[
+		{"name":"pi1","status":"online","relation":"owner","share_level":null},
+		{"name":"pi2","status":"online","relation":"shared","share_level":"metrics"}
+	]}`)
+	if got, want := summarizeHosts(old, false), "2 hosts: pi1 online, pi2 online (shared: metrics)"; got != want {
+		t.Fatalf("pre-v1.24 hosts\n got %q\nwant %q", got, want)
 	}
 }

@@ -723,6 +723,7 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
      - `relation` is `"owner"` when `access_level` is `"deploy"`, otherwise `"shared"`;
      - `share_level` equals `access_level`.
      They are removed in v1.25.
+   - `HostPrograms.projects`, the host's allowlist of project slugs (v1.23 item 1), is returned only to org admins and owners. Every other caller gets `projects: null`. Each project view keeps its own `project_listed`. This replaces v1.23's "members of the host's owning project": a project with access never sees the other projects' slugs.
    - `HostAccess{project_id,project_name,level,granted_by,granted_at}`.
 2. **Permissions** (replaces the v1.1 matrix; roles are org roles or the caller's role in a project that has access):
    - see the host, status, metrics, processes and snapshot: org admin+, or any member of a project with access (any level);
@@ -786,6 +787,12 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
    - backfills: an explicit mapping on production (spec §4.1), and otherwise one org per project owner;
    - converts each host's former owning project into a `host_access` row at `deploy`, and same-org shares into `host_access` rows;
    - keeps `hosts.project_id`, `host_shares` and the approval tables, unused by the new API, so v0.2.29 still runs after a rollback;
+   - relaxes `NOT NULL` on `services.project_id` (org-level discovered services) and `hosts.project_id` (hosts enrolled with an org token that has no grant), and adds `UNIQUE (org_id, name)` on hosts (`hosts_project_name_unique` stays);
+   - ships a rollback script, `0015_orgs.down.sql`, which is not applied by `--migrate`. Ops runs it before pointing `current` back at v0.2.29. It:
+     - gives every NULL `services.project_id` its host's `project_id`;
+     - gives every NULL `hosts.project_id` a project with `deploy` access, otherwise the org's oldest project;
+     - restores both `NOT NULL` constraints.
+     Access grants made after the release are not carried back into `host_shares` (spec §7).
    - the `deploybot_api` grants follow the existing default privileges.
 10. **MCP-visible change:**
     - `list_projects` shows the org;

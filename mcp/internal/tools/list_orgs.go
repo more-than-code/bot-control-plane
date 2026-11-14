@@ -26,25 +26,45 @@ func registerListOrgs(server *mcp.Server, api *apiclient.Client) {
 		if fail != nil {
 			return fail
 		}
-		orgs := projectOrgs(payload)
+		orgs, found, err := projectOrgs(payload)
+		if err != nil {
+			return toolError("error", errStatusShape.Error())
+		}
+		if !found {
+			return present(orgs, "0 orgs: this API predates organizations")
+		}
 		return present(orgs, summarizeOrgs(orgs))
 	})
 }
 
 // projectOrgs keeps only the orgs list from a /v1/me body, so list_orgs does
-// not repeat the profile and projects that list_projects returns. A body
-// without an orgs array (an API older than v1.24) becomes an empty list.
-func projectOrgs(payload json.RawMessage) json.RawMessage {
-	var body struct {
-		Orgs []json.RawMessage `json:"orgs"`
+// not repeat the profile and projects that list_projects returns.
+// found is false when the body has no orgs key (an API older than v1.24);
+// the list is then empty. A body that is not an object, or whose orgs is not
+// an array of objects, is an error and is not shown.
+func projectOrgs(payload json.RawMessage) (out json.RawMessage, found bool, err error) {
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &body); err != nil || body == nil {
+		return nil, false, errStatusShape
 	}
-	_ = json.Unmarshal(payload, &body)
-	if body.Orgs == nil {
-		body.Orgs = []json.RawMessage{}
+	raw, found := body["orgs"]
+	if !found {
+		return json.RawMessage(`{"orgs":[]}`), false, nil
 	}
-	out, err := json.Marshal(body)
+	var orgs []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &orgs); err != nil || orgs == nil {
+		return nil, true, errStatusShape
+	}
+	for _, o := range orgs {
+		if o == nil {
+			return nil, true, errStatusShape
+		}
+	}
+	out, err = json.Marshal(struct {
+		Orgs json.RawMessage `json:"orgs"`
+	}{raw})
 	if err != nil {
-		return json.RawMessage(`{"orgs":[]}`)
+		return nil, true, errStatusShape
 	}
-	return out
+	return out, true, nil
 }

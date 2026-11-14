@@ -1613,6 +1613,29 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 		return http.StatusUnauthorized, "unauthorized", "session expired", nil
 	case "health-error":
 		return http.StatusBadRequest, "bad_request", "token=s3cret", nil
+	case "org-hosts-forbidden":
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/orgs/"+orgID+"/hosts" {
+			return http.StatusForbidden, "forbidden", "org admins only", nil
+		}
+	case "org-hosts-missing":
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/orgs/"+orgID+"/hosts" {
+			return http.StatusNotFound, "not_found", "org not found", nil
+		}
+	case "me-no-orgs":
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/me" {
+			return http.StatusOK, "ok", "", map[string]any{
+				"user":     map[string]any{"id": "55555555-5555-4555-8555-555555555555", "email": "ada@example", "name": "Ada"},
+				"projects": []any{},
+			}
+		}
+	case "me-empty-orgs":
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/me" {
+			return http.StatusOK, "ok", "", map[string]any{"user": map[string]any{}, "orgs": []any{}, "projects": []any{}}
+		}
+	case "me-bad":
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/me" {
+			return http.StatusOK, "ok", "", map[string]any{"user": map[string]any{}, "orgs": "not a list"}
+		}
 	}
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/me":
@@ -2321,5 +2344,85 @@ func assertKeptPrefix(t *testing.T, body map[string]any, key, prefix string) {
 		if row["id"] != fmt.Sprintf("%s%03d", prefix, i) {
 			t.Fatalf("%s[%d] id %v", key, i, row["id"])
 		}
+	}
+}
+
+// v1.24: list_orgs tells an API without organizations from an empty list,
+// and does not show a malformed /v1/me body.
+func TestListOrgsBodies(t *testing.T) {
+	cases := []struct {
+		mode    string
+		text    string
+		isError bool
+	}{
+		{mode: "me-no-orgs", text: "0 orgs: this API predates organizations"},
+		{mode: "me-empty-orgs", text: "0 orgs"},
+		{mode: "me-bad", text: "error: status response was not usable", isError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			fake := &fakeAPI{token: userToken, mode: tc.mode}
+			mcpSrv, _ := newTestServer(t, fake)
+			cs, _ := connectMCP(t, mcpSrv, userToken)
+			res := mustCall(t, cs, "list_orgs", map[string]any{})
+			assertLast(t, fake, http.MethodGet, "/v1/me", "", "")
+			if res.IsError != tc.isError || textOf(t, res) != tc.text {
+				t.Fatalf("error=%v text %q", res.IsError, textOf(t, res))
+			}
+			if tc.isError && res.StructuredContent != nil {
+				t.Fatalf("malformed body was returned: %#v", res.StructuredContent)
+			}
+		})
+	}
+}
+
+// v1.24: GET /v1/orgs/{id}/hosts is org admin+; the API's refusal is the
+// tool error, with its code and message.
+func TestListHostsOrgRefused(t *testing.T) {
+	cases := []struct{ mode, text string }{
+		{mode: "org-hosts-forbidden", text: "forbidden: org admins only"},
+		{mode: "org-hosts-missing", text: "not_found: org not found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			fake := &fakeAPI{token: userToken, mode: tc.mode}
+			mcpSrv, _ := newTestServer(t, fake)
+			cs, _ := connectMCP(t, mcpSrv, userToken)
+			res := mustCall(t, cs, "list_hosts", map[string]any{"org_id": orgID})
+			assertLast(t, fake, http.MethodGet, "/v1/orgs/"+orgID+"/hosts", "", "")
+			if !res.IsError || textOf(t, res) != tc.text {
+				t.Fatalf("error=%v text %q", res.IsError, textOf(t, res))
+			}
+		})
+	}
+}
+
+// The org reads send only GET requests, and only to the three v1.24 read
+// routes MCP may use; nothing else on /v1 is called.
+func TestOrgReadsOnlyGet(t *testing.T) {
+	fake := &fakeAPI{token: userToken}
+	mcpSrv, _ := newTestServer(t, fake)
+	cs, _ := connectMCP(t, mcpSrv, userToken)
+	mustCall(t, cs, "list_orgs", map[string]any{})
+	mustCall(t, cs, "list_projects", map[string]any{})
+	mustCall(t, cs, "list_hosts", map[string]any{"project_id": projectID})
+	mustCall(t, cs, "list_hosts", map[string]any{"org_id": orgID})
+	allowed := map[string]bool{
+		"/v1/me":                               true,
+		"/v1/orgs/" + orgID + "/hosts":         true,
+		"/v1/projects/" + projectID + "/hosts": true,
+	}
+	var paths []string
+	for _, call := range fake.snapshot() {
+		if !strings.HasPrefix(call.Path, "/v1/") {
+			continue
+		}
+		paths = append(paths, call.Path)
+		if call.Method != http.MethodGet || !allowed[call.Path] {
+			t.Errorf("unexpected api call %s %s", call.Method, call.Path)
+		}
+	}
+	if len(paths) != 4 {
+		t.Fatalf("v1 calls %v", paths)
 	}
 }
