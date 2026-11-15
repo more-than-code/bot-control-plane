@@ -171,9 +171,9 @@ func putStatus(ctx context.Context, api *apiclient.Client, path string, body any
 }
 
 // postWithin is postStatus with a per-call deadline. A deadline is reported
-// as still running on the host. Only confirm uses it, and only for an image
-// deploy or rollback. Other calls keep the default deadline and the generic
-// API error.
+// as still running on the host. Only confirm uses it: for an image deploy or
+// rollback, an unknown entry, or a confirm without project_id and entry.
+// Other calls keep the default deadline and the generic API error.
 func postWithin(ctx context.Context, api *apiclient.Client, path string, body any, timeout time.Duration) (int, json.RawMessage, *mcp.CallToolResult) {
 	return callStatusWithin(ctx, api, http.MethodPost, path, nil, body, timeout)
 }

@@ -66,8 +66,23 @@ func registerDeployEntry(server *mcp.Server, api *apiclient.Client) {
 		if in.Force != nil && *in.Force {
 			payload = markForce(payload)
 		}
-		return pendingConfirmation(payload)
+		return withConfirmHint(pendingConfirmation(payload))
 	})
+}
+
+// confirmHint ends a deploy or rollback 202 text.
+const confirmHint = "When you confirm, pass project_id and entry as well."
+
+// withConfirmHint adds confirmHint to a pending deploy or rollback result.
+// An error result is returned unchanged.
+func withConfirmHint(res *mcp.CallToolResult) *mcp.CallToolResult {
+	if res.IsError || len(res.Content) == 0 {
+		return res
+	}
+	if text, ok := res.Content[0].(*mcp.TextContent); ok {
+		text.Text += "\n" + confirmHint
+	}
+	return res
 }
 
 // markForce records that this confirmation was reserved with force.
