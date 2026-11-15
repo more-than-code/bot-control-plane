@@ -860,3 +860,35 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
    The rollback after this migration is restoring the pre-release dump (spec §7).
 4. **Unchanged:** every other route, field and error, agent-protocol, and oauth-v1.
 5. **Release condition:** ships only after phase 1 (v0.2.30) has been live and checked (spec §7, D-9).
+
+## v1.28 value requests: an agent asks, the human fills the value in the browser (2026-11-15, approved spec `docs/spec-env-request-value.md` rev 3; migration 0018; additive)
+
+*Status: implemented on dev 2026-11-16 (bot-control-plane merge of e6aa328), not yet released; ships with v1.27 phase B (items 4–6). No agent-protocol change.*
+
+*As implemented (2026-11-16): `via` for these rows is recorded in the audit detail (`audit_log.via` keeps console/mcp/agent/system); the read and the fill-page data also answer `not_found` when the creator no longer reaches the project; `reason` also refuses format and line/paragraph separator characters (Unicode Cf, Zl, Zp) with the same message; create and fill answer `unavailable` when the server has no secrets key; rows are deleted 7 days after expiry.*
+
+1. **ValueRequest object:** `{"request_id","project_id","set","key","state","expires_at","created_at"}`. `state` is `pending`, `filled`, `declined` or `expired` (`expired` is computed from `expires_at` for a `pending` row). It never carries a value, a preview or the reason after creation.
+2. **Create:** `POST /v1/projects/{id}/env-sets/{set}/value-requests`, body `{"key", "reason"?}`.
+   - **Who:** a project owner or admin (org owners and admins included), console or `api_delegated` session. It **decides in its handler** (v1.12.1 item 3); it writes no env value.
+   - **Checks, in order:**
+     1. the set exists (`not_found`);
+     2. `key` matches the env key rule (`bad_request`);
+     3. `reason`, if given, is at most 200 characters with no control characters (`bad_request` `reason must be at most 200 characters of plain text`);
+     4. the key is either absent from the set or a `needs_value` placeholder; a key with a value → `conflict` `{KEY} already has a value; edit it in the console`;
+     5. the caller has fewer than 20 `pending`, unexpired requests, not counting one this request replaces (`conflict` `too many open value requests; fill or wait for the ones you have`).
+   - **Effect:** stores the request only. A new key is created only when the request is filled, so an unfilled request leaves the set unchanged. The id is 43-character base64url from a CSPRNG, stored hashed (as confirmation ids). Valid for 15 minutes, single use.
+   - **Replaces an open one (rev 3):** in the same transaction, a `pending`, unexpired request by the same user for the same project, set and key gets `expires_at` set to now, so its link answers `this request has expired; ask the agent for a new one`. At most one open request per user and key.
+   - **Response:** `201 {"request_id","url","expires_at"}`. `url` is `<BOT_API_CONSOLE_ORIGIN>/fill/<request_id>`; it carries no user data and is not pre-authenticated.
+   - **Audit:** `env_set.value_requested` (`set`, `key`, `via`, `request`). The reason is not audited.
+   - **`request` in audit rows (rev 3):** the first 8 hex characters of the SHA-256 of the request id, never any part of the id itself (the id is the token in a live link).
+3. **Read:** `GET /v1/value-requests/{request_id}` → `200` ValueRequest, only to the user who created it; anyone else, or an unknown id → `not_found`. Console or delegated session.
+4. **Fill page data:** `GET /v1/value-requests/{request_id}/fill`, **console session only** (`api_delegated` → `forbidden` before any lookup), the requesting user only (else `not_found`) → `200` the ValueRequest plus `project_name` and `reason` (plain text). Used by the console fill page; never cached (`Cache-Control: no-store`).
+5. **Fill:** `POST /v1/value-requests/{request_id}/fill`, console session only (`api_delegated` → `forbidden`), body `{"value"}` or `{"generate": <v1.27 item 1 object>}` (both or neither → `bad_request` `send value or generate, not both`).
+   - **Checks:** the caller created the request (else `not_found`) and is still owner or admin of the project (else `not_found`); the request is `pending` (`filled` or `declined` → `conflict` `this request was already used`) and not expired (`conflict` `this request has expired; ask the agent for a new one`); the key is still absent or still a placeholder (`conflict` `{KEY} already has a value; edit it in the console`; the request stays `pending`); a typed value follows the env value rules (no empty value, size limit).
+   - **Effect, in one transaction:** writes the key as **secret**, sealed on arrival; clears `needs_value`; a generated value follows v1.27 items 1–2 (`generated`, `reveal_pending`); the request becomes `filled` with `done_at`. Typed value → `200 {"state":"filled"}`. Generated → `200 {"state":"filled","reveal_pending":true}`; the page then uses the v1.27 item 3 reveal route.
+   - **Audit:** `env_set.key_put` with `via='value_request'`, `request` (item 2's hash prefix), and `generated: "<kind>"` when generated. No value.
+6. **Decline:** `POST /v1/value-requests/{request_id}/decline`, console session only, same user and state checks as item 5 → `200 {"state":"declined"}`. Audit `env_set.value_request_declined` (`set`, `key`, `request` as in item 2).
+7. **Lifecycle:** deleting an env set, or its project, removes its requests (cascade). An expired request is never filled; expired rows may be deleted after 7 days.
+8. **Migration 0018** (applied by `--migrate`): table `app.env_value_requests` (`id_hash`, `user_id`, `project_id`, `set_name`, `key`, `reason`, `state`, `created_at`, `expires_at`, `done_at`), foreign keys to users and projects `ON DELETE CASCADE`, an index for the per-user open count; **no value column**. `0018_env_value_requests.down.sql` drops the table (pending requests are lost; filled values stay in their sets).
+9. **Unchanged:** every other env-set route and its delegated refusal; no route returns an env value or preview to a delegated session; v1.27 items 1–8.
+
