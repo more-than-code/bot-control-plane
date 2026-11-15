@@ -663,7 +663,11 @@ export async function deleteRegistry(event: RequestEvent) {
 	const path = registryPath(id, host);
 	if (!path) return settingsFailure(event, 400, 'That registry is not valid.');
 	try {
-		await apiFetch(event, path, { method: 'DELETE' });
+		const payload = await apiFetch(event, path, { method: 'DELETE' });
+		// Disconnect of a GitHub login (api-v1 v1.29 item 4): a failed revoke at GitHub is reported, not hidden.
+		if (payload != null && typeof payload === 'object' && (payload as Record<string, unknown>).revoked === false) {
+			return present(event, { scope: 'settings' as const, githubNote: 'revoke_failed' as const });
+		}
 		redirect(303, backTo(event.url));
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
@@ -743,6 +747,8 @@ export async function loadProjectSettings(event: RequestEvent, id: string): Prom
 	envSetsMessage: string | null;
 	registries: Registry[];
 	registriesMessage: string | null;
+	/** api-v1 v1.29 item 5: the API has Connect GitHub configured. */
+	githubConnect: boolean;
 	files: ProjectFile[];
 	filesMessage: string | null;
 }> {
@@ -752,6 +758,7 @@ export async function loadProjectSettings(event: RequestEvent, id: string): Prom
 		envSetsMessage: env.message,
 		registries: registries.items,
 		registriesMessage: registries.message,
+		githubConnect: registries.githubConnect,
 		files: files.items,
 		filesMessage: files.message
 	};
@@ -779,13 +786,20 @@ async function readProjectFiles(event: RequestEvent, id: string) {
 	}
 }
 
+/** The registries list's `github_connect` (api-v1 v1.29 item 5). Anything but `true` (an older API) hides Connect GitHub. */
+export function githubConnectOf(payload: unknown): boolean {
+	return payload != null && typeof payload === 'object' && (payload as Record<string, unknown>).github_connect === true;
+}
+
 async function readRegistries(event: RequestEvent, id: string) {
 	try {
-		const list = parseRegistryList(await apiFetch(event, `/v1/projects/${id}/registries`));
-		if (!list) return { items: [], message: UNEXPECTED };
-		return { items: list.items, message: null };
+		const payload = await apiFetch(event, `/v1/projects/${id}/registries`);
+		const list = parseRegistryList(payload);
+		const githubConnect = githubConnectOf(payload);
+		if (!list) return { items: [], message: UNEXPECTED, githubConnect };
+		return { items: list.items, message: null, githubConnect };
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
-		return { items: [], message: apiMessage(err) };
+		return { items: [], message: apiMessage(err), githubConnect: false };
 	}
 }

@@ -169,6 +169,7 @@ func TestTools(t *testing.T) {
 		"list_orgs": true, "list_projects": true, "list_hosts": true, "list_services": true,
 		"query_metrics": true, "list_processes": true, "service_health_history": true,
 		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true,
+		"check_readiness": true, "image_access": true, "host_policy_snippet": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -324,12 +325,13 @@ func TestTools(t *testing.T) {
 		"create_catalog_entry", "update_catalog_entry", "delete_catalog_entry",
 		"confirm", "entry_logs", "entry_status", "create_env_set", "list_env_sets",
 		"request_env_value", "get_env_value_request",
+		"check_readiness", "image_access", "host_policy_snippet",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	if len(seen) != 27 {
+	if len(seen) != 30 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -1665,6 +1667,15 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 		}
 	}
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/catalog/"+imageEntry+"/readiness":
+		return http.StatusOK, "ok", "ok", readinessReply()
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/image-access":
+		return http.StatusOK, "ok", "ok", map[string]any{"registry": "ghcr.io", "access": "private_no_login", "login": "none", "token": readinessLeak}
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/catalog/"+imageEntry+"/host-policy-snippet":
+		return http.StatusOK, "ok", "ok", map[string]any{
+			"image_pattern": "ghcr.io/joe/app", "project": "lab", "toml": "x " + readinessLeak, "command": "rm -rf /",
+			"note": "The host's root applies this.", "token": readinessLeak,
+		}
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/projects/"+projectID+"/env-sets/services/value-requests":
 		return http.StatusCreated, "ok", "ok", map[string]any{
 			"request_id": valueRequestID, "url": "https://console.example/fill/" + valueRequestID, "expires_at": "2026-11-15T10:15:00Z",

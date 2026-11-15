@@ -29,7 +29,7 @@ const deployEntrySchema = `{
 func registerDeployEntry(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "deploy_entry",
-		Description: "Deploy a catalog image entry on a host. Requires the deploy permission. The host must run containers. The action is real and is audited. Nothing runs until a second confirm call with the returned confirmation id, after the user agrees. This call does not contact the host. The API refuses when the entry joins a shared network the host does not open to the project, or the host's agent is older than 0.2.9. The result lists the last 3 deploys so a rollback digest can be chosen.",
+		Description: "Deploy a catalog image entry on a host. Requires the deploy permission. The host must run containers. The action is real and is audited. Nothing runs until a second confirm call with the returned confirmation id, after the user agrees. This call does not contact the host. The API refuses when the entry joins a shared network the host does not open to the project, or the host's agent is older than 0.2.9. The result lists the last 3 deploys so a rollback digest can be chosen. Run check_readiness first to see what is missing.",
 		Annotations: mutatingAnnotations(false),
 		InputSchema: json.RawMessage(deployEntrySchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -55,7 +55,7 @@ func registerDeployEntry(server *mcp.Server, api *apiclient.Client) {
 		}{HostID: in.HostID, Force: in.Force, IdempotencyKey: in.IdempotencyKey}
 		status, payload, fail := postStatus(ctx, api, path, body)
 		if fail != nil {
-			return fail
+			return withReadinessHint(fail)
 		}
 		if status != http.StatusAccepted {
 			return confirmationOnly(status, payload)
@@ -68,6 +68,28 @@ func registerDeployEntry(server *mcp.Server, api *apiclient.Client) {
 		}
 		return withConfirmHint(pendingConfirmation(payload))
 	})
+}
+
+// readinessHint ends a deploy_entry refusal (api-v1 v1.29, spec §3.3).
+const readinessHint = "Run check_readiness for this entry and host to see what is missing and how to fix it."
+
+// withReadinessHint adds readinessHint to an API refusal (bad_request,
+// forbidden or unavailable). Other errors are returned unchanged.
+func withReadinessHint(res *mcp.CallToolResult) *mcp.CallToolResult {
+	if !res.IsError || len(res.Content) == 0 {
+		return res
+	}
+	text, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		return res
+	}
+	for _, code := range []string{"bad_request: ", "forbidden: ", "unavailable: "} {
+		if strings.HasPrefix(text.Text, code) {
+			text.Text += "\n" + readinessHint
+			return res
+		}
+	}
+	return res
 }
 
 // confirmHint ends a deploy or rollback 202 text.

@@ -174,20 +174,43 @@ type EnvSetConfirmation struct {
 	UsedAt         *time.Time
 }
 
+// Registry sources (api-v1 v1.29 item 5).
+const (
+	RegistrySourceManual = "manual"
+	RegistrySourceGitHub = "github"
+)
+
+// GitHubRegistry is the registry host a GitHub connection stores (ghcr.io).
+const GitHubRegistry = "ghcr.io"
+
 // Registry is a registry credential without the token.
 type Registry struct {
 	Host      string    `json:"host"`
 	Username  string    `json:"username"`
 	UpdatedAt time.Time `json:"updated_at"`
 	UpdatedBy uuid.UUID `json:"updated_by"`
+	// Source is manual or github (api-v1 v1.29 item 5).
+	Source string `json:"source"`
+	// ConnectedBy is the user who connected GitHub; nil for a manual row,
+	// and nil when that user no longer exists.
+	ConnectedBy *RegistryUser `json:"connected_by"`
 }
 
-// RegistryWrite is an encrypted registry token.
+// RegistryUser names the user who connected a registry.
+type RegistryUser struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// RegistryWrite is an encrypted registry token. An empty Source is manual.
+// ConnectedBy is stored only for a github row.
 type RegistryWrite struct {
-	Username   string
-	Nonce      []byte
-	Ciphertext []byte
-	KeyVersion int
+	Username    string
+	Nonce       []byte
+	Ciphertext  []byte
+	KeyVersion  int
+	Source      string
+	ConnectedBy *uuid.UUID
 }
 
 // RegistryMaterial is one stored registry token. It is not returned over HTTP.
@@ -197,6 +220,18 @@ type RegistryMaterial struct {
 	Nonce      []byte
 	Ciphertext []byte
 	KeyVersion int
+	Source     string
+}
+
+// Norm fills in the manual source and drops ConnectedBy for a manual row.
+func (in RegistryWrite) Norm() RegistryWrite {
+	if in.Source == "" {
+		in.Source = RegistrySourceManual
+	}
+	if in.Source != RegistrySourceGitHub {
+		in.ConnectedBy = nil
+	}
+	return in
 }
 
 // DefaultGrantActions is the grant inserted for a new entry.

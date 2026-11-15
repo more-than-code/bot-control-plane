@@ -83,7 +83,8 @@ func TestOrgToolDescriptions(t *testing.T) {
 	}
 	for name := range desc {
 		for _, word := range []string{"org", "member", "token", "access", "grant", "invite"} {
-			if strings.Contains(name, word) && name != "list_orgs" {
+			// image_access reads registry access for an image, not org or host access.
+			if strings.Contains(name, word) && name != "list_orgs" && name != "image_access" {
 				t.Errorf("tool %s looks like an org, membership, token or access tool", name)
 			}
 		}

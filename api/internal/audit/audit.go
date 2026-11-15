@@ -82,6 +82,9 @@ const (
 	ActionEnvSetValueRequestDeclined = "env_set.value_request_declined"
 	ActionRegistryPut                = "registry.put"
 	ActionRegistryDelete             = "registry.delete"
+	// Connect GitHub (api-v1 v1.29). Detail never holds the token.
+	ActionRegistryGitHubConnected    = "registry.github_connected"
+	ActionRegistryGitHubDisconnected = "registry.github_disconnected"
 	ActionFilePut                    = "file.put"
 	ActionFileDelete                 = "file.delete"
 	ActionDelegatedDenied            = "delegated.denied"

@@ -11,8 +11,11 @@
 	import FileViewDialog, { viewButtonId } from './FileViewDialog.svelte';
 	import ProjectFileForm from './ProjectFileForm.svelte';
 	import RegistryForm from './RegistryForm.svelte';
+	import GitHubConnect from './GitHubConnect.svelte';
+	import { Badge } from '$lib/components/ui/badge';
+	import { envSetUsers, fileUsers, GITHUB_NOTES, GITHUB_REGISTRY, registryUsers, usedByText, type GitHubNoteCode } from '$lib/settings-auto';
 	import { ENV_SET_STATUS_ID } from './env-set-panel';
-	import type { EnvSet, Project, ProjectFile, Registry } from '$lib/api-types';
+	import type { CatalogEntry, EnvSet, Project, ProjectFile, Registry } from '$lib/api-types';
 	import { formatBytes } from '$lib/format';
 	import { actionUrlFrom } from '$lib/url';
 	import { Button } from '$lib/components/ui/button';
@@ -33,7 +36,12 @@
 		viewedFile = null,
 		settingsName = null,
 		registries = [],
-		registriesMessage = null
+		registriesMessage = null,
+		githubConnect = false,
+		githubNote = null,
+		githubRefused = false,
+		catalog = [],
+		catalogKnown = true
 	}: {
 		project: Project;
 		canOwner: boolean;
@@ -48,7 +56,23 @@
 		settingsName?: string | null;
 		registries?: Registry[];
 		registriesMessage?: string | null;
+		/** Connect GitHub is offered: the registries list's github_connect (api-v1 v1.29 item 5). */
+		githubConnect?: boolean;
+		/** The note after Connect GitHub (`?github=`) or a Disconnect whose revoke failed. */
+		githubNote?: GitHubNoteCode | null;
+		/** ghcr.io refused the GitHub connection for an image in this project's catalog. */
+		/** Streamed: its registry lookups never hold up the tab. */
+		githubRefused?: boolean | Promise<boolean>;
+		/** The catalog, for each card's "Used by" note (names only). */
+		catalog?: CatalogEntry[];
+		/** False when the catalog failed to load, was truncated or left entries out: the notes say usage is unknown. */
+		catalogKnown?: boolean;
 	} = $props();
+
+	const githubRow = $derived(registries.find((row) => row.host === GITHUB_REGISTRY && row.source === 'github') ?? null);
+	const manualGhcr = $derived(registries.find((row) => row.host === GITHUB_REGISTRY && row.source !== 'github') ?? null);
+	const connectAction = $derived(actionUrlFrom(page.url, 'connectGitHub'));
+	const note = $derived(githubNote ? GITHUB_NOTES[githubNote] : null);
 
 	// The Files card's "Saved file {name}." line, set by the Add file dialog.
 	let savedFile = $state<string | null>(null);
@@ -62,6 +86,10 @@
 	// The Env sets card's status line ("Saved env set {name}."), set by the Add env set dialog.
 	let envSetNote = $state('');
 </script>
+
+{#snippet refusedBadge()}
+	<Badge variant="destructive" class="ml-1" title="ghcr.io refused this login for an image in the catalog. Reconnect GitHub.">Refused</Badge>
+{/snippet}
 
 {#if message && !settingsField && !settingsName}
 	<div id="settings-error" tabindex="-1" class="mb-4 max-w-full min-w-0 break-words focus-visible:ring-3 focus-visible:ring-ring">
@@ -116,7 +144,7 @@
 	<p class="text-muted-foreground text-sm">Only the owner can rename or delete this project.</p>
 {/if}
 {#if canAdmin}
-	<Card.Root class="mt-4">
+	<Card.Root id="env-sets" class="mt-4">
 		<Card.Header>
 			<Card.Title>Env sets</Card.Title>
 			<Card.Description>Plain values are shown. A secret shows only a short preview. A generated value is shown once.</Card.Description>
@@ -131,6 +159,7 @@
 				<p class="text-muted-foreground text-sm">No env sets.</p>
 			{/if}
 			{#each envSets as set (set.name)}
+				<div class="grid min-w-0 gap-1">
 				<EnvSetTable
 					{set}
 					putAction={actionUrlFrom(page.url, 'putEnvKey')}
@@ -142,10 +171,12 @@
 					mergeError={settingsField === 'merge' && settingsName === set.name ? message : null}
 					onAction={() => (envSetNote = '')}
 				/>
+				<p class="text-muted-foreground min-w-0 text-xs break-words" data-used-by="env-set">{usedByText(envSetUsers(catalog, set.name), catalogKnown)}</p>
+				</div>
 			{/each}
 		</Card.Content>
 	</Card.Root>
-	<Card.Root class="mt-4">
+	<Card.Root id="files" class="mt-4">
 		<Card.Header>
 			<Card.Title>Files</Card.Title>
 			<Card.Description>Secret files stay on the API. The paste box is never filled in.</Card.Description>
@@ -176,6 +207,7 @@
 							<span class="text-muted-foreground">{formatBytes(file.size)}</span>
 							<span class="text-muted-foreground"><LocalTime iso={file.updated_at} /></span>
 						</p>
+						<p class="text-muted-foreground w-full min-w-0 text-xs break-words" data-used-by="file">{usedByText(fileUsers(catalog, file.name), catalogKnown)}</p>
 						<div class="flex flex-wrap items-center gap-2">
 							{#if !file.is_secret}
 								<form
@@ -228,10 +260,16 @@
 		</Card.Content>
 	</Card.Root>
 	<Card.Root id="registries" class="mt-4">
-		<Card.Header>
+		<!-- Below sm the actions stack under the description, so the buttons never squeeze the text at 375 px. -->
+		<Card.Header class="max-sm:has-data-[slot=card-action]:grid-cols-1">
 			<Card.Title>Registries</Card.Title>
-			<Card.Description>The token is write-only. It is not shown again.</Card.Description>
-			<Card.Action>
+			<Card.Description>
+				The token is write-only. It is not shown again.{githubConnect ? ' For ghcr.io, Connect GitHub signs in with GitHub instead of a token.' : ''}
+			</Card.Description>
+			<Card.Action class="flex flex-wrap justify-end gap-2 max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-3 max-sm:justify-self-start max-sm:justify-start">
+				{#if githubConnect && !githubRow}
+					<GitHubConnect action={connectAction} replaces={manualGhcr?.username ?? null} />
+				{/if}
 				<FormDialog
 					id="add-registry"
 					label="Add registry"
@@ -252,6 +290,11 @@
 			</Card.Action>
 		</Card.Header>
 		<Card.Content class="grid gap-4">
+			{#if note}
+				<div class="max-w-full min-w-0 break-words">
+					<Notice kind={note.kind}>{note.text}</Notice>
+				</div>
+			{/if}
 			{#if savedRegistry}
 				<Notice kind="success">Saved registry {savedRegistry}.</Notice>
 			{/if}
@@ -260,16 +303,48 @@
 			{/if}
 			{#each registries as row (row.host)}
 				<div class="flex flex-wrap items-center justify-between gap-2">
-					<p class="min-w-0 text-sm break-all"><span class="font-mono">{row.host}</span> <span class="text-muted-foreground">{row.username}</span></p>
-					<ConfirmAction
-						id="delete-registry-{row.host}"
-						action={actionUrlFrom(page.url, 'deleteRegistry')}
-						label="Delete"
-						triggerLabel="Delete registry {row.host}"
-						confirmLabel="Delete"
-						message="Delete registry {row.host}?"
-						hidden={[{ name: 'host', value: row.host }]}
-					/>
+					<p class="text-muted-foreground order-last w-full min-w-0 text-xs break-words" data-used-by="registry">{usedByText(registryUsers(catalog, row.host), catalogKnown)}</p>
+					{#if row.source === 'github'}
+						<p class="min-w-0 text-sm break-words">
+							<span class="font-mono">{row.host}</span>
+							<span class="text-muted-foreground">
+								— connected to GitHub as <span class="text-foreground font-mono">{row.username}</span>{row.connected_by?.name ? ` by ${row.connected_by.name}` : ''},
+								<LocalTime iso={row.updated_at} />
+							</span>
+							{#if typeof githubRefused === 'boolean'}
+								{#if githubRefused}{@render refusedBadge()}{/if}
+							{:else}
+								{#await githubRefused then refused}
+									{#if refused}{@render refusedBadge()}{/if}
+								{/await}
+							{/if}
+						</p>
+						<div class="flex flex-wrap items-center gap-2">
+							{#if githubConnect}
+								<GitHubConnect action={connectAction} label="Reconnect" />
+							{/if}
+							<ConfirmAction
+								id="disconnect-registry-{row.host}"
+								action={actionUrlFrom(page.url, 'deleteRegistry')}
+								label="Disconnect"
+								triggerLabel="Disconnect GitHub from {row.host}"
+								confirmLabel="Disconnect"
+								message="Disconnect GitHub? The ghcr.io login is deleted here and Deploybot's access is revoked at GitHub."
+								hidden={[{ name: 'host', value: row.host }]}
+							/>
+						</div>
+					{:else}
+						<p class="min-w-0 text-sm break-all"><span class="font-mono">{row.host}</span> <span class="text-muted-foreground">{row.username}</span></p>
+						<ConfirmAction
+							id="delete-registry-{row.host}"
+							action={actionUrlFrom(page.url, 'deleteRegistry')}
+							label="Delete"
+							triggerLabel="Delete registry {row.host}"
+							confirmLabel="Delete"
+							message="Delete registry {row.host}?"
+							hidden={[{ name: 'host', value: row.host }]}
+						/>
+					{/if}
 				</div>
 			{/each}
 		</Card.Content>

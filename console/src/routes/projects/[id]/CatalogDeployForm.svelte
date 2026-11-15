@@ -34,6 +34,7 @@
 	import { serviceLogsHref } from '$lib/service-label';
 	import { onPlainClick } from '$lib/url';
 	import FlightStatus from './FlightStatus.svelte';
+	import ReadinessList from './ReadinessList.svelte';
 
 	let {
 		entry,
@@ -474,6 +475,10 @@
 				<p class="text-muted-foreground text-sm">Publishes on all of the host's interfaces.</p>
 			{/if}
 		</form>
+		<!-- Advisory (api-v1 v1.29): Deploy stays enabled whatever it says. Outside the deploy form: it posts its own. -->
+		<div class="mt-4 shrink-0">
+			<ReadinessList entry={entry.name} hostId={hostId === '' ? null : hostId} hostName={hostLabel === '' ? null : hostLabel} refreshKey={result?.resultId ?? null} />
+		</div>
 
 		{#if result?.confirmation && result.confirmKind}
 			<form method="POST" action={confirmAction} class="mt-3 grid gap-3" use:enhance={confirmEnhance}>

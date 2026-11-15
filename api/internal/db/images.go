@@ -1103,10 +1103,11 @@ func (d *DB) ListRegistries(ctx context.Context, projectID uuid.UUID) ([]store.R
 		return nil, err
 	}
 	rows, err := d.pool.Query(ctx, `
-SELECT host, username, updated_at, updated_by::text
-FROM app.registries
-WHERE project_id = $1::uuid
-ORDER BY host
+SELECT r.host, r.username, r.updated_at, r.updated_by::text, r.source, r.connected_by::text, u.name
+FROM app.registries AS r
+LEFT JOIN app.users AS u ON u.id = r.connected_by
+WHERE r.project_id = $1::uuid
+ORDER BY r.host
 `, projectID.String())
 	if err != nil {
 		return nil, mapErr(err)
@@ -1126,22 +1127,36 @@ ORDER BY host
 	return out, nil
 }
 
+// PutRegistry upserts one login. A manual write over a github row makes it
+// manual and clears connected_by (api-v1 v1.29 item 5).
 func (d *DB) PutRegistry(ctx context.Context, projectID uuid.UUID, host string, in store.RegistryWrite, actor uuid.UUID, at time.Time) (store.Registry, error) {
 	if !catalog.ValidRegistryHost(host) {
 		return store.Registry{}, store.ErrInvalid
 	}
+	in = in.Norm()
+	var connected *string
+	if in.ConnectedBy != nil {
+		v := in.ConnectedBy.String()
+		connected = &v
+	}
 	row := d.pool.QueryRow(ctx, `
-INSERT INTO app.registries (project_id, host, username, nonce, ciphertext, key_version, updated_at, updated_by)
-VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid)
+WITH up AS (
+INSERT INTO app.registries (project_id, host, username, nonce, ciphertext, key_version, updated_at, updated_by, source, connected_by)
+VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10::uuid)
 ON CONFLICT (project_id, host) DO UPDATE SET
     username = EXCLUDED.username,
     nonce = EXCLUDED.nonce,
     ciphertext = EXCLUDED.ciphertext,
     key_version = EXCLUDED.key_version,
     updated_at = EXCLUDED.updated_at,
-    updated_by = EXCLUDED.updated_by
-RETURNING host, username, updated_at, updated_by::text
-`, projectID.String(), host, in.Username, in.Nonce, in.Ciphertext, in.KeyVersion, at, actor.String())
+    updated_by = EXCLUDED.updated_by,
+    source = EXCLUDED.source,
+    connected_by = EXCLUDED.connected_by
+RETURNING host, username, updated_at, updated_by, source, connected_by
+)
+SELECT up.host, up.username, up.updated_at, up.updated_by::text, up.source, up.connected_by::text, u.name
+FROM up LEFT JOIN app.users AS u ON u.id = up.connected_by
+`, projectID.String(), host, in.Username, in.Nonce, in.Ciphertext, in.KeyVersion, at, actor.String(), in.Source, connected)
 	item, err := scanRegistry(row)
 	if err != nil {
 		return store.Registry{}, err
@@ -1163,10 +1178,10 @@ func (d *DB) DeleteRegistry(ctx context.Context, projectID uuid.UUID, host strin
 func (d *DB) GetRegistryMaterial(ctx context.Context, projectID uuid.UUID, host string) (store.RegistryMaterial, error) {
 	var item store.RegistryMaterial
 	err := d.pool.QueryRow(ctx, `
-SELECT host, username, nonce, ciphertext, key_version
+SELECT host, username, nonce, ciphertext, key_version, source
 FROM app.registries
 WHERE project_id = $1::uuid AND host = $2
-`, projectID.String(), host).Scan(&item.Host, &item.Username, &item.Nonce, &item.Ciphertext, &item.KeyVersion)
+`, projectID.String(), host).Scan(&item.Host, &item.Username, &item.Nonce, &item.Ciphertext, &item.KeyVersion, &item.Source)
 	if err != nil {
 		return store.RegistryMaterial{}, mapErr(err)
 	}
@@ -1176,7 +1191,8 @@ WHERE project_id = $1::uuid AND host = $2
 func scanRegistry(row pgx.Row) (store.Registry, error) {
 	var item store.Registry
 	var by string
-	if err := row.Scan(&item.Host, &item.Username, &item.UpdatedAt, &by); err != nil {
+	var connected, name *string
+	if err := row.Scan(&item.Host, &item.Username, &item.UpdatedAt, &by, &item.Source, &connected, &name); err != nil {
 		return store.Registry{}, mapErr(err)
 	}
 	id, err := parseID(by)
@@ -1184,6 +1200,17 @@ func scanRegistry(row pgx.Row) (store.Registry, error) {
 		return store.Registry{}, err
 	}
 	item.UpdatedBy = id
+	if connected != nil {
+		cid, err := parseID(*connected)
+		if err != nil {
+			return store.Registry{}, err
+		}
+		user := store.RegistryUser{ID: cid}
+		if name != nil {
+			user.Name = *name
+		}
+		item.ConnectedBy = &user
+	}
 	return item, nil
 }
 

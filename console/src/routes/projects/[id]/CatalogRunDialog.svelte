@@ -9,6 +9,7 @@
 	import { RUN_ICON, RUN_LABEL, runResultTitle, shownOnOpen } from '$lib/run-actions';
 	import CatalogRunForm from './CatalogRunForm.svelte';
 	import CatalogRunResult from './CatalogRunResult.svelte';
+	import ReadinessList from './ReadinessList.svelte';
 
 	let {
 		kind,
@@ -162,6 +163,12 @@
 						<Dialog.Close type="button" disabled={flight}>Cancel</Dialog.Close>
 					{/snippet}
 				</CatalogRunForm>
+				{#if entryKind === 'program' && (kind === 'run' || kind === 'restart')}
+					<!-- Advisory, as in the Deploy drawer (api-v1 v1.29): Run stays enabled. The API skips registry, containers and networks for a program. -->
+					<div class="mt-4">
+						<ReadinessList entry={entryName} {hostId} {hostName} refreshKey={result} />
+					</div>
+				{/if}
 			{/if}
 		</div>
 	</Dialog.Content>

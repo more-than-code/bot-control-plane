@@ -58,6 +58,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerEntryLogs(server, api)
 	registerEntryStatus(server, api)
 	registerValueRequests(server, api)
+	registerReadiness(server, api)
 }
 
 func addTool(server *mcp.Server, tool *mcp.Tool, h func(context.Context, json.RawMessage) *mcp.CallToolResult) {

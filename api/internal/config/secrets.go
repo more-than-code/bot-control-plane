@@ -22,15 +22,31 @@ func ReadSecretsKey(path string) ([]byte, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
 	}
+	line, err := readSecretFile(path, "BOT_SECRETS_KEY_FILE")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(line)
+	if err != nil || len(raw) != 32 {
+		return nil, errors.New("BOT_SECRETS_KEY_FILE is invalid")
+	}
+	return raw, nil
+}
+
+// readSecretFile returns the first line of a secret file (a trailing CR
+// removed): a regular non-symlink file with mode 0600, opened with
+// O_NOFOLLOW and checked again after the open. Errors name only the
+// variable, never the path or the contents.
+func readSecretFile(path, name string) (string, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return nil, errors.New("BOT_SECRETS_KEY_FILE is missing")
+		return "", errors.New(name + " is missing")
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New("BOT_SECRETS_KEY_FILE must not be a symlink")
+		return "", errors.New(name + " must not be a symlink")
 	}
 	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		return nil, errors.New("BOT_SECRETS_KEY_FILE must be mode 0600")
+		return "", errors.New(name + " must be mode 0600")
 	}
 	if beforeSecretsOpen != nil {
 		beforeSecretsOpen()
@@ -38,19 +54,19 @@ func ReadSecretsKey(path string) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		if errors.Is(err, syscall.ELOOP) {
-			return nil, errors.New("BOT_SECRETS_KEY_FILE must not be a symlink")
+			return "", errors.New(name + " must not be a symlink")
 		}
-		return nil, errors.New("BOT_SECRETS_KEY_FILE is missing")
+		return "", errors.New(name + " is missing")
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm() != 0o600 {
-		return nil, errors.New("BOT_SECRETS_KEY_FILE must be mode 0600")
+		return "", errors.New(name + " must be mode 0600")
 	}
 	buf := make([]byte, 4096)
 	n, err := f.Read(buf)
 	if err != nil && err != io.EOF {
-		return nil, errors.New("BOT_SECRETS_KEY_FILE is unreadable")
+		return "", errors.New(name + " is unreadable")
 	}
 	line := string(buf[:n])
 	if i := strings.IndexByte(line, '\n'); i >= 0 {
@@ -58,11 +74,7 @@ func ReadSecretsKey(path string) ([]byte, error) {
 	}
 	line = strings.TrimSuffix(line, "\r")
 	if line == "" {
-		return nil, errors.New("BOT_SECRETS_KEY_FILE is empty")
+		return "", errors.New(name + " is empty")
 	}
-	raw, err := base64.StdEncoding.DecodeString(line)
-	if err != nil || len(raw) != 32 {
-		return nil, errors.New("BOT_SECRETS_KEY_FILE is invalid")
-	}
-	return raw, nil
+	return line, nil
 }

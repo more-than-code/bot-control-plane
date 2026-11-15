@@ -747,7 +747,7 @@ WHERE table_schema = 'app' AND table_name = 'services' AND column_name = 'image_
 	assertTablePrivs(t, d, ctx, "image_deploys", true, true, false, true, []string{"digest", "outcome", "exit_code", "finished_at", "in_flight"})
 	assertTablePrivs(t, d, ctx, "env_sets", true, true, false, true, []string{"updated_at", "updated_by"})
 	assertTablePrivs(t, d, ctx, "env_values", true, true, false, true, []string{"is_secret", "value", "nonce", "ciphertext", "key_version", "reveal_pending", "needs_value", "generated"})
-	assertTablePrivs(t, d, ctx, "registries", true, true, false, true, []string{"username", "nonce", "ciphertext", "key_version", "updated_at", "updated_by"})
+	assertTablePrivs(t, d, ctx, "registries", true, true, false, true, []string{"username", "nonce", "ciphertext", "key_version", "updated_at", "updated_by", "source", "connected_by"})
 	assertTablePrivs(t, d, ctx, "project_files", true, true, false, true, []string{"is_secret", "content_plain", "nonce", "content_cipher", "key_version", "sha256", "size", "updated_by", "updated_at"})
 	var indexDef string
 	if err := d.pool.QueryRow(ctx, `SELECT pg_get_indexdef(to_regclass('app.image_deploys_in_flight_uidx'))`).Scan(&indexDef); err != nil {

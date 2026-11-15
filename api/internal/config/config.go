@@ -32,6 +32,10 @@ type Config struct {
 	// RegistryAllowPrivate is BOT_API_REGISTRY_ALLOW_PRIVATE=1 (dev only). It
 	// lifts only the address and port checks on registry tag and digest lookups.
 	RegistryAllowPrivate bool
+	// GitHubClientID and GitHubClientSecretFile are the Connect GitHub OAuth
+	// App (api-v1 v1.29 item 1). Without both, Connect GitHub is unavailable.
+	GitHubClientID         string
+	GitHubClientSecretFile string
 }
 
 const defaultIssuer = "https://accounts.google.com"
@@ -40,22 +44,24 @@ const defaultIssuer = "https://accounts.google.com"
 // server needs and requires only BOT_API_MIGRATE_DATABASE_URL.
 func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	cfg := Config{
-		Listen:                strings.TrimSpace(getenv("BOT_API_LISTEN")),
-		DatabaseURL:           strings.TrimSpace(getenv("DATABASE_URL")),
-		MigrateDatabaseURL:    strings.TrimSpace(getenv("BOT_API_MIGRATE_DATABASE_URL")),
-		OrgMappingFile:        strings.TrimSpace(getenv("BOT_API_ORG_MAPPING_FILE")),
-		GoogleClientID:        strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_ID")),
-		GoogleClientSecret:    strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_SECRET")),
-		GoogleIssuer:          strings.TrimSpace(getenv("BOT_API_GOOGLE_ISSUER")),
-		DeviceVerificationURI: strings.TrimSpace(getenv("BOT_API_DEVICE_VERIFICATION_URI")),
-		AgentWSURL:            strings.TrimSpace(getenv("BOT_API_AGENT_WS_URL")),
-		PublicOrigin:          strings.TrimSpace(getenv("BOT_API_PUBLIC_ORIGIN")),
-		TrustedProxy:          strings.TrimSpace(getenv("BOT_API_TRUSTED_PROXY")),
-		MCPResource:           strings.TrimSpace(getenv("BOT_API_MCP_RESOURCE")),
-		ConsoleOrigin:         strings.TrimSpace(getenv("BOT_API_CONSOLE_ORIGIN")),
-		MCPClientSecretFile:   strings.TrimSpace(getenv("BOT_API_MCP_CLIENT_SECRET_FILE")),
-		SecretsKeyFile:        strings.TrimSpace(getenv("BOT_SECRETS_KEY_FILE")),
-		RegistryAllowPrivate:  strings.TrimSpace(getenv("BOT_API_REGISTRY_ALLOW_PRIVATE")) == "1",
+		Listen:                 strings.TrimSpace(getenv("BOT_API_LISTEN")),
+		DatabaseURL:            strings.TrimSpace(getenv("DATABASE_URL")),
+		MigrateDatabaseURL:     strings.TrimSpace(getenv("BOT_API_MIGRATE_DATABASE_URL")),
+		OrgMappingFile:         strings.TrimSpace(getenv("BOT_API_ORG_MAPPING_FILE")),
+		GoogleClientID:         strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_ID")),
+		GoogleClientSecret:     strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_SECRET")),
+		GoogleIssuer:           strings.TrimSpace(getenv("BOT_API_GOOGLE_ISSUER")),
+		DeviceVerificationURI:  strings.TrimSpace(getenv("BOT_API_DEVICE_VERIFICATION_URI")),
+		AgentWSURL:             strings.TrimSpace(getenv("BOT_API_AGENT_WS_URL")),
+		PublicOrigin:           strings.TrimSpace(getenv("BOT_API_PUBLIC_ORIGIN")),
+		TrustedProxy:           strings.TrimSpace(getenv("BOT_API_TRUSTED_PROXY")),
+		MCPResource:            strings.TrimSpace(getenv("BOT_API_MCP_RESOURCE")),
+		ConsoleOrigin:          strings.TrimSpace(getenv("BOT_API_CONSOLE_ORIGIN")),
+		MCPClientSecretFile:    strings.TrimSpace(getenv("BOT_API_MCP_CLIENT_SECRET_FILE")),
+		SecretsKeyFile:         strings.TrimSpace(getenv("BOT_SECRETS_KEY_FILE")),
+		RegistryAllowPrivate:   strings.TrimSpace(getenv("BOT_API_REGISTRY_ALLOW_PRIVATE")) == "1",
+		GitHubClientID:         strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_ID")),
+		GitHubClientSecretFile: strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET_FILE")),
 	}
 	if cfg.GoogleIssuer == "" {
 		cfg.GoogleIssuer = defaultIssuer
@@ -94,6 +100,11 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 		return Config{}, fmt.Errorf("BOT_API_AGENT_WS_URL must not contain quotes or whitespace")
 	}
 	return cfg, nil
+}
+
+// GitHubConfigured reports whether both Connect GitHub settings are set.
+func (c Config) GitHubConfigured() bool {
+	return c.GitHubClientID != "" && c.GitHubClientSecretFile != ""
 }
 
 // RedirectAllowed reports whether uri is on the OAuth allowlist.
