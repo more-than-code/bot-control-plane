@@ -1,9 +1,31 @@
 package catalog
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+// TestRefErrorNames is api-v1 v1.29 item 7: the error names the key and the
+// unknown name, also for a secret key whose message leaves the name out.
+func TestRefErrorNames(t *testing.T) {
+	env := map[string]string{"A": "x${B}", "S": "${C}", "Z": "${Y"}
+	_, err := ResolveEnvRefs(env, map[string]bool{"S": true})
+	var ref *RefError
+	if !errors.As(err, &ref) || ref.Key != "A" || ref.Name != "B" {
+		t.Fatalf("plain %#v", err)
+	}
+	delete(env, "A")
+	_, err = ResolveEnvRefs(env, map[string]bool{"S": true})
+	if !errors.As(err, &ref) || ref.Key != "S" || ref.Name != "C" || strings.Contains(ref.Msg, "C}") {
+		t.Fatalf("secret %#v", err)
+	}
+	delete(env, "S")
+	_, err = ResolveEnvRefs(env, nil)
+	if !errors.As(err, &ref) || ref.Key != "Z" || ref.Name != "" {
+		t.Fatalf("unterminated %#v", err)
+	}
+}
 
 func TestResolveEnvRefs(t *testing.T) {
 	long := strings.Repeat("A", 65)

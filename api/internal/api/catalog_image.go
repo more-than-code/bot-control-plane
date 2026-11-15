@@ -956,16 +956,41 @@ func (s *Server) mergeImageEnv(ctx context.Context, projectID uuid.UUID, img cat
 // override. Image deploys (through mergeImageEnv) and program Runs share it
 // (api-v1 v1.22 item 3).
 func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs) (envMerge, error) {
+	return s.mergeEnvWith(ctx, projectID, refs, false)
+}
+
+// mergeEnvWith is mergeEnv. With tolerant (the readiness check, api-v1 v1.29
+// item 7) a missing set or secret_env source is skipped, and a needs_value
+// placeholder counts as set with an empty value instead of being opened, so
+// the ${KEY} check sees the same precedence as a deploy without failing on
+// what the other checks already report.
+func (s *Server) mergeEnvWith(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs, tolerant bool) (envMerge, error) {
 	out := map[string]string{}
 	secret := map[string]bool{}
 	generated := map[string]bool{}
-	for _, set := range refs.Sets {
+	material := func(set string) ([]store.EnvMaterial, bool, error) {
 		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
+		if tolerant && errors.Is(err, store.ErrNotFound) {
+			return nil, false, nil
+		}
+		return mats, err == nil, err
+	}
+	open := func(set string, m store.EnvMaterial) (string, error) {
+		if tolerant && m.NeedsValue {
+			return "", nil
+		}
+		return s.openEnv(projectID, set, m)
+	}
+	for _, set := range refs.Sets {
+		mats, ok, err := material(set)
 		if err != nil {
 			return envMerge{}, err
 		}
+		if !ok {
+			continue
+		}
 		for _, m := range mats {
-			val, err := s.openEnv(projectID, set, m)
+			val, err := open(set, m)
 			if err != nil {
 				return envMerge{}, err
 			}
@@ -979,16 +1004,19 @@ func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, refs catalog
 		if !ok {
 			return envMerge{}, errDecrypt
 		}
-		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
+		mats, exists, err := material(set)
 		if err != nil {
 			return envMerge{}, err
+		}
+		if !exists {
+			continue
 		}
 		found := false
 		for _, m := range mats {
 			if m.Key != name {
 				continue
 			}
-			val, err := s.openEnv(projectID, set, m)
+			val, err := open(set, m)
 			if err != nil {
 				return envMerge{}, err
 			}
@@ -998,7 +1026,7 @@ func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, refs catalog
 			found = true
 			break
 		}
-		if !found {
+		if !found && !tolerant {
 			return envMerge{}, errDecrypt
 		}
 	}

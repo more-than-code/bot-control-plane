@@ -139,7 +139,12 @@ func TestNeedsValueRefusalPassesThrough(t *testing.T) {
 		res := mustCall(t, cs, tool, map[string]any{
 			"project_id": projectID, "entry": imageEntry, "host_id": hostID, "idempotency_key": tool + "-1",
 		})
-		if !res.IsError || textOf(t, res) != "bad_request: "+needsValueRefusal {
+		want := "bad_request: " + needsValueRefusal
+		if tool == "deploy_entry" {
+			// api-v1 v1.29: a deploy refusal points to check_readiness.
+			want += "\nRun check_readiness for this entry and host to see what is missing and how to fix it."
+		}
+		if !res.IsError || textOf(t, res) != want {
 			t.Fatalf("%s: error=%v %q", tool, res.IsError, textOf(t, res))
 		}
 	}

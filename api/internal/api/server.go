@@ -14,6 +14,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"github.com/more-than-code/bot-control-plane/api/internal/auth"
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
+	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/registry"
 	"github.com/more-than-code/bot-control-plane/api/internal/seal"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
@@ -38,6 +39,10 @@ type Server struct {
 	Secrets *seal.Box
 	// Registry serves the v1.16 tag and digest lookups. Nil makes them unavailable.
 	Registry *registry.Service
+	// GitHub and GitHubStates are Connect GitHub (api-v1 v1.29 items 1–4).
+	// Nil makes start and callback unavailable.
+	GitHub       *github.Client
+	GitHubStates *github.States
 	// imageBudget, when non-zero, replaces the image task timeout.
 	// Production leaves it at 0. Tests set it so a timeout does not wait
 	// out the real deploy budget.
@@ -159,6 +164,13 @@ func contractRoutes() []route {
 		{"GET /v1/projects/{id}/registries", false, (*Server).handleRegistryList, delegatedAllow},
 		{"PUT /v1/projects/{id}/registries/{host}", false, (*Server).handleRegistryPut, delegatedHandler},
 		{"DELETE /v1/projects/{id}/registries/{host}", false, (*Server).handleRegistryDelete, delegatedHandler},
+		// api-v1 v1.29 Connect GitHub: console only.
+		{"POST /v1/projects/{id}/registries/github/start", false, (*Server).handleGitHubStart, delegatedDeny},
+		{"POST /v1/auth/github/callback", false, (*Server).handleGitHubCallback, delegatedDeny},
+		// api-v1 v1.29 image access, readiness and the host-policy snippet: console or delegated.
+		{"GET /v1/projects/{id}/image-access", false, (*Server).handleImageAccess, delegatedAllow},
+		{"GET /v1/projects/{id}/catalog/{name}/readiness", false, (*Server).handleReadiness, delegatedAllow},
+		{"GET /v1/projects/{id}/catalog/{name}/host-policy-snippet", false, (*Server).handleHostPolicySnippet, delegatedAllow},
 		{"GET /v1/projects/{id}/image-tags", false, (*Server).handleImageTags, delegatedAllow},
 		{"GET /v1/projects/{id}/image-digest", false, (*Server).handleImageDigest, delegatedAllow},
 		{"GET /v1/projects/{id}/files", false, (*Server).handleFileList, delegatedAllow},

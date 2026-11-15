@@ -581,7 +581,8 @@ func (s *Server) handleRegistryList(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []store.Registry{}
 	}
-	writeOK(w, http.StatusOK, map[string]any{"items": items})
+	// github_connect (api-v1 v1.29 item 5): the console shows Connect GitHub from it.
+	writeOK(w, http.StatusOK, map[string]any{"items": items, "github_connect": s.githubConnect()})
 }
 
 func (s *Server) handleRegistryPut(w http.ResponseWriter, r *http.Request) {
@@ -658,6 +659,15 @@ func (s *Server) handleRegistryDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	host, ok := registryHost(w, r)
 	if !ok {
+		return
+	}
+	mat, err := s.Store.GetRegistryMaterial(r.Context(), id, host)
+	if err != nil {
+		s.writeErr(w, err, false)
+		return
+	}
+	if mat.Source == store.RegistrySourceGitHub {
+		s.deleteGitHubRegistry(w, r, p, id, mat)
 		return
 	}
 	if err := s.Store.DeleteRegistry(r.Context(), id, host); err != nil {

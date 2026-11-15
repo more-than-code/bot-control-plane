@@ -17,6 +17,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/auth"
 	"github.com/more-than-code/bot-control-plane/api/internal/config"
 	"github.com/more-than-code/bot-control-plane/api/internal/db"
+	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/registry"
 	"github.com/more-than-code/bot-control-plane/api/internal/seal"
 )
@@ -101,6 +102,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 			return err
 		}
 	}
+	gh, err := githubClient(cfg)
+	if err != nil {
+		return err
+	}
 	pool, err := d.open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -130,6 +135,13 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		Secrets:       secrets,
 		Registry:      registry.NewService(registry.Options{AllowPrivate: cfg.RegistryAllowPrivate}),
 	}
+	if gh != nil {
+		srv.GitHub = gh
+		srv.GitHubStates = github.NewStates()
+		log.Info("connect github ready")
+	} else if cfg.GitHubClientID != "" || cfg.GitHubClientSecretFile != "" {
+		log.Warn("connect github is off: it needs BOT_API_GITHUB_CLIENT_ID, BOT_API_GITHUB_CLIENT_SECRET_FILE and BOT_API_CONSOLE_ORIGIN")
+	}
 	if cfg.RegistryAllowPrivate {
 		log.Warn("registry lookups may reach private addresses and other ports (BOT_API_REGISTRY_ALLOW_PRIVATE=1, dev only)")
 	}
@@ -141,6 +153,24 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	defer cancel()
 	go housekeep(ctx, pool, srv.Auth, now)
 	return d.serve(cfg.Listen, root, hub.CloseAll)
+}
+
+// githubClient is the Connect GitHub client (api-v1 v1.29 item 1), or nil
+// when the client id, the secret file or the console origin is not set. A
+// set secret file that fails the file checks stops the server, as for the
+// secrets key.
+func githubClient(cfg config.Config) (*github.Client, error) {
+	if !cfg.GitHubConfigured() {
+		return nil, nil
+	}
+	secret, err := config.ReadGitHubClientSecret(cfg.GitHubClientSecretFile)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.ConsoleOrigin == "" {
+		return nil, nil
+	}
+	return github.New(github.Config{ClientID: cfg.GitHubClientID, ClientSecret: secret}), nil
 }
 
 func housekeep(ctx context.Context, pool *db.DB, authn *auth.Service, now func() time.Time) {

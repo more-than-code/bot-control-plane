@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/more-than-code/bot-control-plane/api/internal/config"
 	"github.com/more-than-code/bot-control-plane/api/internal/db"
 )
 
@@ -214,5 +215,36 @@ func TestOrgSource(t *testing.T) {
 	}
 	if got, err := orgSource(path); err != nil || !got.Chosen || got.Mapping == nil {
 		t.Fatalf("file %+v %v", got, err)
+	}
+}
+
+// TestGitHubClientConfig is api-v1 v1.29 item 1: both settings and a console
+// origin turn Connect GitHub on; a set file that fails the checks stops startup.
+func TestGitHubClientConfig(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "gh")
+	if err := os.WriteFile(good, []byte("gh-secret-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loose := filepath.Join(dir, "loose")
+	if err := os.WriteFile(loose, []byte("gh-secret-value\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{GitHubClientID: "cid", GitHubClientSecretFile: good, ConsoleOrigin: "http://console.test"}
+	if c, err := githubClient(cfg); err != nil || c == nil {
+		t.Fatalf("configured %v %v", c, err)
+	}
+	for name, c := range map[string]config.Config{
+		"no id":     {GitHubClientSecretFile: good, ConsoleOrigin: "http://console.test"},
+		"no file":   {GitHubClientID: "cid", ConsoleOrigin: "http://console.test"},
+		"no origin": {GitHubClientID: "cid", GitHubClientSecretFile: good},
+	} {
+		if got, err := githubClient(c); err != nil || got != nil {
+			t.Fatalf("%s: %v %v", name, got, err)
+		}
+	}
+	cfg.GitHubClientSecretFile = loose
+	if _, err := githubClient(cfg); err == nil || strings.Contains(err.Error(), "gh-secret-value") {
+		t.Fatalf("loose file %v", err)
 	}
 }

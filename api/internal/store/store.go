@@ -674,6 +674,10 @@ type Store interface {
 	ListAudit(ctx context.Context, projectID uuid.UUID, limit int, cursor *Cursor) ([]AuditEntry, *Cursor, error)
 	// ListOrgAudit returns the rows whose org_id is orgID, newest first.
 	ListOrgAudit(ctx context.Context, orgID uuid.UUID, limit int, cursor *Cursor) ([]AuditEntry, *Cursor, error)
+	// LatestCatalogDeploy returns the newest catalog.deploy audit row of the
+	// project for entry on host (detail entry, host_id), or ErrNotFound. Only
+	// ID, At, Action, Decision and Detail are set (api-v1 v1.29 item 7).
+	LatestCatalogDeploy(ctx context.Context, projectID uuid.UUID, entry string, hostID uuid.UUID) (AuditEntry, error)
 
 	CreateDevice(ctx context.Context, row Device) error
 	DeviceByUserCode(ctx context.Context, code string) (Device, error)

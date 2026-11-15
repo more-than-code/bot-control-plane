@@ -757,6 +757,28 @@ func (d *DB) ListOrgAudit(ctx context.Context, orgID uuid.UUID, limit int, curso
 	return d.listAudit(ctx, "org_id", orgID, limit, cursor)
 }
 
+func (d *DB) LatestCatalogDeploy(ctx context.Context, projectID uuid.UUID, entry string, hostID uuid.UUID) (store.AuditEntry, error) {
+	var out store.AuditEntry
+	var id int64
+	var detail []byte
+	err := d.pool.QueryRow(ctx, `
+SELECT id, at, action, decision, detail
+FROM app.audit_log
+WHERE project_id = $1::uuid AND host_id = $2::uuid AND action = 'catalog.deploy' AND detail->>'entry' = $3
+ORDER BY at DESC, id DESC
+LIMIT 1
+`, projectID.String(), hostID.String(), entry).Scan(&id, &out.At, &out.Action, &out.Decision, &detail)
+	if err != nil {
+		return store.AuditEntry{}, mapErr(err)
+	}
+	out.ID = strconv.FormatInt(id, 10)
+	if detail == nil {
+		detail = []byte(`{}`)
+	}
+	out.Detail = json.RawMessage(detail)
+	return out, nil
+}
+
 // listAudit pages rows by column (project_id or org_id, never caller input).
 func (d *DB) listAudit(ctx context.Context, column string, id uuid.UUID, limit int, cursor *store.Cursor) ([]store.AuditEntry, *store.Cursor, error) {
 	if column != "project_id" && column != "org_id" {

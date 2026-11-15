@@ -377,6 +377,10 @@ export type Registry = {
 	username: string;
 	updated_at: string;
 	updated_by: string;
+	/** api-v1 v1.29: `github` for a Connect GitHub login. An older API sends neither field: manual, null. */
+	source: 'manual' | 'github';
+	/** Who connected GitHub, or null (a manual row, or that user is gone). */
+	connected_by: { id: string; name: string } | null;
 };
 
 /**

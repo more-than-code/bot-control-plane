@@ -67,6 +67,8 @@ import {
 	viewProjectFile
 } from '$lib/server/image-actions';
 import { formText } from '$lib/server/form';
+import { catalogReadiness, connectGitHub, githubRefused, hostPolicySnippet, imageAccess } from '$lib/server/settings-auto';
+import { githubNoteCode, type GitHubNoteCode } from '$lib/settings-auto';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { isOrgAdmin, roleAtLeast, uiRole } from '$lib/server/roles';
@@ -335,6 +337,8 @@ const empty = {
 	filesMessage: null as string | null,
 	registries: [] as Registry[],
 	registriesMessage: null as string | null,
+	githubConnect: false,
+	githubNote: null as GitHubNoteCode | null,
 	...noCopies
 };
 
@@ -372,7 +376,8 @@ export const load: PageServerLoad = async (event) => {
 		tab === 'hosts' || tab === 'catalog'
 			? loadList(event, `/v1/projects/${id}/hosts`, parseHost)
 			: Promise.resolve(emptyList<Host>());
-	const catalogRead = tab === 'catalog' ? loadCatalog(event, id, canOwner) : Promise.resolve(null);
+	// Settings reads the catalog too: each card's "Used by" note and the refused-login badge (api-v1 v1.29).
+	const catalogRead = tab === 'catalog' || (tab === 'settings' && canAdmin) ? loadCatalog(event, id, canOwner) : Promise.resolve(null);
 	const copiesLoad =
 		tab === 'catalog'
 			? Promise.all([hostsLoad, catalogRead, readCopyRows(event, id)]).then(([list, listed, read]) =>
@@ -416,6 +421,9 @@ export const load: PageServerLoad = async (event) => {
 	const filesMessage = settings?.filesMessage ?? null;
 	const registries = settings?.registries ?? [];
 	const registriesMessage = settings?.registriesMessage ?? null;
+	// The refused-login badge streams: its registry lookups never hold up the tab.
+	const refused: Promise<boolean> =
+		tab === 'settings' && canAdmin ? githubRefused(event, id, registries, catalog).catch(() => false) : Promise.resolve(false);
 
 	// The streamed states stay a promise: present() would turn it into a plain object.
 	const { serviceStates, ...copyData } = copiesData;
@@ -453,9 +461,12 @@ export const load: PageServerLoad = async (event) => {
 			filesMessage,
 			registries,
 			registriesMessage,
+			githubConnect: settings?.githubConnect ?? false,
+			githubNote: githubNoteCode(event.url.searchParams.get('github')),
 			...copyData
 		}),
-		serviceStates
+		serviceStates,
+		githubRefused: refused
 	};
 };
 
@@ -654,6 +665,10 @@ export const actions: Actions = {
 	deleteProjectFile,
 	saveRegistry,
 	deleteRegistry,
+	connectGitHub,
+	imageAccess,
+	catalogReadiness,
+	hostPolicySnippet,
 	askRevoke: async (event) => {
 		requireUser(event);
 		projectId(event.params);

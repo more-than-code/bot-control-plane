@@ -40,6 +40,9 @@ type registryRec struct {
 	KeyVersion int
 	UpdatedAt  time.Time
 	UpdatedBy  uuid.UUID
+	// Source and ConnectedBy are api-v1 v1.29 item 5.
+	Source      string
+	ConnectedBy *uuid.UUID
 }
 
 type imageDeployRec = store.ImageDeploy
@@ -809,10 +812,22 @@ func (m *Mem) ListRegistries(_ context.Context, projectID uuid.UUID) ([]store.Re
 		if key != envKey(projectID, rec.Host) {
 			continue
 		}
-		out = append(out, store.Registry{Host: rec.Host, Username: rec.Username, UpdatedAt: rec.UpdatedAt, UpdatedBy: rec.UpdatedBy})
+		out = append(out, m.registryLocked(rec))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
 	return out, nil
+}
+
+// registryLocked is the listed form of rec, naming the connecting user as
+// the database join does.
+func (m *Mem) registryLocked(rec registryRec) store.Registry {
+	out := store.Registry{Host: rec.Host, Username: rec.Username, UpdatedAt: rec.UpdatedAt, UpdatedBy: rec.UpdatedBy, Source: rec.Source}
+	if rec.ConnectedBy != nil {
+		if u, ok := m.users[*rec.ConnectedBy]; ok {
+			out.ConnectedBy = &store.RegistryUser{ID: u.ID, Name: u.Name}
+		}
+	}
+	return out
 }
 
 func (m *Mem) PutRegistry(_ context.Context, projectID uuid.UUID, host string, in store.RegistryWrite, actor uuid.UUID, at time.Time) (store.Registry, error) {
@@ -824,12 +839,18 @@ func (m *Mem) PutRegistry(_ context.Context, projectID uuid.UUID, host string, i
 	if !catalog.ValidRegistryHost(host) {
 		return store.Registry{}, store.ErrInvalid
 	}
-	m.registries[envKey(projectID, host)] = registryRec{
+	in = in.Norm()
+	rec := registryRec{
 		Host: host, Username: in.Username,
 		Nonce: append([]byte(nil), in.Nonce...), Ciphertext: append([]byte(nil), in.Ciphertext...),
-		KeyVersion: in.KeyVersion, UpdatedAt: at, UpdatedBy: actor,
+		KeyVersion: in.KeyVersion, UpdatedAt: at, UpdatedBy: actor, Source: in.Source,
 	}
-	return store.Registry{Host: host, Username: in.Username, UpdatedAt: at, UpdatedBy: actor}, nil
+	if in.ConnectedBy != nil {
+		id := *in.ConnectedBy
+		rec.ConnectedBy = &id
+	}
+	m.registries[envKey(projectID, host)] = rec
+	return m.registryLocked(rec), nil
 }
 
 func (m *Mem) DeleteRegistry(_ context.Context, projectID uuid.UUID, host string) error {
@@ -852,7 +873,7 @@ func (m *Mem) GetRegistryMaterial(_ context.Context, projectID uuid.UUID, host s
 	return store.RegistryMaterial{
 		Host: rec.Host, Username: rec.Username,
 		Nonce: append([]byte(nil), rec.Nonce...), Ciphertext: append([]byte(nil), rec.Ciphertext...),
-		KeyVersion: rec.KeyVersion,
+		KeyVersion: rec.KeyVersion, Source: rec.Source,
 	}, nil
 }
 

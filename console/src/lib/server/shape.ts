@@ -1784,7 +1784,14 @@ export function parseRegistry(value: unknown): Registry | null {
 	const updated_at = timestamp(value.updated_at);
 	const updated_by = text(value.updated_by, 36);
 	if (!host || !isRegistryHost(host) || username === null || !updated_at || !updated_by || !isUuid(updated_by)) return null;
-	return { host, username, updated_at, updated_by };
+	const source = value.source === 'github' ? 'github' : 'manual';
+	let connected_by: Registry['connected_by'] = null;
+	if (source === 'github' && isRecord(value.connected_by)) {
+		const byId = text(value.connected_by.id, 36);
+		const byName = text(value.connected_by.name, 200);
+		if (byId && isUuid(byId)) connected_by = { id: byId, name: byName ?? '' };
+	}
+	return { host, username, updated_at, updated_by, source, connected_by };
 }
 
 export function parseRegistryList(payload: unknown): { items: Registry[]; omitted: number } | null {

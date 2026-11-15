@@ -55,6 +55,9 @@
 	import { envRefHints } from '$lib/env-references';
 	import type { ImageEditorState } from '$lib/project-action';
 	import ImageLookupPost from './ImageLookupPost.svelte';
+	import type { AccessLineState, ImageAccessResult } from '$lib/settings-auto';
+	import ImageAccessLine from './ImageAccessLine.svelte';
+	import { actionUrlFrom } from '$lib/url';
 	import EnvSourceFields from './EnvSourceFields.svelte';
 	import ImageTagNotes from './ImageTagNotes.svelte';
 
@@ -299,6 +302,27 @@
 
 	$effect(() => () => lookup.dispose());
 
+	// Image access (api-v1 v1.29 item 6): one line under the field, looked up a moment after typing stops.
+	const accessAction = $derived(actionUrlFrom(page.url, 'imageAccess'));
+	let accessPost = $state<ImageLookupPost | null>(null);
+	let access = $state<{ image: string; line: AccessLineState; githubConnect: boolean } | null>(null);
+	const accessShown = $derived(access != null && access.image === draft.image.trim() ? access : null);
+	const accessId = $derived(`${fieldId}-image-access`);
+	const connectAction = $derived(actionUrlFrom(page.url, 'connectGitHub'));
+	let connectForm = $state<HTMLFormElement | null>(null);
+	$effect(() => {
+		const image = draft.image.trim();
+		if (!browser || image === '' || image.length > 512 || /\s/.test(image) || access?.image === image) return;
+		const timer = setTimeout(() => accessPost?.send(image), 600);
+		return () => clearTimeout(timer);
+	});
+
+	function takeAccess(image: string, data: Record<string, unknown>) {
+		const result = (data.imageAccess as ImageAccessResult | null | undefined) ?? null;
+		// A failed lookup (including 429) says so instead of leaving the line out.
+		access = { image, line: result ? { result } : { failed: true }, githubConnect: data.imageAccessGitHub === true };
+	}
+
 	function pickTag(tag: string) {
 		const next = lookup.pick(draft.image, tag);
 		if (next == null) return;
@@ -398,7 +422,7 @@
 					autocomplete="off"
 					spellcheck="false"
 					aria-invalid={invalid('image')}
-					aria-describedby={imageDescribedBy(fieldId, { error: describedBy('image') != null, tags: tagsMessage != null, pin: pinLine != null })}
+					aria-describedby={[imageDescribedBy(fieldId, { error: describedBy('image') != null, tags: tagsMessage != null, pin: pinLine != null }), accessShown ? accessId : null].filter((id) => id != null).join(' ') || undefined}
 					onfocus={() => {
 						imageFocused = true;
 						tagListOpen = true;
@@ -423,6 +447,15 @@
 		{/if}
 		<div class="sr-only" role="status" aria-live="polite">{tagStatus}</div>
 		<ImageTagNotes {fieldId} message={tagsMessage} authFailed={tagLookup?.state === 'auth_failed'} {settingsHref} {pinLine} />
+		{#if accessShown}
+			<ImageAccessLine
+				id={accessId}
+				state={accessShown.line}
+				{settingsHref}
+				canConnect={accessShown.githubConnect && page.data.canAdmin === true}
+				onConnect={() => connectForm?.submit()}
+			/>
+		{/if}
 		{@render fieldNotice('image')}
 		<div class="grid gap-1.5">
 			<p class="text-sm font-medium">Paste a docker run</p>
@@ -910,3 +943,6 @@
 {#if digestAction}
 	<ImageLookupPost bind:this={digestPost} action={digestAction} onResult={takeDigest} />
 {/if}
+<ImageLookupPost bind:this={accessPost} action={accessAction} onResult={takeAccess} />
+<!-- Connect GitHub from the Image field: a plain post in a new tab, so this drawer keeps its unsaved edit. -->
+<form bind:this={connectForm} method="POST" action={connectAction} target="_blank" class="hidden"></form>

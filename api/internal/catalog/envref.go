@@ -11,6 +11,12 @@ import (
 // answers it as bad_request.
 type RefError struct {
 	Msg string
+	// Key is the env key whose value holds the bad reference, and Name the
+	// unknown name it references (empty for the other errors). They let the
+	// readiness check name the key to add (api-v1 v1.29 item 7); Msg still
+	// leaves Name out for a secret key.
+	Key  string
+	Name string
 }
 
 func (e *RefError) Error() string { return e.Msg }
@@ -69,7 +75,7 @@ func ResolveEnvRefs(env map[string]string, secret map[string]bool) (Resolved, er
 			return Resolved{}, err
 		}
 		if len(val) > maxEnvValue {
-			return Resolved{}, &RefError{Msg: "env " + key + " is longer than 4096 bytes after references"}
+			return Resolved{}, &RefError{Msg: "env " + key + " is longer than 4096 bytes after references", Key: key}
 		}
 		out.Env[key] = val
 		if len(refs) > 0 {
@@ -98,7 +104,7 @@ func resolveValue(key, val string, env map[string]string, keySecret bool) (strin
 		}
 		end := strings.IndexByte(val[i+2:], '}')
 		if end < 0 {
-			return "", nil, &RefError{Msg: "env " + key + " has an unterminated ${"}
+			return "", nil, &RefError{Msg: "env " + key + " has an unterminated ${", Key: key}
 		}
 		name := val[i+2 : i+2+end]
 		if !envKeyRe.MatchString(name) {
@@ -109,9 +115,9 @@ func resolveValue(key, val string, env map[string]string, keySecret bool) (strin
 		ref, ok := env[name]
 		if !ok {
 			if keySecret {
-				return "", nil, &RefError{Msg: "env " + key + " has a reference that is not set for this entry"}
+				return "", nil, &RefError{Msg: "env " + key + " has a reference that is not set for this entry", Key: key, Name: name}
 			}
-			return "", nil, &RefError{Msg: "env " + key + " references ${" + name + "}, which is not set for this entry"}
+			return "", nil, &RefError{Msg: "env " + key + " references ${" + name + "}, which is not set for this entry", Key: key, Name: name}
 		}
 		b.WriteString(ref)
 		refs = append(refs, name)

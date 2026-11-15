@@ -13,10 +13,20 @@
 	import CatalogSection from './CatalogSection.svelte';
 	import HostsSection from './HostsSection.svelte';
 	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
 	import MembersSection from './MembersSection.svelte';
 	import SettingsSection from './SettingsSection.svelte';
 
 	let { data, form } = $props();
+
+	// The Connect GitHub note arrives once as `?github=` (api-v1 v1.29). Drop it from the address so later
+	// actions, which keep the query, do not show it again.
+	$effect(() => {
+		if (!page.url.searchParams.has('github')) return;
+		const url = new URL(page.url);
+		url.searchParams.delete('github');
+		replaceState(url, page.state);
+	});
 
 	const action = $derived((form ?? null) as ProjectActionData | null);
 	const scope = $derived<ProjectScope>(action?.scope ?? data.tab ?? 'hosts');
@@ -199,6 +209,11 @@
 			settingsName={action?.scope === 'settings' ? (action.settingsName ?? null) : null}
 			registries={data.registries ?? []}
 			registriesMessage={data.registriesMessage ?? null}
+			githubConnect={data.githubConnect ?? false}
+			githubNote={action?.scope === 'settings' && action.githubNote ? action.githubNote : (data.githubNote ?? null)}
+			githubRefused={data.githubRefused ?? false}
+			catalog={data.catalog ?? []}
+			catalogKnown={data.catalogMessage == null && !(data.catalogTruncated ?? false) && (data.catalogOmitted ?? 0) === 0}
 		/>
 	{/if}
 {/if}

@@ -225,6 +225,31 @@ func (m *Mem) ListOrgAudit(_ context.Context, orgID uuid.UUID, limit int, cursor
 	return m.listAudit(func(a store.AuditEntry) bool { return a.OrgID != nil && *a.OrgID == orgID }, limit, cursor)
 }
 
+func (m *Mem) LatestCatalogDeploy(_ context.Context, projectID uuid.UUID, entry string, hostID uuid.UUID) (store.AuditEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var best *store.AuditEntry
+	for i := range m.audits {
+		a := m.audits[i]
+		if a.ProjectID == nil || *a.ProjectID != projectID || a.HostID == nil || *a.HostID != hostID || a.Action != "catalog.deploy" {
+			continue
+		}
+		var detail struct {
+			Entry string `json:"entry"`
+		}
+		if json.Unmarshal(a.Detail, &detail) != nil || detail.Entry != entry {
+			continue
+		}
+		if best == nil || a.At.After(best.At) || (a.At.Equal(best.At) && auditID(a.ID) > auditID(best.ID)) {
+			best = &a
+		}
+	}
+	if best == nil {
+		return store.AuditEntry{}, store.ErrNotFound
+	}
+	return store.AuditEntry{ID: best.ID, At: best.At, Action: best.Action, Decision: best.Decision, Detail: best.Detail}, nil
+}
+
 func (m *Mem) listAudit(keep func(store.AuditEntry) bool, limit int, cursor *store.Cursor) ([]store.AuditEntry, *store.Cursor, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

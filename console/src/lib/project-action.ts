@@ -16,6 +16,7 @@ import type {
 import { nextFormDialog, type DialogState } from '$lib/dialog-open';
 import type { ImageDraft, KnownSet } from '$lib/image-spec';
 import type { ImageDigestResult, ImageTagsResult } from '$lib/image-tags';
+import type { HostPolicySnippet, ImageAccessResult, Readiness } from '$lib/settings-auto';
 
 export type ProjectScope = 'hosts' | 'catalog' | 'members' | 'settings';
 
@@ -145,6 +146,18 @@ export type ProjectActionData = {
 	settingsField?: 'dotenv' | 'token' | 'file' | 'merge' | null;
 	/** File a delete failure belongs to (the notice sits on that row), or the set of an Add variables failure. */
 	settingsName?: string | null;
+	/** api-v1 v1.29: a Disconnect whose GitHub revoke failed. */
+	githubNote?: 'revoke_failed';
+	/** api-v1 v1.29 lookups for the image field, the readiness list and Allow on host (names and statuses only). */
+	imageAccess?: ImageAccessResult | null;
+	/** With a Connect GitHub line: whether the API offers Connect GitHub. */
+	imageAccessGitHub?: boolean;
+	readiness?: Readiness | null;
+	readinessMessage?: string | null;
+	/** With a Connect GitHub fix: whether the API offers Connect GitHub. */
+	readinessGitHub?: boolean;
+	hostPolicy?: HostPolicySnippet | null;
+	hostPolicyMessage?: string | null;
 };
 
 export type RenameOpenState = DialogState;
