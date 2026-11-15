@@ -56,6 +56,6 @@ func registerRollbackEntry(server *mcp.Server, api *apiclient.Client) {
 		if fail != nil {
 			return fail
 		}
-		return confirmationOnly(status, payload)
+		return withConfirmHint(confirmationOnly(status, payload))
 	})
 }

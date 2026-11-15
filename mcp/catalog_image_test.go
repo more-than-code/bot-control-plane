@@ -291,7 +291,8 @@ func TestDeployEntryConfirm(t *testing.T) {
 		"recent deploys:\n" +
 		"sha256:abababababab succeeded 2026-10-15T01:01:00Z\n" +
 		"sha256:cdcdcdcdcdcd unchanged 2026-10-15T02:01:00Z\n" +
-		"sha256:efefefefefef failed 2026-10-15T03:00:00Z"
+		"sha256:efefefefefef failed 2026-10-15T03:00:00Z\n" +
+		"When you confirm, pass project_id and entry as well."
 	if textOf(t, res) != want {
 		t.Fatalf("text %q", textOf(t, res))
 	}
@@ -350,7 +351,8 @@ func TestDeployEntryConfirm(t *testing.T) {
 			t.Fatal("rollback fetched history")
 		}
 	}
-	if !strings.Contains(textOf(t, res), "nothing ran yet") || !strings.Contains(textOf(t, res), imagePlan(jobEntry, digestAB)) {
+	if !strings.Contains(textOf(t, res), "nothing ran yet") || !strings.Contains(textOf(t, res), imagePlan(jobEntry, digestAB)) ||
+		!strings.HasSuffix(textOf(t, res), "\nWhen you confirm, pass project_id and entry as well.") {
 		t.Fatalf("rollback text %q", textOf(t, res))
 	}
 	if _, ok := structuredMap(t, res)["history"]; ok {
@@ -598,8 +600,18 @@ func TestDeployTimeoutText(t *testing.T) {
 		}
 		return nil
 	}
+	// Without project_id and entry the confirm may be an image deploy, so a
+	// deadline is still running, not a failure (spec v0.2.34 §2.3).
 	res = mustCall(t, cs, "confirm", map[string]any{
 		"confirmation_id": confirmationID, "idempotency_key": "confirm-1",
+	})
+	if textOf(t, res) != "error: still running on the host, check entry_status later" {
+		t.Fatalf("plain confirm text %q", textOf(t, res))
+	}
+
+	res = mustCall(t, cs, "confirm", map[string]any{
+		"confirmation_id": confirmationID, "idempotency_key": "confirm-1",
+		"project_id": projectID, "entry": entryName,
 	})
 	if textOf(t, res) != "error: api request failed" || strings.Contains(textOf(t, res), "still running") {
 		t.Fatalf("program confirm text %q", textOf(t, res))
@@ -718,7 +730,7 @@ func TestImageCallDeadlines(t *testing.T) {
 			"confirmation_id": confirmationID, "idempotency_key": "confirm-plain",
 		})
 	})
-	check("confirm plain", http.MethodPost, confirmPath, apiclient.Timeout, hits)
+	check("confirm plain", http.MethodPost, confirmPath, apiclient.MaxCallTimeout, hits)
 	for _, hit := range hits {
 		if hit.path == catalogPath {
 			t.Fatal("program confirm read the catalog")
@@ -899,6 +911,16 @@ func TestLongConfirmExtendsWriteDeadline(t *testing.T) {
 	}
 	if len(got) != 2 || !nearBudget(got[1], apiclient.MaxCallTimeout+writeTimeout) {
 		t.Fatalf("unknown write deadline %s", got)
+	}
+
+	res = mustCall(t, cs, "confirm", map[string]any{
+		"confirmation_id": confirmationID, "idempotency_key": "confirm-plain",
+	})
+	if res.IsError {
+		t.Fatalf("plain confirm %s", textOf(t, res))
+	}
+	if len(got) != 3 || !nearBudget(got[2], apiclient.MaxCallTimeout+writeTimeout) {
+		t.Fatalf("plain write deadline %s", got)
 	}
 }
 
