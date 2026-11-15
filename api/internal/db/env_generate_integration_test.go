@@ -393,7 +393,8 @@ func assertEnvGenerate(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 	if err != nil || fresh.Keys[0].RevealPending || fresh.Keys[0].NeedsValue {
 		t.Fatalf("create flags %#v %v", fresh, err)
 	}
-	// Make secret writes both flags false on a plain key.
+	// Make secret clears reveal_pending and keeps needs_value: it is not a
+	// value write (v1.27 item 2), so a placeholder made secret still needs one.
 	if _, err := d.pool.Exec(ctx, `UPDATE app.env_values SET needs_value = true WHERE project_id = $1::uuid AND set_name = 'fresh' AND key = 'A'`, pid); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +403,7 @@ func assertEnvGenerate(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 		return store.EnvSecret{Key: key, Nonce: nonce, Ciphertext: ciphertext, KeyVersion: seal.KeyVersion}, err
 	}
 	set, _, err := d.MakeEnvKeysSecret(ctx, home.ID, "fresh", []string{"A"}, sealer, owner.ID, at)
-	if err != nil || !set.Keys[0].IsSecret || set.Keys[0].RevealPending || set.Keys[0].NeedsValue || set.Keys[0].Generated {
+	if err != nil || !set.Keys[0].IsSecret || set.Keys[0].RevealPending || !set.Keys[0].NeedsValue || set.Keys[0].Generated {
 		t.Fatalf("make secret flags %#v %v", set, err)
 	}
 

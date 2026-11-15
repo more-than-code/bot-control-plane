@@ -602,12 +602,12 @@ SET updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
 `, projectID.String(), name, at, actor.String()); err != nil {
 		return store.EnvKey{}, false, mapErr(err)
 	}
-	var isSecret bool
+	var isSecret, needsValue bool
 	err = tx.QueryRow(ctx, `
-SELECT is_secret FROM app.env_values
+SELECT is_secret, needs_value FROM app.env_values
 WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
 FOR UPDATE
-`, projectID.String(), name, in.Key).Scan(&isSecret)
+`, projectID.String(), name, in.Key).Scan(&isSecret, &needsValue)
 	created := false
 	if errors.Is(err, pgx.ErrNoRows) {
 		created = true
@@ -617,9 +617,9 @@ FOR UPDATE
 		}
 	} else if err != nil {
 		return store.EnvKey{}, false, mapErr(err)
-	} else if in.Generated {
-		// Generate creates new keys only (v1.27 rev 3). Phase B will let it
-		// fill a needs_value placeholder; needs_value is always false today.
+	} else if in.Generated && !needsValue {
+		// Generate creates new keys only (v1.27 rev 3), or fills a
+		// needs_value placeholder (item 4).
 		return store.EnvKey{}, false, store.ErrKeyExists
 	} else if in.Secret != nil && *in.Secret != isSecret {
 		return store.EnvKey{}, false, store.ErrSecretFixed
@@ -735,7 +735,7 @@ FOR UPDATE
 		if err := exec(ctx, tx, `
 UPDATE app.env_values
 SET is_secret = true, value = NULL, nonce = $4, ciphertext = $5, key_version = $6,
-    reveal_pending = false, needs_value = false, generated = false
+    reveal_pending = false, generated = false
 WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
 `, projectID.String(), name, key, sealed.Nonce, sealed.Ciphertext, sealed.KeyVersion); err != nil {
 			return store.EnvSet{}, nil, mapErr(err)
@@ -894,6 +894,11 @@ func insertEnvValue(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name st
 	secret := newKeysSecret
 	if was, ok := kept[key.Key]; ok {
 		secret = was
+		// The v1.18 guard, as for merge and the key PUT: an existing secret
+		// is never replaced by "" (a placeholder stays needs_value instead).
+		if was && key.Plain == "" {
+			return store.ErrSecretEmpty
+		}
 	}
 	// A typed value: all v1.27 flags false, written explicitly.
 	if secret {
@@ -1060,7 +1065,7 @@ SELECT EXISTS (SELECT 1 FROM app.env_sets WHERE project_id = $1::uuid AND name =
 		return nil, store.ErrNotFound
 	}
 	rows, err := d.pool.Query(ctx, `
-SELECT key, is_secret, value, nonce, ciphertext, key_version, generated
+SELECT key, is_secret, value, nonce, ciphertext, key_version, generated, needs_value
 FROM app.env_values
 WHERE project_id = $1::uuid AND set_name = $2
 ORDER BY key
@@ -1074,7 +1079,7 @@ ORDER BY key
 		var item store.EnvMaterial
 		var plain *string
 		var version *int
-		if err := rows.Scan(&item.Key, &item.IsSecret, &plain, &item.Nonce, &item.Ciphertext, &version, &item.Generated); err != nil {
+		if err := rows.Scan(&item.Key, &item.IsSecret, &plain, &item.Nonce, &item.Ciphertext, &version, &item.Generated, &item.NeedsValue); err != nil {
 			return nil, mapErr(err)
 		}
 		if plain != nil {

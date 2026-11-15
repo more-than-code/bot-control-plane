@@ -76,6 +76,7 @@ type Mem struct {
 	confirmations             map[string]confirmationRec
 	serviceConfirmations      map[string]serviceConfirmationRec
 	catalogWriteConfirmations map[string]catalogWriteConfirmationRec
+	envSetConfirmations       map[string]envSetConfirmationRec
 	idempotency               map[string]store.IdempotencyRecord
 
 	envSets      map[string]envSetRec
@@ -168,6 +169,7 @@ func New() *Mem {
 		confirmations:             map[string]confirmationRec{},
 		serviceConfirmations:      map[string]serviceConfirmationRec{},
 		catalogWriteConfirmations: map[string]catalogWriteConfirmationRec{},
+		envSetConfirmations:       map[string]envSetConfirmationRec{},
 		idempotency:               map[string]store.IdempotencyRecord{},
 		envSets:                   map[string]envSetRec{},
 		envValues:                 map[string][]envValueRec{},

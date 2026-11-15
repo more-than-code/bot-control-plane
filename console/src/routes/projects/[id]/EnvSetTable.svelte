@@ -212,7 +212,9 @@
 		<div class="flex flex-wrap items-center gap-2">
 			<EnvAddVariablesDialog
 				setName={set.name}
-				existingKeys={set.keys.map((row) => row.key)}
+				existingKeys={set.keys.filter((row) => !row.needs_value).map((row) => row.key)}
+				secretPlaceholders={set.keys.filter((row) => row.needs_value && row.is_secret).map((row) => row.key)}
+				plainPlaceholders={set.keys.filter((row) => row.needs_value && !row.is_secret).map((row) => row.key)}
 				addAction={putAction}
 				{mergeAction}
 				{mergeError}
@@ -310,11 +312,23 @@
 							{/if}
 						</Table.Cell>
 						<Table.Cell>
-							<Badge variant="outline">{item.is_secret ? 'Secret' : 'Plain'}</Badge>
+							<div class="flex flex-wrap items-center gap-1">
+								<Badge variant="outline">{item.is_secret ? 'Secret' : 'Plain'}</Badge>
+								{#if item.needs_value}
+									<!-- api-v1 v1.27 item 4: a placeholder; a deploy that uses it is refused until it has a value. -->
+									<Badge id={domId('needs', item.key)} variant="secondary">Needs value</Badge>
+								{/if}
+							</div>
 						</Table.Cell>
 						<Table.Cell class="whitespace-normal">
 							<div class="flex flex-wrap items-center gap-1">
-								<RowAction id={domId('edit', item.key)} label="Edit {item.key}" icon={Pencil} onclick={() => startEdit(item)} />
+								<RowAction
+									id={domId('edit', item.key)}
+									label="Edit {item.key}"
+									icon={Pencil}
+									describedBy={item.needs_value ? domId('needs', item.key) : undefined}
+									onclick={() => startEdit(item)}
+								/>
 								{#if rowActions.revealOnce}
 									<RowAction id={domId('reveal', item.key)} label="Reveal {item.key} once" icon={Eye} onclick={() => showOnce(item.key)} />
 								{/if}

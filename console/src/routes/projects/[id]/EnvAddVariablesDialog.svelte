@@ -16,16 +16,20 @@
 	import * as ToggleGroup from '$lib/components/ui/toggle-group';
 	import { GENERATE_KINDS, GENERATE_LABELS, isGenerateKind } from '$lib/env-generate';
 	import { dotenvWarnings, envValueWarnings } from '$lib/env-lint';
+	import { looksSecretLine, secretLookingKeys } from '$lib/env-secret-name';
 	import {
 		addErrorText,
 		addIsSecret,
 		addKeyError,
 		addKeyRefused,
+		addKeyTyped,
+		placeholderRule,
 		addTabFailed,
 		addValueTyped,
 		closeAddVariables,
 		initialAddVariables,
 		pasteTabFailed,
+		pasteTyped,
 		setAddSecret,
 		setAddSource,
 		settleAdd,
@@ -38,6 +42,8 @@
 	let {
 		setName,
 		existingKeys,
+		secretPlaceholders = [],
+		plainPlaceholders = [],
 		addAction,
 		mergeAction,
 		mergeError = null,
@@ -46,8 +52,12 @@
 		onMerged
 	}: {
 		setName: string;
-		/** Keys already in the set: One variable refuses them instead of overwriting. */
+		/** Keys already in the set: One variable refuses them instead of overwriting. Placeholders are left out, so Add fills them. */
 		existingKeys: readonly string[];
+		/** Secret placeholders (needs_value): adding one keeps it secret, typed or generated (api-v1 v1.27 item 4). */
+		secretPlaceholders?: readonly string[];
+		/** Plain placeholders: adding one keeps it plain, and Generate is off (a generated value is secret). */
+		plainPlaceholders?: readonly string[];
 		/** putEnvKey, sent with op=add. */
 		addAction: string;
 		/** mergeEnvSet (api-v1 v1.19 merge). */
@@ -74,10 +84,21 @@
 
 	const keyError = $derived(view.draft.errorField === 'key');
 	const generating = $derived(view.draft.source === 'generate');
-	const secretShown = $derived(addIsSecret(view.draft));
+	const placeholder = $derived(placeholderRule(view.draft.key, secretPlaceholders, plainPlaceholders));
+	const secretShown = $derived(placeholder.secret ?? addIsSecret(view.draft));
+	// Every key already in the set, placeholders included: the paste suggestion names new keys only.
+	const allKeys = $derived([...existingKeys, ...secretPlaceholders, ...plainPlaceholders]);
+	/** Typing a key: the name suggestion, and back to Type a value when the key is a plain placeholder. */
+	function keyTyped() {
+		let draft = addKeyTyped(view.draft);
+		if (!placeholderRule(draft.key, secretPlaceholders, plainPlaceholders).canGenerate) draft = setAddSource(draft, 'value');
+		view = { ...view, draft };
+	}
 	// Paste lint (spec-env-generate §3.6): warnings only, naming the key, never the value.
 	const valueWarnings = $derived(generating ? [] : envValueWarnings(view.draft.key, view.draft.value));
 	const pasteWarnings = $derived(dotenvWarnings(view.paste));
+	// Secret suggestion by name (spec rev 3 §3.4): a visible hint, never a silent rule.
+	const pasteLooksSecret = $derived(looksSecretLine(secretLookingKeys(view.paste, allKeys)));
 
 	// A new form-result failure opens the dialog on Paste several. Closing it stays closed while it is current.
 	$effect(() => {
@@ -129,7 +150,7 @@
 				close: closeAfterSave,
 				failed: async () => {
 					// Stay open on this tab. The server never echoes the value; a secret one is asked for again.
-					view = addTabFailed(view, failureMessage(result));
+					view = addTabFailed(view, failureMessage(result), secretShown);
 					await tick();
 					focusById(id(keyError ? 'add-key' : 'add-error'));
 				},
@@ -202,6 +223,7 @@
 								id={id('add-key')}
 								name="key"
 								bind:value={view.draft.key}
+								oninput={keyTyped}
 								required
 								maxlength={64}
 								autocomplete="off"
@@ -227,7 +249,9 @@
 								}
 							>
 								<ToggleGroup.Item value="value" id={id('add-source-value')}>Type a value</ToggleGroup.Item>
-								<ToggleGroup.Item value="generate" id={id('add-source-generate')}>Generate</ToggleGroup.Item>
+								<ToggleGroup.Item value="generate" id={id('add-source-generate')} disabled={!placeholder.canGenerate} aria-describedby={placeholder.note ? id('add-placeholder') : undefined}>
+									Generate
+								</ToggleGroup.Item>
 							</ToggleGroup.Root>
 						</div>
 						{#if generating}
@@ -257,10 +281,10 @@
 								<Input
 									id={id('add-value')}
 									name="value"
-									type={view.draft.secret ? 'password' : 'text'}
+									type={secretShown ? 'password' : 'text'}
 									bind:value={view.draft.value}
 									oninput={() => (view = { ...view, draft: addValueTyped(view.draft) })}
-									autocomplete={view.draft.secret ? 'new-password' : 'off'}
+									autocomplete={secretShown ? 'new-password' : 'off'}
 									spellcheck="false"
 									aria-describedby={[view.draft.error ? id('add-error') : null, valueWarnings.length > 0 ? id('add-warnings') : null].filter(Boolean).join(' ') || undefined}
 								/>
@@ -271,12 +295,15 @@
 							<Checkbox
 								id={id('add-secret')}
 								checked={secretShown}
-								disabled={generating}
-								aria-label="Secret"
+								disabled={generating || placeholder.secret !== null}
+								aria-describedby={placeholder.note ? id('add-placeholder') : undefined}
 								onCheckedChange={(value) => (view = { ...view, draft: setAddSecret(view.draft, value === true) })}
 							/>
 							Secret
 						</Label>
+						{#if placeholder.note}
+							<p id={id('add-placeholder')} class="text-muted-foreground text-sm break-words">{placeholder.note}</p>
+						{/if}
 						{#if view.draft.error}
 							<div id={id('add-error')} tabindex="-1" class="max-w-full min-w-0 break-words focus-visible:ring-3 focus-visible:ring-ring">
 								<Notice kind="error">{addErrorText(view.draft)}</Notice>
@@ -296,6 +323,7 @@
 								id={id('merge-dotenv')}
 								name="dotenv"
 								bind:value={view.paste}
+								oninput={() => (view = pasteTyped(view, allKeys))}
 								rows={6}
 								spellcheck="false"
 								autocomplete="off"
@@ -309,11 +337,14 @@
 							<Checkbox
 								id={id('merge-new-secret')}
 								checked={view.pasteSecret}
-								aria-label="New keys are secret"
-								onCheckedChange={(value) => (view = { ...view, pasteSecret: value === true })}
+								aria-describedby={pasteLooksSecret ? id('merge-looks-secret') : undefined}
+								onCheckedChange={(value) => (view = { ...view, pasteSecret: value === true, pasteSecretTouched: true })}
 							/>
 							New keys are secret
 						</Label>
+						{#if pasteLooksSecret}
+							<p id={id('merge-looks-secret')} class="text-muted-foreground text-sm break-words">{pasteLooksSecret}</p>
+						{/if}
 						{#if view.pasteError}
 							<div id={id('merge-error')} tabindex="-1" class="max-w-full min-w-0 break-words focus-visible:ring-3 focus-visible:ring-ring">
 								<Notice kind="error">{view.pasteError}</Notice>

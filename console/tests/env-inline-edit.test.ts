@@ -147,9 +147,9 @@ describe('env-set inline edit and Add variable dialog', () => {
 
 	test('a failed add keeps the key, clears a secret value and asks for it again', () => {
 		const secret = addFailed({ ...initialAddDraft(), key: 'TOKEN', value: TYPED, secret: true }, 'refused [redacted]');
-		assert.deepEqual(secret, { key: 'TOKEN', value: '', secret: true, error: 'refused [redacted]', errorField: 'form', retype: true, source: 'value', kind: 'password' });
+		assert.deepEqual(secret, { key: 'TOKEN', value: '', secret: true, error: 'refused [redacted]', errorField: 'form', retype: true, source: 'value', kind: 'password', secretTouched: false });
 		const plain = addFailed({ ...initialAddDraft(), key: 'LOG', value: 'debug', secret: false }, 'refused');
-		assert.deepEqual(plain, { key: 'LOG', value: 'debug', secret: false, error: 'refused', errorField: 'form', retype: false, source: 'value', kind: 'password' });
+		assert.deepEqual(plain, { key: 'LOG', value: 'debug', secret: false, error: 'refused', errorField: 'form', retype: false, source: 'value', kind: 'password', secretTouched: false });
 		assert.equal(addFailed({ ...initialAddDraft(), key: 'TOKEN' }, 'bad key').retype, false);
 		assert.equal(addKeyError('API_TOKEN'), null);
 		assert.equal(addKeyError('bad key'), ADD_KEY_MESSAGE);
@@ -167,7 +167,8 @@ describe('env-set inline edit and Add variable dialog', () => {
 			errorField: 'key',
 			retype: false,
 			source: 'value',
-			kind: 'password'
+			kind: 'password',
+			secretTouched: false
 		});
 		const dialog = source('EnvAddVariablesDialog.svelte');
 		assert.match(dialog, /draft: addKeyRefused\(view\.draft, invalid\)/);
@@ -468,7 +469,7 @@ describe('env-set rows: icon-only Copy and Delete (v0.2.14 item 7)', () => {
 			assert.equal(visibleText(edit), '');
 		}
 		const table = source('EnvSetTable.svelte');
-		assert.match(table, /<RowAction id=\{domId\('edit', item\.key\)\} label="Edit \{item\.key\}" icon=\{Pencil\} onclick=\{\(\) => startEdit\(item\)\} \/>/);
+		assert.match(table, /<RowAction\s+id=\{domId\('edit', item\.key\)\}\s+label="Edit \{item\.key\}"\s+icon=\{Pencil\}\s+describedBy=\{item\.needs_value \? domId\('needs', item\.key\) : undefined\}\s+onclick=\{\(\) => startEdit\(item\)\}\s*\/>/);
 		// RowAction runs the tooltip's own click handler before the caller's.
 		const row = readFileSync(new URL('../src/lib/components/RowAction.svelte', import.meta.url), 'utf8');
 		assert.match(row, /if \(typeof tooltipClick === 'function'\) tooltipClick\(event\);\s*onclick\?\.\(event\);/);

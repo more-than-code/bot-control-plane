@@ -158,7 +158,8 @@ func TestRevealEnvKey(t *testing.T) {
 		}
 	}
 
-	// Make secret clears it on a plain key.
+	// Make secret keeps it on a plain placeholder: it is not a value write
+	// (v1.27 item 2), so an empty secret never deploys.
 	if _, err := m.PutEnvSet(ctx, home.ID, "plainset", []store.EnvSecret{{Key: "P", Plain: "plain"}}, owner.ID, at, false); err != nil {
 		t.Fatal(err)
 	}
@@ -168,12 +169,12 @@ func TestRevealEnvKey(t *testing.T) {
 	sealer := func(key, plain string) (store.EnvSecret, error) {
 		return sealKey(t, box, pid, "plainset", key, plain), nil
 	}
-	if set, changed, err := m.MakeEnvKeysSecret(ctx, home.ID, "plainset", []string{"P"}, sealer, owner.ID, at); err != nil || len(changed) != 1 || set.Keys[0].NeedsValue || set.Keys[0].Generated {
+	if set, changed, err := m.MakeEnvKeysSecret(ctx, home.ID, "plainset", []string{"P"}, sealer, owner.ID, at); err != nil || len(changed) != 1 || !set.Keys[0].NeedsValue || set.Keys[0].Generated {
 		t.Fatalf("make secret flags %#v %v", set.Keys, err)
 	}
 
 	// Generate over an existing secret or plain key is ErrKeyExists and
-	// writes nothing (rev 3). Phase B will let it fill a needs_value placeholder.
+	// writes nothing (rev 3); a needs_value placeholder is the exception (TestParityEnvSetCreate).
 	put("seven", true)
 	snap := func() string {
 		mats, _ := m.ListEnvMaterial(ctx, home.ID, "svc")

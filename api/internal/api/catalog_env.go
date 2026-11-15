@@ -32,12 +32,22 @@ func (s *Server) handleEnvSetList(w http.ResponseWriter, r *http.Request) {
 		s.writeAuth(w, err)
 		return
 	}
-	if s.refuseDelegated(w, r, p, idPtr(id), nil, audit.ActionEnvSetList) || !requireConsole(w, p) {
+	delegated := p.Session.Kind == store.KindDelegated
+	if !delegated && !requireConsole(w, p) {
 		return
 	}
 	items, err := s.Store.ListEnvSets(r.Context(), id)
 	if err != nil {
 		s.writeErr(w, err, false)
+		return
+	}
+	if delegated {
+		// api-v1 v1.27 item 5: names and flags only, nothing decrypted.
+		out := make([]envSetNamesOnly, 0, len(items))
+		for _, item := range items {
+			out = append(out, namesOnly(item))
+		}
+		writeOK(w, http.StatusOK, map[string]any{"items": out})
 		return
 	}
 	out := make([]store.EnvSet, 0, len(items))
@@ -60,7 +70,8 @@ func (s *Server) handleEnvSetGet(w http.ResponseWriter, r *http.Request) {
 		s.writeAuth(w, err)
 		return
 	}
-	if s.refuseDelegated(w, r, p, idPtr(id), nil, audit.ActionEnvSetGet) || !requireConsole(w, p) {
+	delegated := p.Session.Kind == store.KindDelegated
+	if !delegated && !requireConsole(w, p) {
 		return
 	}
 	name, ok := envSetName(w, r)
@@ -70,6 +81,10 @@ func (s *Server) handleEnvSetGet(w http.ResponseWriter, r *http.Request) {
 	set, err := s.Store.GetEnvSet(r.Context(), id, name)
 	if err != nil {
 		s.writeErr(w, err, false)
+		return
+	}
+	if delegated {
+		writeOK(w, http.StatusOK, namesOnly(set))
 		return
 	}
 	filled, ok := s.withPreviews(w, r, id, set)
@@ -156,6 +171,10 @@ func (s *Server) handleEnvSetPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if mode == "create" && errors.Is(err, store.ErrConflict) {
 		writeCode(w, "conflict", fmt.Sprintf("env set %s already exists", name))
+		return
+	}
+	if errors.Is(err, store.ErrSecretEmpty) {
+		writeCode(w, "bad_request", err.Error())
 		return
 	}
 	if err != nil {

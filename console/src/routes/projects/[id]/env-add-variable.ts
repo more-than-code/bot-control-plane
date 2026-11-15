@@ -1,5 +1,6 @@
 import { ENV_KEY } from '$lib/catalog';
 import type { GenerateKind } from '$lib/env-generate';
+import { looksSecret, secretLookingKeys, suggestedSecret } from '$lib/env-secret-name';
 import { RETYPE_VALUE } from './env-set-panel';
 
 /** Draft of the One variable tab. Secret is off by default (Joe 2026-10-25). */
@@ -15,10 +16,12 @@ export type AddDraft = {
 	/** `generate`: the API makes the value (api-v1 v1.27 item 1); the key is secret and no value is sent. */
 	source: 'value' | 'generate';
 	kind: GenerateKind;
+	/** The user set Secret themself, so the name suggestion no longer changes it (spec rev 3 §3.4). */
+	secretTouched: boolean;
 };
 
 export function initialAddDraft(): AddDraft {
-	return { key: '', value: '', secret: false, error: '', errorField: null, retype: false, source: 'value', kind: 'password' };
+	return { key: '', value: '', secret: false, error: '', errorField: null, retype: false, source: 'value', kind: 'password', secretTouched: false };
 }
 
 /** Switch between typing a value and generating one. Generate drops a typed value so it is never sent. */
@@ -34,7 +37,13 @@ export function addIsSecret(draft: AddDraft): boolean {
 
 /** Flip Secret. The typed value stays; the paste-again hint no longer applies. */
 export function setAddSecret(draft: AddDraft, secret: boolean): AddDraft {
-	return { ...draft, secret, retype: false };
+	return { ...draft, secret, retype: false, secretTouched: true };
+}
+
+/** Typing a key pre-ticks Secret when the name looks secret, until the user sets Secret themself. */
+export function addKeyTyped(draft: AddDraft): AddDraft {
+	const secret = suggestedSecret(draft.secret, draft.secretTouched, looksSecret(draft.key));
+	return secret === draft.secret ? draft : { ...draft, secret };
 }
 
 /** Typing a value ends the paste-again hint. */
@@ -59,10 +68,13 @@ export function addKeyRefused(draft: AddDraft, message: string): AddDraft {
 	return { ...draft, error: message, errorField: 'key', retype: false };
 }
 
-/** A failed add keeps the key and the message. A secret value is cleared and asked for again. */
-export function addFailed(draft: AddDraft, message: string, errorField: 'key' | 'form' = 'form'): AddDraft {
+/**
+ * A failed add keeps the key and the message. A secret value is cleared and asked for again. `secret` is the
+ * effective flag as shown (it can be on for a secret placeholder while the draft's own box is off).
+ */
+export function addFailed(draft: AddDraft, message: string, errorField: 'key' | 'form' = 'form', secret = addIsSecret(draft)): AddDraft {
 	// A generated value or a plain one has nothing to retype.
-	if (draft.source === 'generate' || !draft.secret) return { ...draft, error: message, errorField, retype: false };
+	if (draft.source === 'generate' || !secret) return { ...draft, error: message, errorField, retype: false };
 	return { ...draft, value: '', error: message, errorField, retype: draft.value !== '' };
 }
 
@@ -116,12 +128,20 @@ export type AddVariablesView = {
 	draft: AddDraft;
 	paste: string;
 	pasteSecret: boolean;
+	/** The user set New keys are secret themself (see AddDraft.secretTouched). */
+	pasteSecretTouched: boolean;
 	pasteError: string;
 };
 
 /** Every open starts here: the One variable tab, both inputs empty, both Secret boxes unticked. */
 export function initialAddVariables(): AddVariablesView {
-	return { tab: 'one', draft: initialAddDraft(), paste: '', pasteSecret: false, pasteError: '' };
+	return { tab: 'one', draft: initialAddDraft(), paste: '', pasteSecret: false, pasteSecretTouched: false, pasteError: '' };
+}
+
+/** Editing the paste pre-ticks New keys are secret when a new key looks secret, until the user sets the box. */
+export function pasteTyped(view: AddVariablesView, existing: readonly string[]): AddVariablesView {
+	const pasteSecret = suggestedSecret(view.pasteSecret, view.pasteSecretTouched, secretLookingKeys(view.paste, existing).length > 0);
+	return pasteSecret === view.pasteSecret ? view : { ...view, pasteSecret };
 }
 
 /** Closing (Cancel, Escape, the X, or after a save) drops the key, the value and the paste, and goes back to One variable. */
@@ -139,8 +159,19 @@ export function switchAddTab(view: AddVariablesView, tab: AddTab): AddVariablesV
 }
 
 /** An Add variable failure shows on the One variable tab (a secret value is asked for again). */
-export function addTabFailed(view: AddVariablesView, message: string): AddVariablesView {
-	return { ...view, tab: 'one', draft: addFailed(view.draft, message), pasteError: '' };
+export function addTabFailed(view: AddVariablesView, message: string, secret = addIsSecret(view.draft)): AddVariablesView {
+	return { ...view, tab: 'one', draft: addFailed(view.draft, message, 'form', secret), pasteError: '' };
+}
+
+/**
+ * The Secret box and Generate for the typed key (api-v1 v1.27 item 4): a secret placeholder stays secret; a plain
+ * placeholder stays plain and cannot be generated (a generated value is secret). `note` explains it.
+ */
+export function placeholderRule(key: string, secretPlaceholders: readonly string[], plainPlaceholders: readonly string[]): { secret: boolean | null; canGenerate: boolean; note: string } {
+	const k = key.trim();
+	if (secretPlaceholders.includes(k)) return { secret: true, canGenerate: true, note: 'A secret placeholder stays secret.' };
+	if (plainPlaceholders.includes(k)) return { secret: false, canGenerate: false, note: 'This placeholder is plain; make it secret first to generate.' };
+	return { secret: null, canGenerate: true, note: '' };
 }
 
 /** An Add variables failure shows on the Paste several tab. The paste is not kept. */

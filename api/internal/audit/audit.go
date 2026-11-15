@@ -71,6 +71,8 @@ const (
 	ActionEnvSetKeyDelete          = "env_set.key_delete"
 	ActionEnvSetKeySecret          = "env_set.key_secret"
 	ActionEnvSetKeyReveal          = "env_set.key_reveal"
+	ActionEnvSetCreate             = "env_set.create"
+	ActionEnvSetWriteConfirmation  = "env_set.write_confirmation_issued"
 	ActionEnvSetDelete             = "env_set.delete"
 	ActionEnvSetList               = "env_set.list"
 	ActionEnvSetGet                = "env_set.get"

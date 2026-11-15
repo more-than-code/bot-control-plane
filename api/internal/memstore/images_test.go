@@ -494,7 +494,8 @@ func sealKey(t *testing.T, box *seal.Box, projectID, set, key, plain string) sto
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store.EnvSecret{Key: key, Nonce: nonce, Ciphertext: ciphertext, KeyVersion: seal.KeyVersion}
+	// Plain is set as the API handler sets it; the store keeps only the seal for a secret key.
+	return store.EnvSecret{Key: key, Plain: plain, Nonce: nonce, Ciphertext: ciphertext, KeyVersion: seal.KeyVersion}
 }
 
 func grantHas(grants []store.CatalogGrant, subject string, actions ...string) bool {

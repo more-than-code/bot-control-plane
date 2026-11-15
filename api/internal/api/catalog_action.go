@@ -387,6 +387,13 @@ func (s *Server) programGate(ctx context.Context, projectID uuid.UUID, host stor
 		}
 	}
 	refs := entry.Spec.Program().EnvRefs()
+	if action == "run" || action == "restart" {
+		// api-v1 v1.27 item 6: an unfilled placeholder never reaches a unit.
+		msg, err := s.unfilledReason(ctx, projectID, refs)
+		if err != nil || msg != "" {
+			return "bad_request", msg, err
+		}
+	}
 	switch action {
 	case "run":
 		msg, err := s.unlistedReason(ctx, host, projectID)

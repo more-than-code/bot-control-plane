@@ -490,6 +490,11 @@ func (m *Mem) deleteCatalogLocked(projectID uuid.UUID) {
 			delete(m.catalogWriteConfirmations, key)
 		}
 	}
+	for key, rec := range m.envSetConfirmations {
+		if rec.row.ProjectID == projectID {
+			delete(m.envSetConfirmations, key)
+		}
+	}
 }
 
 func (m *Mem) deleteEntryLocked(id uuid.UUID) {

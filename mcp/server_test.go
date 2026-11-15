@@ -168,7 +168,7 @@ func TestTools(t *testing.T) {
 	closed := map[string]bool{
 		"list_orgs": true, "list_projects": true, "list_hosts": true, "list_services": true,
 		"query_metrics": true, "list_processes": true, "service_health_history": true,
-		"get_health_checks": true, "list_catalog": true,
+		"get_health_checks": true, "list_catalog": true, "list_env_sets": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -208,6 +208,15 @@ func TestTools(t *testing.T) {
 				"get_health_checks",
 				"replaces all checks",
 			} {
+				if !strings.Contains(tool.Description, phrase) {
+					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
+				}
+			}
+		case tool.Name == "create_env_set":
+			if readOnly || open {
+				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
+			}
+			for _, phrase := range []string{"Nothing changes until confirm", "user agrees", "console", "No value is sent or returned", "Does not contact"} {
 				if !strings.Contains(tool.Description, phrase) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
@@ -304,13 +313,13 @@ func TestTools(t *testing.T) {
 		"list_catalog", "run_entry", "stop_entry", "restart_entry",
 		"deploy_entry", "rollback_entry", "set_health_checks",
 		"create_catalog_entry", "update_catalog_entry", "delete_catalog_entry",
-		"confirm", "entry_logs", "entry_status",
+		"confirm", "entry_logs", "entry_status", "create_env_set", "list_env_sets",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	if len(seen) != 23 {
+	if len(seen) != 25 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -1602,6 +1611,14 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 	healthBody := f.healthBody
 	f.mu.Unlock()
 	switch mode {
+	case "env-sets":
+		if reply, ok := envSetsReply(r, plan); ok {
+			return reply.status, reply.code, reply.msg, reply.payload
+		}
+	case "needs-value":
+		if r.Method == http.MethodPost {
+			return http.StatusBadRequest, "bad_request", needsValueRefusal, nil
+		}
 	case "forbidden":
 		return http.StatusForbidden, "forbidden", "not a member", nil
 	case "metrics-share-processes":
