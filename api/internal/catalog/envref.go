@@ -6,8 +6,9 @@ import (
 )
 
 // RefError refuses a deploy or rollback whose env has a bad ${KEY}
-// reference (api-v1 v1.27 item 7). Msg names keys only, never a value.
-// The API answers it as bad_request.
+// reference (api-v1 v1.27 item 7), or resolves a placeholder that has no
+// value yet (item 6). Msg names keys and sets only, never a value. The API
+// answers it as bad_request.
 type RefError struct {
 	Msg string
 }

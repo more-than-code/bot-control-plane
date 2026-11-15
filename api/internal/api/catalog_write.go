@@ -268,7 +268,8 @@ func (s *Server) confirmCatalogWrite(w http.ResponseWriter, r *http.Request, p p
 	c, err := s.Store.GetCatalogWriteConfirmation(r.Context(), hash)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeCode(w, "not_found", "not found")
+			// Last table: an env set create plan (api-v1 v1.27 item 4).
+			s.confirmEnvSetCreate(w, r, p, hash, key)
 			return
 		}
 		s.fail(w, err)

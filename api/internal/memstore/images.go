@@ -402,6 +402,12 @@ func (m *Mem) putEnvSetLocked(projectID uuid.UUID, name string, keys []store.Env
 	for _, v := range m.envValues[id] {
 		kept[v.Key] = v.IsSecret
 	}
+	// The v1.18 guard, as for merge: an existing secret is never replaced by "".
+	for _, k := range keys {
+		if kept[k.Key] && k.Plain == "" {
+			return store.EnvSet{}, store.ErrSecretEmpty
+		}
+	}
 	rec := envSetRec{Name: name, UpdatedAt: at, UpdatedBy: actor}
 	m.envSets[id] = rec
 	values := make([]envValueRec, 0, len(keys))
@@ -525,9 +531,9 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 		}
 	} else {
 		secret = values[idx].IsSecret
-		// Generate creates new keys only (v1.27 rev 3). Phase B will let it
-		// fill a needs_value placeholder; needs_value is always false today.
-		if in.Generated {
+		// Generate creates new keys only (v1.27 rev 3), or fills a
+		// needs_value placeholder (item 4).
+		if in.Generated && !values[idx].NeedsValue {
 			return store.EnvKey{}, false, store.ErrKeyExists
 		}
 		if in.Secret != nil && *in.Secret != secret {
@@ -652,10 +658,11 @@ func (m *Mem) MakeEnvKeysSecret(_ context.Context, projectID uuid.UUID, name str
 		if err != nil {
 			return store.EnvSet{}, nil, err
 		}
+		// Not a value write: a placeholder keeps needs_value (v1.27 item 2).
 		values[i] = envValueRec{
 			Key: key, IsSecret: true,
 			Nonce: append([]byte(nil), sealed.Nonce...), Ciphertext: append([]byte(nil), sealed.Ciphertext...),
-			KeyVersion: sealed.KeyVersion,
+			KeyVersion: sealed.KeyVersion, NeedsValue: values[i].NeedsValue,
 		}
 		changed = append(changed, key)
 	}
@@ -783,7 +790,7 @@ func (m *Mem) ListEnvMaterial(_ context.Context, projectID uuid.UUID, name strin
 		out = append(out, store.EnvMaterial{
 			Key: v.Key, IsSecret: v.IsSecret, Plain: v.Plain,
 			Nonce: append([]byte(nil), v.Nonce...), Ciphertext: append([]byte(nil), v.Ciphertext...),
-			KeyVersion: v.KeyVersion, Generated: v.Generated,
+			KeyVersion: v.KeyVersion, Generated: v.Generated, NeedsValue: v.NeedsValue,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })

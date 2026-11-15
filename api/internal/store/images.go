@@ -103,6 +103,8 @@ type EnvSet struct {
 
 // EnvSecret is one env value prepared for PutEnvSet, CreateEnvSet, and MergeEnvSet.
 // Nonce, Ciphertext, and KeyVersion seal Plain (AAD project_id|set|key).
+// Plain is always set, also for a secret key: the stores refuse "" over an
+// existing secret key (ErrSecretEmpty) by reading it.
 // The store keeps Plain for a key that is plain (an existing plain key, or a
 // new key when newKeysSecret is false) and the seal for a key that is secret.
 type EnvSecret struct {
@@ -138,6 +140,38 @@ type EnvMaterial struct {
 	Ciphertext []byte
 	KeyVersion int
 	Generated  bool
+	// NeedsValue marks a placeholder with no value yet (v1.27 item 4). A
+	// deploy or rollback that resolves it is refused (item 6).
+	NeedsValue bool
+}
+
+// EnvKeyCreate is one key of CreateEnvSetNames (api-v1 v1.27 item 4). It
+// never carries a typed value. A Generated key is a sealed API-generated
+// secret. Any other key is a placeholder: an empty value with needs_value,
+// secret when Secret is true (Nonce and Ciphertext then seal "").
+type EnvKeyCreate struct {
+	Key        string
+	Secret     bool
+	Generated  bool
+	Nonce      []byte
+	Ciphertext []byte
+	KeyVersion int
+}
+
+// EnvSetConfirmation is a single-use delegated env set create (api-v1 v1.27
+// item 4), stored by token hash in app.env_set_confirmations. Body is the
+// normalized request keys (names, generate objects, is_secret) and never
+// holds a value. RequestHash binds the request without the idempotency key.
+type EnvSetConfirmation struct {
+	UserID         uuid.UUID
+	ProjectID      uuid.UUID
+	SetName        string
+	Body           json.RawMessage
+	RequestHash    []byte
+	IdempotencyKey string
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+	UsedAt         *time.Time
 }
 
 // Registry is a registry credential without the token.

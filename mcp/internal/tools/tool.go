@@ -52,6 +52,8 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerCreateCatalogEntry(server, api)
 	registerUpdateCatalogEntry(server, api)
 	registerDeleteCatalogEntry(server, api)
+	registerCreateEnvSet(server, api)
+	registerListEnvSets(server, api)
 	registerConfirm(server, api)
 	registerEntryLogs(server, api)
 	registerEntryStatus(server, api)
@@ -123,6 +125,9 @@ func badRequest(err error) *mcp.CallToolResult {
 func fromAPI(err error) *mcp.CallToolResult {
 	var apiErr *apiclient.Error
 	if errors.As(err, &apiErr) {
+		if apiErr.Code == "bad_request" && envRefusal(apiErr.Msg) {
+			return toolError(apiErr.Code, apiErr.Msg)
+		}
 		return toolError(apiErr.Code, redactText(apiErr.Msg))
 	}
 	return toolError("error", "api request failed")
@@ -209,6 +214,9 @@ func actedOrPending(status int, payload json.RawMessage) *mcp.CallToolResult {
 	case http.StatusAccepted:
 		return pendingConfirmation(payload)
 	case http.StatusCreated:
+		if envSetPayload(payload) {
+			return envSetCreated(payload)
+		}
 		return catalogWriteResult(payload, "created")
 	case http.StatusOK:
 		if isNullJSON(payload) {

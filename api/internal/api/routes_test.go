@@ -91,6 +91,7 @@ func TestRouteTable(t *testing.T) {
 		"POST /v1/projects/{id}/catalog/{name}/remove",
 		"GET /v1/projects/{id}/catalog/{name}/deploys",
 		"GET /v1/projects/{id}/env-sets",
+		"POST /v1/projects/{id}/env-sets",
 		"GET /v1/projects/{id}/env-sets/{set}",
 		"PUT /v1/projects/{id}/env-sets/{set}",
 		"DELETE /v1/projects/{id}/env-sets/{set}",

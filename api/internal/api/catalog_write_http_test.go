@@ -384,10 +384,15 @@ func TestDelegatedCatalogConsoleOnly(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodPut, "/v1/projects/"+project+"/env-sets/svc", `{"dotenv":"TOKEN=super-secret-value-zz"}`)
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
-	status, env, _ = mustCall(t, c.w, c.tok, http.MethodGet, "/v1/projects/"+project+"/env-sets", "")
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
+	// api-v1 v1.27 item 5: delegated reads are names and flags only.
+	status, env, raw := mustCall(t, c.w, c.tok, http.MethodGet, "/v1/projects/"+project+"/env-sets", "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if strings.Contains(raw, "super-secret-value-zz") || strings.Contains(raw, `"preview"`) {
+		t.Fatalf("delegated list %s", raw)
+	}
+	// The refused PUT above created nothing.
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodGet, "/v1/projects/"+project+"/env-sets/svc", "")
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
+	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodDelete, "/v1/projects/"+project+"/env-sets/svc", "")
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodPut, "/v1/projects/"+project+"/env-sets/svc/keys/TOKEN", `{"value":"nope"}`)
@@ -405,8 +410,9 @@ func TestDelegatedCatalogConsoleOnly(t *testing.T) {
 	requireDelegatedDenial(t, rows, audit.ActionCatalogPermissions, 1)
 	requireDelegatedDenial(t, rows, audit.ActionEnvSetReplace, 1)
 	requireDelegatedDenial(t, rows, audit.ActionEnvSetDelete, 1)
-	requireDelegatedDenial(t, rows, audit.ActionEnvSetList, 1)
-	requireDelegatedDenial(t, rows, audit.ActionEnvSetGet, 1)
+	// v1.27 item 5: delegated reads are allowed, so they write no denial.
+	requireDelegatedDenial(t, rows, audit.ActionEnvSetList, 0)
+	requireDelegatedDenial(t, rows, audit.ActionEnvSetGet, 0)
 }
 
 func TestCatalogWriteConfirmedViaConsole(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"sort"
@@ -927,6 +928,13 @@ func envSecretForms(typed, generated []string) []secretForm {
 // *catalog.RefError (see refCall). Program env stays literal: program Runs
 // call mergeEnv.
 func (s *Server) mergeImageEnv(ctx context.Context, projectID uuid.UUID, img catalog.Image) (envMerge, error) {
+	msg, err := s.unfilledReason(ctx, projectID, img.EnvRefs())
+	if err != nil {
+		return envMerge{}, err
+	}
+	if msg != "" {
+		return envMerge{}, &catalog.RefError{Msg: msg}
+	}
 	merged, err := s.mergeEnv(ctx, projectID, img.EnvRefs())
 	if err != nil {
 		return envMerge{}, err
@@ -1000,6 +1008,60 @@ func (s *Server) mergeEnv(ctx context.Context, projectID uuid.UUID, refs catalog
 		generated[key] = false
 	}
 	return newEnvMerge(out, secret, generated), nil
+}
+
+// unfilledReason is the api-v1 v1.27 item 6 refusal for an entry whose env
+// sets or secret_env sources hold a needs_value placeholder, or "". It
+// names the first such key in env_sets order (keys sorted), else the
+// source of the first secret_env key in key order. Nothing is decrypted.
+// Image deploys and rollbacks (mergeImageEnv) and program Runs and
+// Restarts (programGate) refuse it. A missing set or source is left to the
+// merge, which reports it.
+func (s *Server) unfilledReason(ctx context.Context, projectID uuid.UUID, refs catalog.EnvRefs) (string, error) {
+	for _, set := range refs.Sets {
+		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		for _, m := range mats {
+			if m.NeedsValue {
+				return needsValueMsg(m.Key, set), nil
+			}
+		}
+	}
+	keys := make([]string, 0, len(refs.Secret))
+	for key := range refs.Secret {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		set, name, ok := strings.Cut(refs.Secret[key], ".")
+		if !ok {
+			continue
+		}
+		mats, err := s.Store.ListEnvMaterial(ctx, projectID, set)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		for _, m := range mats {
+			if m.Key == name && m.NeedsValue {
+				return needsValueMsg(m.Key, set), nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// needsValueMsg is the api-v1 v1.27 item 6 refusal. It names the key and
+// the set only.
+func needsValueMsg(key, set string) string {
+	return fmt.Sprintf("env %s in set %s has no value yet; set it in the console", key, set)
 }
 
 // newEnvMerge builds an envMerge from the merged env and its per-key flags.

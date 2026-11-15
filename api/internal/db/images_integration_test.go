@@ -517,7 +517,7 @@ func assertImages(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 		t.Fatal(err)
 	}
 	if _, err := d.PutEnvSet(ctx, home.ID, "svc", []store.EnvSecret{{
-		Key: "TOKEN", Nonce: nonce, Ciphertext: ciphertext, KeyVersion: seal.KeyVersion,
+		Key: "TOKEN", Plain: "db-secret-value", Nonce: nonce, Ciphertext: ciphertext, KeyVersion: seal.KeyVersion,
 	}}, owner.ID, at, true); err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +541,7 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key = 'TOKEN'
 		t.Fatal(err)
 	}
 	if _, err := d.PutEnvSet(ctx, home.ID, "svc", []store.EnvSecret{{
-		Key: "TOKEN", Nonce: nonce2, Ciphertext: ct2, KeyVersion: seal.KeyVersion,
+		Key: "TOKEN", Plain: "other-secret-value", Nonce: nonce2, Ciphertext: ct2, KeyVersion: seal.KeyVersion,
 	}}, owner.ID, at.Add(time.Second), true); err != nil {
 		t.Fatal(err)
 	}
@@ -558,8 +558,8 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key = 'TOKEN'
 		t.Fatal(err)
 	}
 	if _, err := d.PutEnvSet(ctx, home.ID, "svc", []store.EnvSecret{
-		{Key: "TOKEN", Nonce: nA, Ciphertext: cA, KeyVersion: seal.KeyVersion},
-		{Key: "ADDED", Nonce: nB, Ciphertext: cB, KeyVersion: seal.KeyVersion},
+		{Key: "TOKEN", Plain: "db-secret-value", Nonce: nA, Ciphertext: cA, KeyVersion: seal.KeyVersion},
+		{Key: "ADDED", Plain: "added-secret-value", Nonce: nB, Ciphertext: cB, KeyVersion: seal.KeyVersion},
 	}, owner.ID, at.Add(2*time.Second), true); err != nil {
 		t.Fatal(err)
 	}

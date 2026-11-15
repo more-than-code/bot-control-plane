@@ -28,7 +28,7 @@ func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time
 		if err != nil {
 			t.Fatal(err)
 		}
-		return store.EnvSecret{Key: key, Nonce: nonce, Ciphertext: ct, KeyVersion: seal.KeyVersion}
+		return store.EnvSecret{Key: key, Plain: value, Nonce: nonce, Ciphertext: ct, KeyVersion: seal.KeyVersion}
 	}
 	if _, err := d.PutEnvSet(ctx, home.ID, "gh", []store.EnvSecret{sealed("GH_TOKEN", "db-prog-secret-1")}, owner.ID, at, true); err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func assertProgramSecrets(t *testing.T, d *DB, ctx context.Context, at time.Time
 		if err != nil {
 			t.Fatal(err)
 		}
-		return store.EnvSecret{Key: key, Nonce: nonce, Ciphertext: ct, KeyVersion: seal.KeyVersion}
+		return store.EnvSecret{Key: key, Plain: value, Nonce: nonce, Ciphertext: ct, KeyVersion: seal.KeyVersion}
 	}
 	if _, err := d.PutEnvSet(ctx, home.ID, "cfg", []store.EnvSecret{cfgSealed("A_KEY", "a-value"), cfgSealed("B_KEY", "b-value")}, owner.ID, at, true); err != nil {
 		t.Fatal(err)
@@ -207,5 +207,5 @@ func sealedPl(t *testing.T, box *seal.Box, project, key, value string) store.Env
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store.EnvSecret{Key: key, Nonce: nonce, Ciphertext: ct}
+	return store.EnvSecret{Key: key, Plain: value, Nonce: nonce, Ciphertext: ct}
 }

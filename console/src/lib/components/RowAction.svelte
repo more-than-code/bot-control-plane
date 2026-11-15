@@ -26,6 +26,7 @@
 		disabled = false,
 		blockedReason = null,
 		id,
+		describedBy,
 		onclick
 	}: {
 		label: string;
@@ -50,6 +51,8 @@
 		id?: string;
 		/** For a plain button: runs after the tooltip's own click handler. */
 		onclick?: (event: MouseEvent) => void;
+		/** For a plain button: the id of a visible note that describes it (e.g. a row badge). */
+		describedBy?: string;
 	} = $props();
 
 	function runClick(tooltipClick: unknown, event: MouseEvent) {
@@ -114,6 +117,7 @@
 						size="icon-sm"
 						class={cn(destructive && 'text-destructive', tooltipClass(props.class))}
 						aria-label={label}
+						aria-describedby={describedBy}
 					>
 						<Icon class="size-4" />
 					</Button>

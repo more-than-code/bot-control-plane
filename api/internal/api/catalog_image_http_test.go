@@ -773,8 +773,6 @@ func TestEnvRegistryConsoleOnly(t *testing.T) {
 		path   string
 		body   string
 	}{
-		{http.MethodGet, "/v1/projects/" + project + "/env-sets", ""},
-		{http.MethodGet, envPath(project, "svc"), ""},
 		{http.MethodPut, envPath(project, "svc"), `{"dotenv":"FOO=next\n"}`},
 		{http.MethodDelete, envPath(project, "svc"), ""},
 		{http.MethodPut, envPath(project, "svc") + "/keys/FOO", `{"value":"next"}`},
@@ -788,6 +786,15 @@ func TestEnvRegistryConsoleOnly(t *testing.T) {
 		mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
 		if strings.Contains(raw, envSecret) || strings.Contains(raw, regSecret) {
 			t.Fatalf("%s %s returned a secret", route.method, route.path)
+		}
+	}
+	// api-v1 v1.27 item 5: the delegated env set reads answer names and
+	// flags only, with no value and no preview.
+	for _, path := range []string{"/v1/projects/" + project + "/env-sets", envPath(project, "svc")} {
+		status, env, raw := mustCall(t, w, delegated, http.MethodGet, path, "")
+		mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+		if strings.Contains(raw, envSecret) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"value"`) {
+			t.Fatalf("GET %s returned a value or preview: %s", path, raw)
 		}
 	}
 	w.srv.Secrets = testBoxByte(t, 9)

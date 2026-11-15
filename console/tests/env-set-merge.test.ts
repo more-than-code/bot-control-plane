@@ -161,12 +161,13 @@ describe('Env set paste modes (api-v1 v1.19)', () => {
 
 	test('One variable is the default tab on every open, and close resets the key, the value, the paste and the tab', () => {
 		const start = initialAddVariables();
-		assert.deepEqual(start, { tab: 'one', draft: initialAddDraft(), paste: '', pasteSecret: false, pasteError: '' });
+		assert.deepEqual(start, { tab: 'one', draft: initialAddDraft(), paste: '', pasteSecret: false, pasteSecretTouched: false, pasteError: '' });
 		const dirty = {
 			tab: 'paste' as const,
 			draft: { ...initialAddDraft(), key: 'API_TOKEN', value: SECRET, secret: true, error: 'refused', errorField: 'form' as const, retype: true },
 			paste,
 			pasteSecret: true,
+			pasteSecretTouched: true,
 			pasteError: 'no env set app'
 		};
 		assert.deepEqual(closeAddVariables(dirty), start);
@@ -232,7 +233,7 @@ describe('Env set paste modes (api-v1 v1.19)', () => {
 		const dialog = source('EnvAddVariablesDialog.svelte');
 		assert.match(dialog, /await settleMerge\(open, result\.type,/);
 		assert.match(dialog, /view = pasteTabFailed\(view, failureMessage\(result\)\)/);
-		assert.match(dialog, /view = addTabFailed\(view, failureMessage\(result\)\)/);
+		assert.match(dialog, /view = addTabFailed\(view, failureMessage\(result\), secretShown\)/);
 		// A failure in the page's form result (a post without JS) opens the dialog on Paste several.
 		assert.match(dialog, /serverFailed \? pasteTabFailed\(initialAddVariables\(\), mergeError \?\? ''\)/);
 	});
@@ -274,7 +275,8 @@ describe('Env set paste modes (api-v1 v1.19)', () => {
 			dialog,
 			/Paste the variables, one KEY=value per line, like a \.env file\. Existing keys keep the secret flag they already have; other keys in the set are kept\./
 		);
-		assert.match(dialog, /aria-label="New keys are secret"/);
+		// The box is named by its wrapping Label (no duplicate aria-label).
+		assert.match(dialog, /<Checkbox\s+id=\{id\('merge-new-secret'\)\}[\s\S]*?\/>\s*New keys are secret\s*<\/Label>/);
 		assert.match(dialog, /<Button type="submit" form=\{id\('add-form'\)\}>Add variable<\/Button>/);
 		assert.match(dialog, /<Button type="submit" form=\{id\('merge-form'\)\}>Add variables<\/Button>/);
 		assert.equal(dialog.match(/>Cancel<\/Dialog\.Close>/g)?.length, 1);

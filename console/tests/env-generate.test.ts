@@ -23,9 +23,10 @@ import {
 } from '../src/lib/env-generate.ts';
 import { dotenvPairs, dotenvWarnings, envValueWarnings } from '../src/lib/env-lint.ts';
 import { envRefHints, scanEnvRefs } from '../src/lib/env-references.ts';
+import { looksSecret, looksSecretLine, secretLookingKeys, suggestedSecret } from '../src/lib/env-secret-name.ts';
 import { envSource } from '../src/lib/env-precedence.ts';
 import { parseEnvSet, parseEnvSetList, parseHostPrograms } from '../src/lib/server/shape.ts';
-import { addFailed, addIsSecret, addKeyError, addKeyExistsMessage, initialAddDraft, setAddSource } from '../src/routes/projects/[id]/env-add-variable.ts';
+import { addFailed, addIsSecret, addKeyError, addKeyExistsMessage, addKeyTyped, addTabFailed, initialAddDraft, initialAddVariables, pasteTyped, placeholderRule, setAddSecret, setAddSource } from '../src/routes/projects/[id]/env-add-variable.ts';
 import EnvSetTable from '../src/routes/projects/[id]/EnvSetTable.svelte';
 import { actions as projectActions } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
@@ -130,7 +131,7 @@ describe('generate for a new key (api-v1 v1.27 item 1)', () => {
 		assert.equal(failed.error, 'refused');
 		const dialog = source('EnvAddVariablesDialog.svelte');
 		assert.match(dialog, /<Input type="hidden" name="generate_kind" value=\{view\.draft\.kind\} \/>/);
-		assert.match(dialog, /checked=\{secretShown\}\s*disabled=\{generating\}/);
+		assert.match(dialog, /checked=\{secretShown\}\s*disabled=\{generating \|\| placeholder\.secret !== null\}/);
 		assert.match(dialog, /if \(outcome === 'added' && generated\) onGenerated\(key\)/);
 		// The pressed item cannot be unpressed (getter/setter bind ignores ''), and the select is labelled Kind.
 		assert.match(dialog, /bind:value=\{\s*\(\) => view\.draft\.source,/);
@@ -454,5 +455,105 @@ describe('deploy dialog env_hash note (agent-protocol v1.14)', () => {
 		assert.equal(parseHostPrograms({ ...hello, env_hash: true })?.env_hash, true);
 		assert.equal(parseHostPrograms({ ...hello, env_hash: 'yes' }), null);
 		// The Deploy dialog render is in shared-networks.test.ts (a host without env_hash or shared_networks).
+	});
+});
+
+describe('Needs value badge (api-v1 v1.27 item 4)', () => {
+	const PLACEHOLDERS: EnvSet = {
+		name: 'mail',
+		keys: [
+			{ key: 'SMTP_PASSWORD', is_secret: true, value: null, preview: '••••', reveal_pending: false, needs_value: true },
+			{ key: 'SMTP_HOST', is_secret: false, value: '', preview: null, reveal_pending: false, needs_value: true },
+			{ key: 'SMTP_PORT', is_secret: false, value: '587', preview: null, reveal_pending: false, needs_value: false }
+		],
+		updated_at: '2026-11-15T10:00:00Z',
+		updated_by: USER.id
+	};
+
+	test('placeholders show the badge, and Edit is described by it', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(EnvSetTable, { props: { set: PLACEHOLDERS, ...TABLE_PROPS } }).body.replaceAll(/<!--[^>]*-->/g, '');
+		assert.equal(html.match(/>Needs value</g)?.length, 2);
+		const describedByOf = (key: string) => {
+			const at = html.indexOf(`aria-label="Edit ${key}"`);
+			const start = html.lastIndexOf('<button', at);
+			return html.slice(start, at).match(/aria-describedby="([^"]+)"/)?.[1];
+		};
+		for (const key of ['SMTP_PASSWORD', 'SMTP_HOST']) {
+			const id = describedByOf(key);
+			assert.ok(id, `Edit ${key} has no description`);
+			assert.equal(html.includes(`id="${id}">Needs value<`), true, `${id} is not the badge`);
+		}
+		assert.equal(describedByOf('SMTP_PORT'), undefined);
+	});
+});
+
+describe('secret suggestion by name (spec rev 3 §3.4)', () => {
+	test('the name rule: ends in _KEY, _SECRET, _TOKEN or _PASSWORD, or contains PASSWORD; case-insensitive', () => {
+		for (const key of ['API_KEY', 'JWT_SECRET', 'GH_TOKEN', 'DB_PASSWORD', 'PASSWORD', 'PASSWORD_FILE', 'MYPASSWORDX', 'api_key', 'Db_Password', ' GH_TOKEN ']) {
+			assert.equal(looksSecret(key), true, key);
+		}
+		for (const key of ['', 'KEY', 'SECRET', 'TOKEN', 'KEYS', 'API_KEYS', 'TOKEN_URL', 'SECRET_PATH', 'HOST', 'PASS', 'DB_PASS']) {
+			assert.equal(looksSecret(key), false, key);
+		}
+	});
+
+	test('paste: new keys that look secret, in order, once; the line names keys only', () => {
+		const paste = 'HOST=x\nAPI_KEY=abc\n# OLD_TOKEN=y\nexport DB_PASSWORD="p"\nAPI_KEY=again\nGH_TOKEN=t\n';
+		assert.deepEqual(secretLookingKeys(paste), ['API_KEY', 'DB_PASSWORD', 'GH_TOKEN']);
+		assert.deepEqual(secretLookingKeys(paste, ['GH_TOKEN']), ['API_KEY', 'DB_PASSWORD']);
+		assert.equal(looksSecretLine(['API_KEY', 'DB_PASSWORD']), 'Looks secret: API_KEY, DB_PASSWORD');
+		assert.equal(looksSecretLine([]), '');
+	});
+
+	test('the box follows the suggestion until the user sets it', () => {
+		assert.equal(suggestedSecret(false, false, true), true);
+		assert.equal(suggestedSecret(true, false, false), false);
+		assert.equal(suggestedSecret(false, true, true), false);
+		assert.equal(suggestedSecret(true, true, false), true);
+		let draft = addKeyTyped({ ...initialAddDraft(), key: 'DB_PASSWORD' });
+		assert.equal(draft.secret, true);
+		draft = addKeyTyped({ ...draft, key: 'DB_HOST' });
+		assert.equal(draft.secret, false);
+		draft = setAddSecret({ ...draft, key: 'DB_PASSWORD' }, false);
+		assert.equal(addKeyTyped(draft).secret, false, 'an unticked box stays unticked');
+		let view = pasteTyped({ ...initialAddVariables(), paste: 'API_KEY=x\n' }, []);
+		assert.equal(view.pasteSecret, true);
+		view = pasteTyped({ ...view, paste: 'HOST=x\n' }, []);
+		assert.equal(view.pasteSecret, false);
+		view = pasteTyped({ ...view, pasteSecret: false, pasteSecretTouched: true, paste: 'API_KEY=x\n' }, []);
+		assert.equal(view.pasteSecret, false);
+		assert.equal(initialAddDraft().secret, false);
+	});
+
+	test('the dialogs show the line under the box and link it', () => {
+		const add = source('EnvAddVariablesDialog.svelte');
+		assert.match(add, /oninput=\{keyTyped\}/);
+		assert.match(add, /let draft = addKeyTyped\(view\.draft\);/);
+		assert.match(add, /aria-describedby=\{pasteLooksSecret \? id\('merge-looks-secret'\) : undefined\}/);
+		const set = source('EnvSetDialog.svelte');
+		assert.match(set, /aria-describedby=\{looksSecretText \? 'env-set-looks-secret' : undefined\}/);
+	});
+});
+
+describe('filling placeholders in Add variables (api-v1 v1.27 item 4)', () => {
+	test('a secret placeholder stays secret; a plain one stays plain and cannot be generated', () => {
+		assert.deepEqual(placeholderRule('SMTP_PASSWORD', ['SMTP_PASSWORD'], ['SMTP_HOST']), { secret: true, canGenerate: true, note: 'A secret placeholder stays secret.' });
+		assert.deepEqual(placeholderRule(' SMTP_HOST ', ['SMTP_PASSWORD'], ['SMTP_HOST']), { secret: false, canGenerate: false, note: 'This placeholder is plain; make it secret first to generate.' });
+		assert.deepEqual(placeholderRule('NEW_KEY', ['SMTP_PASSWORD'], ['SMTP_HOST']), { secret: null, canGenerate: true, note: '' });
+		const dialog = source('EnvAddVariablesDialog.svelte');
+		assert.match(dialog, /disabled=\{!placeholder\.canGenerate\}/);
+		assert.match(dialog, /<p id=\{id\('add-placeholder'\)\}[^>]*>\{placeholder\.note\}<\/p>/);
+		assert.equal(/aria-label="Secret"/.test(dialog), false);
+	});
+
+	test('a failed add clears a typed value that was secret only because of the placeholder', () => {
+		const draft = { ...initialAddDraft(), key: 'SMTP_PASSWORD', value: 'typed-secret', secret: false };
+		const failed = addFailed(draft, 'refused', 'form', true);
+		assert.equal(failed.value, '');
+		assert.equal(failed.retype, true);
+		assert.equal(addFailed(draft, 'refused').value, 'typed-secret');
+		const view = addTabFailed({ ...initialAddVariables(), draft }, 'refused', true);
+		assert.equal(view.draft.value, '');
 	});
 });

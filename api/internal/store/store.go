@@ -817,10 +817,15 @@ type Store interface {
 	RecordAutoAction(ctx context.Context, in AutoAction) (row ImageDeploy, inserted bool, err error)
 
 	// Env sets. Value flags (api-v1 v1.27 item 2): every value write in
-	// PutEnvSet, CreateEnvSet, MergeEnvSet, PutEnvKey, and MakeEnvKeysSecret
-	// stores needs_value, reveal_pending, and generated false, except a
-	// PutEnvKey with Generated on a secret key, which stores reveal_pending
-	// and generated true. RevealEnvKey clears reveal_pending only.
+	// PutEnvSet, CreateEnvSet, MergeEnvSet, and PutEnvKey stores needs_value,
+	// reveal_pending, and generated false, except a PutEnvKey with Generated
+	// on a secret key, which stores reveal_pending and generated true.
+	// MakeEnvKeysSecret stores reveal_pending and generated false and keeps
+	// needs_value: making a placeholder secret is not a value write.
+	// CreateEnvSetNames stores placeholders with needs_value; duplicate or
+	// invalid key names are ErrInvalid. PutEnvSet with "" for an existing
+	// secret key is ErrSecretEmpty and writes nothing, as for MergeEnvSet.
+	// RevealEnvKey clears reveal_pending only.
 	//
 	// ListEnvKeyNames returns key names only, including sets that have none.
 	ListEnvKeyNames(ctx context.Context, projectID uuid.UUID) (map[string][]string, error)
@@ -843,7 +848,8 @@ type Store interface {
 	// It returns the set and the names new to the set, sorted.
 	MergeEnvSet(ctx context.Context, projectID uuid.UUID, name string, keys []EnvSecret, actor uuid.UUID, at time.Time, newKeysSecret bool) (EnvSet, []string, error)
 	// PutEnvKey creates the set when it is absent and upserts one key.
-	// A Generated put on an existing key is ErrKeyExists, checked first.
+	// A Generated put on an existing key is ErrKeyExists, checked first,
+	// unless the key is a needs_value placeholder, which it fills (v1.27).
 	// A Secret that differs from the stored flag is ErrSecretFixed.
 	// An empty Plain for an existing secret key is ErrSecretEmpty; nothing is written.
 	// The bool is true when the key was created. Only a created key rehashes.
@@ -861,6 +867,17 @@ type Store interface {
 	// is ErrNotFound; a key that was not pending is ErrConflict. At most one
 	// call succeeds per generated write.
 	RevealEnvKey(ctx context.Context, projectID uuid.UUID, name, key string) (EnvMaterial, error)
+	// CreateEnvSetNames creates a set from key names only (api-v1 v1.27 item
+	// 4): generated keys and placeholders (see EnvKeyCreate). An existing set
+	// is ErrConflict. With confirm (a token hash), the env set plan is checked
+	// and deleted in the same transaction: a missing, used, or expired plan,
+	// or another actor's, is ErrNotFound. Any error writes nothing and leaves
+	// the plan unused.
+	CreateEnvSetNames(ctx context.Context, projectID uuid.UUID, name string, keys []EnvKeyCreate, confirm []byte, actor uuid.UUID, at time.Time) (EnvSet, error)
+	// PutEnvSetConfirmation inserts one env set plan and drops expired ones.
+	// A duplicate token hash is ErrConflict.
+	PutEnvSetConfirmation(ctx context.Context, hash []byte, c EnvSetConfirmation) error
+	GetEnvSetConfirmation(ctx context.Context, hash []byte) (EnvSetConfirmation, error)
 	// DeleteEnvKey removes one key and leaves the set, including an empty set.
 	// A missing set or key is ErrNotFound. Referencing entries are rehashed.
 	DeleteEnvKey(ctx context.Context, projectID uuid.UUID, name, key string, actor uuid.UUID, at time.Time) error

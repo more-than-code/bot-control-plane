@@ -169,3 +169,26 @@ func TestPresentRedactsStatusLines(t *testing.T) {
 		t.Fatalf("structured %s", out)
 	}
 }
+
+func TestEnvRefusalUnredacted(t *testing.T) {
+	for _, msg := range []string{
+		"env SMTP_PASSWORD in set mail has no value yet; set it in the console",
+		"env DATABASE_URL references ${POSTGRES_PASSWORD}, which is not set for this entry",
+		"env SECRET_URL has a reference that is not set for this entry",
+		"env API_TOKEN has an unterminated ${",
+		"env DB_PASSWORD is longer than 4096 bytes after references",
+	} {
+		if !envRefusal(msg) {
+			t.Fatalf("not recognized: %q", msg)
+		}
+	}
+	for _, msg := range []string{
+		"env SMTP_PASSWORD in set mail has no value yet; set it in the console token=abc",
+		"password=hunter2",
+		"env lower in set mail has no value yet; set it in the console",
+	} {
+		if envRefusal(msg) {
+			t.Fatalf("accepted %q", msg)
+		}
+	}
+}
