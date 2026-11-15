@@ -85,6 +85,8 @@ type Mem struct {
 	projectFiles map[string]fileRec
 	imageDeploys map[uuid.UUID]imageDeployRec
 	autoActions  map[uuid.UUID]struct{}
+	// valueRequests is keyed by hashKey(id hash); see value_requests.go.
+	valueRequests map[string]store.ValueRequest
 }
 
 type sessionRec struct {

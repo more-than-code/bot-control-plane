@@ -54,6 +54,8 @@ var delegatedDenyPatterns = []string{
 	"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}",
 	"POST /v1/projects/{id}/env-sets/{set}/secret",
 	"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal",
+	"POST /v1/value-requests/{request_id}/fill",
+	"POST /v1/value-requests/{request_id}/decline",
 }
 
 var delegatedAllowPatterns = []string{
@@ -196,6 +198,14 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 				return envSnap(t, w, sc.project.ID, "svc")
 			}},
 		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal", http.MethodPost, "/v1/projects/" + project + "/env-sets/svc/keys/TOKEN/reveal",
+			"", func(t *testing.T) string {
+				return envSnap(t, w, sc.project.ID, "svc")
+			}},
+		{"POST /v1/value-requests/{request_id}/fill", http.MethodPost, "/v1/value-requests/" + strings.Repeat("A", 43) + "/fill",
+			`{"value":"nope"}`, func(t *testing.T) string {
+				return envSnap(t, w, sc.project.ID, "svc")
+			}},
+		{"POST /v1/value-requests/{request_id}/decline", http.MethodPost, "/v1/value-requests/" + strings.Repeat("A", 43) + "/decline",
 			"", func(t *testing.T) string {
 				return envSnap(t, w, sc.project.ID, "svc")
 			}},

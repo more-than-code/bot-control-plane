@@ -823,7 +823,9 @@ func storedEnvKey(key string, secret bool, plain string) store.EnvKey {
 
 // upsertEnvValue writes one value. Every write clears needs_value. generated
 // is true only for an API-generated secret and sets both reveal_pending and
-// generated (api-v1 v1.27 item 2); a typed value stores both false.
+// generated (api-v1 v1.27 item 2); a typed value stores both false. A secret
+// write also sets is_secret: a no-op for a key that is already secret, and
+// how a value-request fill turns a plain placeholder into a secret (v1.28).
 func upsertEnvValue(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name, key string, secret bool, plain string, nonce, ciphertext []byte, version int, insert, generated bool) error {
 	if secret {
 		if insert {
@@ -834,7 +836,7 @@ VALUES ($1::uuid, $2, $3, true, NULL, $4, $5, $6, $7, false, $7)
 		}
 		tag, err := execTag(ctx, tx, `
 UPDATE app.env_values
-SET value = NULL, nonce = $4, ciphertext = $5, key_version = $6, reveal_pending = $7, needs_value = false, generated = $7
+SET is_secret = true, value = NULL, nonce = $4, ciphertext = $5, key_version = $6, reveal_pending = $7, needs_value = false, generated = $7
 WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
 `, projectID.String(), name, key, nonce, ciphertext, version, generated)
 		if err != nil {

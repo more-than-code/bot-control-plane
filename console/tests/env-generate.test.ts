@@ -133,11 +133,14 @@ describe('generate for a new key (api-v1 v1.27 item 1)', () => {
 		assert.match(dialog, /<Input type="hidden" name="generate_kind" value=\{view\.draft\.kind\} \/>/);
 		assert.match(dialog, /checked=\{secretShown\}\s*disabled=\{generating \|\| placeholder\.secret !== null\}/);
 		assert.match(dialog, /if \(outcome === 'added' && generated\) onGenerated\(key\)/);
+		// The toggle and kind select are the shared ValueSourceFields (also on the value-request fill page).
+		assert.match(dialog, /<ValueSourceFields\s+idOf=\{\(part\) => id\(`add-\$\{part\}`\)\}\s+source=\{view\.draft\.source\}/);
+		const fields = readFileSync(new URL('../src/lib/components/ValueSourceFields.svelte', import.meta.url), 'utf8');
 		// The pressed item cannot be unpressed (getter/setter bind ignores ''), and the select is labelled Kind.
-		assert.match(dialog, /bind:value=\{\s*\(\) => view\.draft\.source,/);
-		assert.match(dialog, /<Label for=\{id\('add-kind'\)\}>Kind<\/Label>/);
+		assert.match(fields, /bind:value=\{\s*\(\) => source,/);
+		assert.match(fields, /<Label for=\{idOf\('kind'\)\}>Kind<\/Label>/);
 		// The value input is not rendered while generating, so nothing typed is posted.
-		assert.match(dialog, /\{#if generating\}[^]*?\{:else\}[^]*?id=\{id\('add-value'\)\}/);
+		assert.match(dialog, /\{#if !generating\}[^]*?id=\{id\('add-value'\)\}/);
 	});
 });
 
@@ -542,7 +545,8 @@ describe('filling placeholders in Add variables (api-v1 v1.27 item 4)', () => {
 		assert.deepEqual(placeholderRule(' SMTP_HOST ', ['SMTP_PASSWORD'], ['SMTP_HOST']), { secret: false, canGenerate: false, note: 'This placeholder is plain; make it secret first to generate.' });
 		assert.deepEqual(placeholderRule('NEW_KEY', ['SMTP_PASSWORD'], ['SMTP_HOST']), { secret: null, canGenerate: true, note: '' });
 		const dialog = source('EnvAddVariablesDialog.svelte');
-		assert.match(dialog, /disabled=\{!placeholder\.canGenerate\}/);
+		assert.match(dialog, /generateDisabled=\{!placeholder\.canGenerate\}/);
+		assert.match(readFileSync(new URL('../src/lib/components/ValueSourceFields.svelte', import.meta.url), 'utf8'), /disabled=\{generateDisabled\}/);
 		assert.match(dialog, /<p id=\{id\('add-placeholder'\)\}[^>]*>\{placeholder\.note\}<\/p>/);
 		assert.equal(/aria-label="Secret"/.test(dialog), false);
 	});

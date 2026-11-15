@@ -76,11 +76,15 @@ const (
 	ActionEnvSetDelete             = "env_set.delete"
 	ActionEnvSetList               = "env_set.list"
 	ActionEnvSetGet                = "env_set.get"
-	ActionRegistryPut              = "registry.put"
-	ActionRegistryDelete           = "registry.delete"
-	ActionFilePut                  = "file.put"
-	ActionFileDelete               = "file.delete"
-	ActionDelegatedDenied          = "delegated.denied"
+	// Value requests (api-v1 v1.28). The fill itself is env_set.key_put
+	// with detail via "value_request".
+	ActionEnvSetValueRequested       = "env_set.value_requested"
+	ActionEnvSetValueRequestDeclined = "env_set.value_request_declined"
+	ActionRegistryPut                = "registry.put"
+	ActionRegistryDelete             = "registry.delete"
+	ActionFilePut                    = "file.put"
+	ActionFileDelete                 = "file.delete"
+	ActionDelegatedDenied            = "delegated.denied"
 	// ActionServiceOwnerConflict is an owned services report that would have
 	// moved a row of another project, or an org-level row (review A2).
 	ActionServiceOwnerConflict = "service.owner_conflict"
