@@ -1,14 +1,23 @@
 // Package seal encrypts env values, registry tokens, and secret project
-// files at rest. Plaintext, keys, and nonces are never logged.
+// files at rest, and derives the keyed env hash of a resolved env
+// (agent-protocol v1.14). Plaintext, keys, and nonces are never logged.
 package seal
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
+	"sort"
 )
+
+// envHashInfo is the HKDF info of the env hash key (agent-protocol v1.14).
+const envHashInfo = "deploybot env hash v1"
 
 // KeyVersion is the only key version this process writes.
 const KeyVersion = 1
@@ -86,4 +95,32 @@ func (b *Box) Open(aad string, nonce, ciphertext []byte) ([]byte, error) {
 		return nil, errors.New("decrypt failed")
 	}
 	return plain, nil
+}
+
+// EnvHash is the agent-protocol v1.14 env_hash of a resolved env: lowercase
+// hex HMAC-SHA256 over "KEY=value\n" lines in byte order of KEY, keyed by
+// HKDF-SHA256(secrets key, no salt, info envHashInfo). The key is derived
+// from the secrets key, so the hash cannot be checked offline against a
+// guessed value.
+func (b *Box) EnvHash(env map[string]string) (string, error) {
+	if b == nil {
+		return "", errors.New("secrets key not configured")
+	}
+	key, err := hkdf.Key(sha256.New, b.key, nil, envHashInfo, sha256.Size)
+	if err != nil {
+		return "", errors.New("env hash failed")
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	mac := hmac.New(sha256.New, key)
+	for _, k := range keys {
+		mac.Write([]byte(k))
+		mac.Write([]byte{'='})
+		mac.Write([]byte(env[k]))
+		mac.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(mac.Sum(nil)), nil
 }

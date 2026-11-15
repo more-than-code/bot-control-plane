@@ -1,4 +1,5 @@
 import { ENV_KEY } from '$lib/catalog';
+import type { GenerateKind } from '$lib/env-generate';
 import { RETYPE_VALUE } from './env-set-panel';
 
 /** Draft of the One variable tab. Secret is off by default (Joe 2026-10-25). */
@@ -11,10 +12,24 @@ export type AddDraft = {
 	errorField: 'key' | 'form' | null;
 	/** A secret value was cleared after a failure and must be pasted again. */
 	retype: boolean;
+	/** `generate`: the API makes the value (api-v1 v1.27 item 1); the key is secret and no value is sent. */
+	source: 'value' | 'generate';
+	kind: GenerateKind;
 };
 
 export function initialAddDraft(): AddDraft {
-	return { key: '', value: '', secret: false, error: '', errorField: null, retype: false };
+	return { key: '', value: '', secret: false, error: '', errorField: null, retype: false, source: 'value', kind: 'password' };
+}
+
+/** Switch between typing a value and generating one. Generate drops a typed value so it is never sent. */
+export function setAddSource(draft: AddDraft, source: 'value' | 'generate'): AddDraft {
+	if (source === draft.source) return draft;
+	return source === 'generate' ? { ...draft, source, value: '', retype: false } : { ...draft, source };
+}
+
+/** Secret as shown and sent: always on for a generated value. */
+export function addIsSecret(draft: AddDraft): boolean {
+	return draft.source === 'generate' || draft.secret;
 }
 
 /** Flip Secret. The typed value stays; the paste-again hint no longer applies. */
@@ -46,7 +61,8 @@ export function addKeyRefused(draft: AddDraft, message: string): AddDraft {
 
 /** A failed add keeps the key and the message. A secret value is cleared and asked for again. */
 export function addFailed(draft: AddDraft, message: string, errorField: 'key' | 'form' = 'form'): AddDraft {
-	if (!draft.secret) return { ...draft, error: message, errorField, retype: false };
+	// A generated value or a plain one has nothing to retype.
+	if (draft.source === 'generate' || !draft.secret) return { ...draft, error: message, errorField, retype: false };
 	return { ...draft, value: '', error: message, errorField, retype: draft.value !== '' };
 }
 

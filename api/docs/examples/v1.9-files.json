@@ -76,6 +76,7 @@
     "docker": true,
     "docker_health": false,
     "enabled": true,
+    "env_hash": false,
     "files": true,
     "health_policy": false,
     "healthcheck": false,

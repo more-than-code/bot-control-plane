@@ -17,9 +17,9 @@ const PLAIN = 'visible-plain-value-17';
 const SET: EnvSet = {
 	name: 'app',
 	keys: [
-		{ key: 'API_TOKEN', is_secret: true, value: null, preview: 'supe…' },
-		{ key: 'DB_URL', is_secret: false, value: PLAIN, preview: null },
-		{ key: 'LOG_LEVEL', is_secret: false, value: 'debug', preview: null }
+		{ key: 'API_TOKEN', is_secret: true, value: null, preview: 'supe…', reveal_pending: false, needs_value: false },
+		{ key: 'DB_URL', is_secret: false, value: PLAIN, preview: null, reveal_pending: false, needs_value: false },
+		{ key: 'LOG_LEVEL', is_secret: false, value: 'debug', preview: null, reveal_pending: false, needs_value: false }
 	],
 	updated_at: '2026-10-25T10:00:00Z',
 	updated_by: USER.id
@@ -30,7 +30,8 @@ const TABLE_PROPS = {
 	deleteAction: '?/deleteEnvKey',
 	deleteSetAction: '?/deleteEnvSet',
 	makeSecretAction: '?/makeEnvKeysSecret',
-	mergeAction: '?/mergeEnvSet'
+	mergeAction: '?/mergeEnvSet',
+	revealAction: '?/revealEnvKey'
 };
 
 function decode(value: string): string {
@@ -69,7 +70,7 @@ describe('Make secret row action (api-v1 v1.17)', () => {
 		assert.equal(html.includes('Make secret…'), false);
 		assert.equal(html.match(/<th\b/g)?.length, 4);
 		// A key name that reads like a delete still gets the lock, not the destructive style.
-		const odd: EnvSet = { ...SET, keys: [{ key: 'DELETE_ME', is_secret: false, value: 'x', preview: null }] };
+		const odd: EnvSet = { ...SET, keys: [{ key: 'DELETE_ME', is_secret: false, value: 'x', preview: null, reveal_pending: false, needs_value: false }] };
 		const oddTag = buttonTag(decode(render(EnvSetTable, { props: { set: odd, ...TABLE_PROPS } }).body), 'aria-label="Make DELETE_ME secret"');
 		assert.equal(oddTag.includes('text-destructive'), false);
 	});

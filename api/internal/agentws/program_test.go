@@ -155,3 +155,24 @@ func TestParseProgramsProjectsBoundaries(t *testing.T) {
 		}
 	}
 }
+
+// api-v1 v1.27 item 8, agent-protocol v1.14 item 1: env_hash from hello.
+func TestParseProgramsEnvHash(t *testing.T) {
+	base := `{"enabled":true,"run_as":["joe"],"allow_shell":false,"policy_hash":"abc","images":true,"docker":true}`
+	old, ok := parsePrograms(json.RawMessage(base))
+	if !ok || old == nil || old.EnvHash {
+		t.Fatalf("older agent %#v %v", old, ok)
+	}
+	on, ok := parsePrograms(json.RawMessage(base[:len(base)-1] + `,"env_hash":true}`))
+	if !ok || on == nil || !on.EnvHash {
+		t.Fatalf("new agent %#v %v", on, ok)
+	}
+	if _, ok := parsePrograms(json.RawMessage(base[:len(base)-1] + `,"env_hash":"yes"}`)); ok {
+		t.Fatal("accepted a non-bool env_hash")
+	}
+	// A 0.2.10 agent sends both v1.13 shared_networks and v1.14 env_hash.
+	both, ok := parsePrograms(json.RawMessage(base[:len(base)-1] + `,"env_hash":true,"shared_networks":[{"name":"dd","subnet":"10.200.10.0/24","projects":["acme"]}]}`))
+	if !ok || both == nil || !both.EnvHash || len(both.SharedNetworks) != 1 || both.SharedNetworks[0].Name != "dd" || len(both.SharedNetworks[0].Projects) != 1 {
+		t.Fatalf("both keys %#v %v", both, ok)
+	}
+}

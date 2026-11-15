@@ -249,14 +249,15 @@ func (s *Server) handleEnvKeyPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Value    string `json:"value"`
-		IsSecret *bool  `json:"is_secret"`
+		Value    *string           `json:"value"`
+		Generate *catalog.Generate `json:"generate"`
+		IsSecret *bool             `json:"is_secret"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if err := catalog.ValidateEnvValue(body.Value); err != nil {
-		s.writeField(w, err)
+	plain, secretFlag, ok := s.keyPutValue(w, body.Value, body.Generate, body.IsSecret)
+	if !ok {
 		return
 	}
 	if s.Secrets == nil {
@@ -264,19 +265,24 @@ func (s *Server) handleEnvKeyPut(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "unavailable", errSecretsKey.Error())
 		return
 	}
-	sealed, err := s.sealValue(id, name, key, body.Value)
+	sealed, err := s.sealValue(id, name, key, plain)
 	if err != nil {
 		s.secretWriteErr(w, err)
 		return
 	}
 	stored, created, err := s.Store.PutEnvKey(r.Context(), id, name, store.EnvKeyPut{
 		Key:        key,
-		Plain:      body.Value,
-		Secret:     body.IsSecret,
+		Plain:      plain,
+		Secret:     secretFlag,
 		Nonce:      sealed.Nonce,
 		Ciphertext: sealed.Ciphertext,
 		KeyVersion: sealed.KeyVersion,
+		Generated:  body.Generate != nil,
 	}, p.User.ID, s.now())
+	if errors.Is(err, store.ErrKeyExists) {
+		writeCode(w, "bad_request", fmt.Sprintf("%s already has a value; edit it to change it", key))
+		return
+	}
 	if errors.Is(err, store.ErrSecretFixed) || errors.Is(err, store.ErrSecretEmpty) {
 		writeCode(w, "bad_request", err.Error())
 		return
@@ -285,12 +291,123 @@ func (s *Server) handleEnvKeyPut(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, err, false)
 		return
 	}
+	detail := map[string]any{"set": name, "key": key, "created": created}
+	if body.Generate != nil {
+		detail["generated"] = body.Generate.Kind
+	}
 	s.auditOK(r.Context(), p, store.AuditRow{
 		ProjectID: idPtr(id),
 		Action:    audit.ActionEnvSetKeyPut,
-		Detail:    map[string]any{"set": name, "key": key, "created": created},
+		Detail:    detail,
 	})
-	writeOK(w, http.StatusOK, envKeyBody(stored.Key, stored.IsSecret, body.Value))
+	item := envKeyBody(stored.Key, stored.IsSecret, plain, stored.Generated)
+	item.RevealPending = stored.RevealPending
+	writeOK(w, http.StatusOK, item)
+}
+
+// keyPutValue resolves a key PUT body to the value to store and the secret
+// flag to request (api-v1 v1.27 item 1): value xor generate, a generated
+// value is secret, and a body with neither stores "" as in v1.19. ok is
+// false when it wrote a refusal.
+func (s *Server) keyPutValue(w http.ResponseWriter, value *string, gen *catalog.Generate, isSecret *bool) (string, *bool, bool) {
+	if gen == nil {
+		plain := ""
+		if value != nil {
+			plain = *value
+		}
+		if err := catalog.ValidateEnvValue(plain); err != nil {
+			s.writeField(w, err)
+			return "", nil, false
+		}
+		return plain, isSecret, true
+	}
+	if value != nil {
+		writeCode(w, "bad_request", "send value or generate, not both")
+		return "", nil, false
+	}
+	if err := gen.Validate(); err != nil {
+		s.writeField(w, err)
+		return "", nil, false
+	}
+	if isSecret != nil && !*isSecret {
+		writeCode(w, "bad_request", "a generated value is secret")
+		return "", nil, false
+	}
+	plain, err := gen.NewValue()
+	if err != nil {
+		s.logger().Error("generate failed")
+		writeCode(w, "error", "internal error")
+		return "", nil, false
+	}
+	t := true
+	return plain, &t, true
+}
+
+// secretPreview is the preview of one secret value. A generated value is
+// always four bullets, so no part of it shows outside reveal (v1.27 item 2).
+func secretPreview(plain string, generated bool) string {
+	if generated {
+		return catalog.SecretPreview("")
+	}
+	return catalog.SecretPreview(plain)
+}
+
+// handleEnvKeyReveal returns a generated value once (api-v1 v1.27 item 3).
+// The route wrapper refuses delegated sessions. The store clears
+// reveal_pending in one statement, so at most one call per generation
+// gets the value.
+func (s *Server) handleEnvKeyReveal(w http.ResponseWriter, r *http.Request) {
+	p, id, ok := s.catalogProject(w, r)
+	if !ok {
+		return
+	}
+	if err := authz.Authorize(r.Context(), p.User.ID, id, authz.CapMembers); err != nil {
+		s.writeAuth(w, err)
+		return
+	}
+	if !requireConsole(w, p) {
+		return
+	}
+	name, ok := envSetName(w, r)
+	if !ok {
+		return
+	}
+	key, ok := envKeyName(w, r)
+	if !ok {
+		return
+	}
+	if s.Secrets == nil {
+		s.logger().Error("secrets key not configured")
+		writeCode(w, "unavailable", errSecretsKey.Error())
+		return
+	}
+	mat, err := s.Store.RevealEnvKey(r.Context(), id, name, key)
+	switch {
+	case errors.Is(err, store.ErrConflict):
+		writeCode(w, "conflict", fmt.Sprintf("the value of %s was already shown or was not generated; edit it to set a new value", key))
+		return
+	case errors.Is(err, store.ErrNotFound):
+		writeCode(w, "not_found", "not found")
+		return
+	case err != nil:
+		s.writeErr(w, err, false)
+		return
+	}
+	// The flag is already cleared. A value that does not open is not shown;
+	// editing the key sets a new one.
+	plain, err := s.openEnv(id, name, mat)
+	if err != nil {
+		s.secretWriteErr(w, err)
+		return
+	}
+	// A client disconnect must not drop the audit row of a value that left.
+	s.auditOK(context.WithoutCancel(r.Context()), p, store.AuditRow{
+		ProjectID: idPtr(id),
+		Action:    audit.ActionEnvSetKeyReveal,
+		Detail:    map[string]any{"set": name, "key": key},
+	})
+	// writeJSON sends Cache-Control: no-store on every answer, this one included.
+	writeOK(w, http.StatusOK, map[string]any{"key": key, "value": plain})
 }
 
 func (s *Server) handleEnvKeyDelete(w http.ResponseWriter, r *http.Request) {
@@ -620,17 +737,17 @@ func fillPreviews(set store.EnvSet, sealed []store.EnvSecret) store.EnvSet {
 		if !set.Keys[i].IsSecret {
 			continue
 		}
-		preview := catalog.SecretPreview(plain[set.Keys[i].Key])
+		preview := secretPreview(plain[set.Keys[i].Key], set.Keys[i].Generated)
 		set.Keys[i].Preview = &preview
 		set.Keys[i].Value = nil
 	}
 	return set
 }
 
-func envKeyBody(key string, secret bool, plain string) store.EnvKey {
+func envKeyBody(key string, secret bool, plain string, generated bool) store.EnvKey {
 	item := store.EnvKey{Key: key, IsSecret: secret}
 	if secret {
-		preview := catalog.SecretPreview(plain)
+		preview := secretPreview(plain, generated)
 		item.Preview = &preview
 		return item
 	}
@@ -679,7 +796,7 @@ func (s *Server) withPreviews(w http.ResponseWriter, r *http.Request, projectID 
 			s.secretWriteErr(w, err)
 			return store.EnvSet{}, false
 		}
-		preview := catalog.SecretPreview(plain)
+		preview := secretPreview(plain, mat.Generated)
 		set.Keys[i].Preview = &preview
 		set.Keys[i].Value = nil
 	}

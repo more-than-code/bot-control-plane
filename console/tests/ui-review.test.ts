@@ -60,7 +60,7 @@ function host(): Host {
 		revoked_at: null,
 		access_level: 'deploy',
 		access: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null, shared_networks: null }
+		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null, shared_networks: null, env_hash: false }
 	};
 }
 
@@ -141,14 +141,14 @@ test('a secret preview has hidden text and the glyphs are hidden from assistive 
 	const set: EnvSet = {
 		name: 'app',
 		keys: [
-			{ key: 'API_TOKEN', is_secret: true, value: null, preview: 'supe\u2026' },
-			{ key: 'EMPTY', is_secret: true, value: null, preview: null }
+			{ key: 'API_TOKEN', is_secret: true, value: null, preview: 'supe\u2026', reveal_pending: false, needs_value: false },
+			{ key: 'EMPTY', is_secret: true, value: null, preview: null, reveal_pending: false, needs_value: false }
 		],
 		updated_at: '2026-10-14T00:00:00Z',
 		updated_by: '00000000-0000-4000-8000-0000000000d1'
 	};
 	const html = render(EnvSetTable, {
-		props: { set, putAction: '?/putEnvKey', deleteAction: '?/deleteEnvKey', deleteSetAction: '?/deleteEnvSet', makeSecretAction: '?/makeEnvKeysSecret', mergeAction: '?/mergeEnvSet' }
+		props: { set, putAction: '?/putEnvKey', deleteAction: '?/deleteEnvKey', deleteSetAction: '?/deleteEnvSet', makeSecretAction: '?/makeEnvKeysSecret', mergeAction: '?/mergeEnvSet', revealAction: '?/revealEnvKey' }
 	}).body;
 	assert.equal(html.split('<span class="sr-only">secret, preview only</span>').length - 1, 2);
 	assert.equal(html.includes('aria-label="secret, preview only"'), false);

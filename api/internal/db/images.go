@@ -425,7 +425,7 @@ WHERE project_id = $1::uuid AND name = $2
 		return store.EnvSet{}, err
 	}
 	rows, err := q.Query(ctx, `
-SELECT key, is_secret, value
+SELECT key, is_secret, value, reveal_pending, needs_value, generated
 FROM app.env_values
 WHERE project_id = $1::uuid AND set_name = $2
 ORDER BY key
@@ -438,7 +438,7 @@ ORDER BY key
 	for rows.Next() {
 		var item store.EnvKey
 		var value *string
-		if err := rows.Scan(&item.Key, &item.IsSecret, &value); err != nil {
+		if err := rows.Scan(&item.Key, &item.IsSecret, &value, &item.RevealPending, &item.NeedsValue, &item.Generated); err != nil {
 			return store.EnvSet{}, mapErr(err)
 		}
 		if !item.IsSecret {
@@ -556,7 +556,7 @@ func (d *DB) MergeEnvSet(ctx context.Context, projectID uuid.UUID, name string, 
 			secret = newKeysSecret
 			created = append(created, key.Key)
 		}
-		if err := upsertEnvValue(ctx, tx, projectID, name, key.Key, secret, key.Plain, key.Nonce, key.Ciphertext, key.KeyVersion, !exists); err != nil {
+		if err := upsertEnvValue(ctx, tx, projectID, name, key.Key, secret, key.Plain, key.Nonce, key.Ciphertext, key.KeyVersion, !exists, false); err != nil {
 			return store.EnvSet{}, nil, err
 		}
 	}
@@ -617,12 +617,17 @@ FOR UPDATE
 		}
 	} else if err != nil {
 		return store.EnvKey{}, false, mapErr(err)
+	} else if in.Generated {
+		// Generate creates new keys only (v1.27 rev 3). Phase B will let it
+		// fill a needs_value placeholder; needs_value is always false today.
+		return store.EnvKey{}, false, store.ErrKeyExists
 	} else if in.Secret != nil && *in.Secret != isSecret {
 		return store.EnvKey{}, false, store.ErrSecretFixed
 	} else if isSecret && in.Plain == "" {
 		return store.EnvKey{}, false, store.ErrSecretEmpty
 	}
-	if err := upsertEnvValue(ctx, tx, projectID, name, in.Key, isSecret, in.Plain, in.Nonce, in.Ciphertext, in.KeyVersion, created); err != nil {
+	generated := in.Generated && isSecret
+	if err := upsertEnvValue(ctx, tx, projectID, name, in.Key, isSecret, in.Plain, in.Nonce, in.Ciphertext, in.KeyVersion, created, generated); err != nil {
 		return store.EnvKey{}, false, err
 	}
 	// Every write re-hashes: a new key changes key names, and a plain value
@@ -633,7 +638,10 @@ FOR UPDATE
 	if err := tx.Commit(ctx); err != nil {
 		return store.EnvKey{}, false, mapErr(err)
 	}
-	return storedEnvKey(in.Key, isSecret, in.Plain), created, nil
+	item := storedEnvKey(in.Key, isSecret, in.Plain)
+	item.RevealPending = generated
+	item.Generated = generated
+	return item, created, nil
 }
 
 func (d *DB) DeleteEnvKey(ctx context.Context, projectID uuid.UUID, name, key string, actor uuid.UUID, at time.Time) error {
@@ -726,7 +734,8 @@ FOR UPDATE
 		}
 		if err := exec(ctx, tx, `
 UPDATE app.env_values
-SET is_secret = true, value = NULL, nonce = $4, ciphertext = $5, key_version = $6
+SET is_secret = true, value = NULL, nonce = $4, ciphertext = $5, key_version = $6,
+    reveal_pending = false, needs_value = false, generated = false
 WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
 `, projectID.String(), name, key, sealed.Nonce, sealed.Ciphertext, sealed.KeyVersion); err != nil {
 			return store.EnvSet{}, nil, mapErr(err)
@@ -758,6 +767,37 @@ WHERE project_id = $1::uuid AND name = $2
 	return set, changed, nil
 }
 
+// RevealEnvKey implements store.Store.RevealEnvKey. The UPDATE ... RETURNING
+// is the single-use step: two concurrent calls cannot both see the flag.
+func (d *DB) RevealEnvKey(ctx context.Context, projectID uuid.UUID, name, key string) (store.EnvMaterial, error) {
+	mat := store.EnvMaterial{Key: key, IsSecret: true}
+	err := d.pool.QueryRow(ctx, `
+UPDATE app.env_values SET reveal_pending = false
+WHERE project_id = $1::uuid AND set_name = $2 AND key = $3 AND reveal_pending
+  AND EXISTS (SELECT 1 FROM app.projects p WHERE p.id = $1::uuid AND p.deleted_at IS NULL)
+RETURNING nonce, ciphertext, key_version, generated
+`, projectID.String(), name, key).Scan(&mat.Nonce, &mat.Ciphertext, &mat.KeyVersion, &mat.Generated)
+	if err == nil {
+		return mat, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return store.EnvMaterial{}, mapErr(err)
+	}
+	var exists bool
+	if err := d.pool.QueryRow(ctx, `
+SELECT EXISTS (
+    SELECT 1 FROM app.env_values v JOIN app.projects p ON p.id = v.project_id
+    WHERE v.project_id = $1::uuid AND v.set_name = $2 AND v.key = $3 AND p.deleted_at IS NULL
+)
+`, projectID.String(), name, key).Scan(&exists); err != nil {
+		return store.EnvMaterial{}, mapErr(err)
+	}
+	if !exists {
+		return store.EnvMaterial{}, store.ErrNotFound
+	}
+	return store.EnvMaterial{}, store.ErrConflict
+}
+
 // lockEnvSet locks one set row. A missing set is ErrNotFound.
 func lockEnvSet(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name string) error {
 	var locked string
@@ -781,19 +821,22 @@ func storedEnvKey(key string, secret bool, plain string) store.EnvKey {
 	return item
 }
 
-func upsertEnvValue(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name, key string, secret bool, plain string, nonce, ciphertext []byte, version int, insert bool) error {
+// upsertEnvValue writes one value. Every write clears needs_value. generated
+// is true only for an API-generated secret and sets both reveal_pending and
+// generated (api-v1 v1.27 item 2); a typed value stores both false.
+func upsertEnvValue(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name, key string, secret bool, plain string, nonce, ciphertext []byte, version int, insert, generated bool) error {
 	if secret {
 		if insert {
 			return mapErr(exec(ctx, tx, `
-INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, ciphertext, key_version)
-VALUES ($1::uuid, $2, $3, true, NULL, $4, $5, $6)
-`, projectID.String(), name, key, nonce, ciphertext, version))
+INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, ciphertext, key_version, reveal_pending, needs_value, generated)
+VALUES ($1::uuid, $2, $3, true, NULL, $4, $5, $6, $7, false, $7)
+`, projectID.String(), name, key, nonce, ciphertext, version, generated))
 		}
 		tag, err := execTag(ctx, tx, `
 UPDATE app.env_values
-SET value = NULL, nonce = $4, ciphertext = $5, key_version = $6
+SET value = NULL, nonce = $4, ciphertext = $5, key_version = $6, reveal_pending = $7, needs_value = false, generated = $7
 WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
-`, projectID.String(), name, key, nonce, ciphertext, version)
+`, projectID.String(), name, key, nonce, ciphertext, version, generated)
 		if err != nil {
 			return mapErr(err)
 		}
@@ -804,13 +847,13 @@ WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
 	}
 	if insert {
 		return mapErr(exec(ctx, tx, `
-INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, ciphertext, key_version)
-VALUES ($1::uuid, $2, $3, false, $4, NULL, NULL, NULL)
+INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, ciphertext, key_version, reveal_pending, needs_value, generated)
+VALUES ($1::uuid, $2, $3, false, $4, NULL, NULL, NULL, false, false, false)
 `, projectID.String(), name, key, plain))
 	}
 	tag, err := execTag(ctx, tx, `
 UPDATE app.env_values
-SET value = $4, nonce = NULL, ciphertext = NULL, key_version = NULL
+SET value = $4, nonce = NULL, ciphertext = NULL, key_version = NULL, reveal_pending = false, needs_value = false, generated = false
 WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
 `, projectID.String(), name, key, plain)
 	if err != nil {
@@ -852,15 +895,16 @@ func insertEnvValue(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name st
 	if was, ok := kept[key.Key]; ok {
 		secret = was
 	}
+	// A typed value: all v1.27 flags false, written explicitly.
 	if secret {
 		return mapErr(exec(ctx, tx, `
-INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, ciphertext, key_version)
-VALUES ($1::uuid, $2, $3, true, NULL, $4, $5, $6)
+INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, ciphertext, key_version, reveal_pending, needs_value, generated)
+VALUES ($1::uuid, $2, $3, true, NULL, $4, $5, $6, false, false, false)
 `, projectID.String(), name, key.Key, key.Nonce, key.Ciphertext, key.KeyVersion))
 	}
 	return mapErr(exec(ctx, tx, `
-INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, ciphertext, key_version)
-VALUES ($1::uuid, $2, $3, false, $4, NULL, NULL, NULL)
+INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, ciphertext, key_version, reveal_pending, needs_value, generated)
+VALUES ($1::uuid, $2, $3, false, $4, NULL, NULL, NULL, false, false, false)
 `, projectID.String(), name, key.Key, key.Plain))
 }
 
@@ -1016,7 +1060,7 @@ SELECT EXISTS (SELECT 1 FROM app.env_sets WHERE project_id = $1::uuid AND name =
 		return nil, store.ErrNotFound
 	}
 	rows, err := d.pool.Query(ctx, `
-SELECT key, is_secret, value, nonce, ciphertext, key_version
+SELECT key, is_secret, value, nonce, ciphertext, key_version, generated
 FROM app.env_values
 WHERE project_id = $1::uuid AND set_name = $2
 ORDER BY key
@@ -1030,7 +1074,7 @@ ORDER BY key
 		var item store.EnvMaterial
 		var plain *string
 		var version *int
-		if err := rows.Scan(&item.Key, &item.IsSecret, &plain, &item.Nonce, &item.Ciphertext, &version); err != nil {
+		if err := rows.Scan(&item.Key, &item.IsSecret, &plain, &item.Nonce, &item.Ciphertext, &version, &item.Generated); err != nil {
 			return nil, mapErr(err)
 		}
 		if plain != nil {

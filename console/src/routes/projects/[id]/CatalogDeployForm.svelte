@@ -14,7 +14,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
-	import { imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, imageNetworksBlockReason, isCatalogHost, projectListedBlockReason, reuseIdempotencyKey } from '$lib/catalog';
+	import { imageEnvHashNote, imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, imageNetworksBlockReason, isCatalogHost, projectListedBlockReason, reuseIdempotencyKey } from '$lib/catalog';
 	import { blockInFlightSubmit, deployProgressNote, flightFocusTarget, flightLabel } from '$lib/catalog-flight';
 	import {
 		applyHistoryResponse,
@@ -401,6 +401,15 @@
 						{/if}
 						{#if networksReason}
 							<p class="text-muted-foreground text-sm">{host.name}: {networksReason}</p>
+						{/if}
+					{/each}
+				</div>
+				<!-- Notes, not block reasons: outside the element Deploy's aria-describedby points at. -->
+				<div class="contents">
+					{#each eligible as host (host.id)}
+						{@const envHashNote = imageEnvHashNote(host, entry.spec.kind)}
+						{#if envHashNote}
+							<p class="text-muted-foreground text-sm">{host.name}: {envHashNote}</p>
 						{/if}
 					{/each}
 				</div>

@@ -195,7 +195,7 @@ function host(): Host {
 		revoked_at: null,
 		access_level: 'deploy',
 		access: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null, shared_networks: null }
+		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null, shared_networks: null, env_hash: false }
 	};
 }
 
@@ -1321,8 +1321,8 @@ describe('catalog images', { concurrency: false }, () => {
 			{
 				name: 'app',
 				keys: [
-					{ key: 'API_TOKEN', is_secret: true, value: SECRET, preview: null },
-					{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: null }
+					{ key: 'API_TOKEN', is_secret: true, value: SECRET, preview: null, reveal_pending: false, needs_value: false },
+					{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: null, reveal_pending: false, needs_value: false }
 				],
 				updated_at: '2026-10-14T00:00:00Z',
 				updated_by: USER.id
@@ -1768,7 +1768,7 @@ describe('catalog images', { concurrency: false }, () => {
 				envSets: [
 					{
 						name: 'app',
-						keys: [{ key: 'A'.repeat(64), is_secret: true, value: null, preview: null }],
+						keys: [{ key: 'A'.repeat(64), is_secret: true, value: null, preview: null, reveal_pending: false, needs_value: false }],
 						updated_at: '2026-10-14T00:00:00Z',
 						updated_by: USER.id
 					}
@@ -1789,7 +1789,7 @@ describe('catalog images', { concurrency: false }, () => {
 		const areaAt = dialog.indexOf('id="env-set-dotenv"');
 		const dotenvErrorAt = dialog.indexOf('id="env-set-error"');
 		assert.equal(areaAt >= 0 && dotenvErrorAt > areaAt, true);
-		assert.equal(dialog.includes("aria-describedby={settingsField === 'dotenv' && message ? 'env-set-error' : undefined}"), true);
+		assert.equal(dialog.includes("aria-describedby={[settingsField === 'dotenv' && message ? 'env-set-error' : null, pasteWarnings.length > 0 ? 'env-set-warnings' : null].filter(Boolean).join(' ') || undefined}"), true);
 		assert.match(dialog, /id="env-set-error"[^>]*focus-visible:ring-3/);
 		assert.doesNotMatch(dialog, /id="env-set-error"[^>]*outline-none/);
 		assert.match(readFileSync(new URL('../src/lib/components/Textarea.svelte', import.meta.url), 'utf8'), /text-base/);
@@ -2482,7 +2482,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.deepEqual(historyFetch(HOST_ID, '', false), { submit: false, pending: false });
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const second = '00000000-0000-4000-8000-0000000000ab';
-		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null, shared_networks: null };
+		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null, shared_networks: null, env_hash: false };
 		const blockedHost = { ...host(), programs };
 		const openHost = { ...host(), id: second, name: 'pi2', programs: { ...programs, images: true, docker: true } };
 		const props = {

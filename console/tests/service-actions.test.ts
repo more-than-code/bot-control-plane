@@ -62,7 +62,7 @@ function host(id = HOST_ID, name = 'pi1', overrides: Partial<Host> = {}): Host {
 		revoked_at: null,
 		access_level: 'deploy',
 		access: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: false, policy_hash: 'p', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null, shared_networks: null },
+		programs: { enabled: true, run_as: ['joe'], allow_shell: false, policy_hash: 'p', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null, shared_networks: null, env_hash: false },
 		...overrides
 	};
 }

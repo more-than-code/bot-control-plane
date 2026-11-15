@@ -10,6 +10,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import { dotenvWarnings } from '$lib/env-lint';
 	import { ENV_SET_STATUS_ID, savedEnvSetNote, settleEnvSetSave } from './env-set-panel';
 
 	let {
@@ -29,6 +30,8 @@
 	let open = $state(untrack(failedNow));
 	let sawFailure = $state(untrack(failedNow));
 	let dotenv = $state('');
+	// Paste lint (spec-env-generate §3.6): warnings only, naming the key, never the value.
+	const pasteWarnings = $derived(dotenvWarnings(dotenv));
 	let setName = $state('');
 	let newKeysSecret = $state(false);
 	// Set when a success closes the dialog: focus moves to the status line after the reload, not on close.
@@ -114,9 +117,16 @@
 					autocomplete="off"
 					aria-label="Env set variables"
 					aria-invalid={settingsField === 'dotenv' && message ? true : undefined}
-					aria-describedby={settingsField === 'dotenv' && message ? 'env-set-error' : undefined}
+					aria-describedby={[settingsField === 'dotenv' && message ? 'env-set-error' : null, pasteWarnings.length > 0 ? 'env-set-warnings' : null].filter(Boolean).join(' ') || undefined}
 				/>
 			</Label>
+			{#if pasteWarnings.length > 0}
+				<ul id="env-set-warnings" class="text-muted-foreground grid gap-1 text-sm break-words">
+					{#each pasteWarnings as warning, index (index)}
+						<li>{warning}</li>
+					{/each}
+				</ul>
+			{/if}
 			<Input type="hidden" name="new_keys_secret" value={newKeysSecret ? '1' : '0'} />
 			<Label class="flex items-center gap-2">
 				<Checkbox

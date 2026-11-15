@@ -41,8 +41,8 @@ const PLAIN = 'visible-plain-value-44';
 const SET: EnvSet = {
 	name: 'app',
 	keys: [
-		{ key: 'API_TOKEN', is_secret: true, value: null, preview: 'api.…' },
-		{ key: 'DB_URL', is_secret: false, value: PLAIN, preview: null }
+		{ key: 'API_TOKEN', is_secret: true, value: null, preview: 'api.…', reveal_pending: false, needs_value: false },
+		{ key: 'DB_URL', is_secret: false, value: PLAIN, preview: null, reveal_pending: false, needs_value: false }
 	],
 	updated_at: '2026-10-25T10:00:00Z',
 	updated_by: USER.id
@@ -53,7 +53,8 @@ const TABLE_PROPS = {
 	deleteAction: '?/deleteEnvKey',
 	deleteSetAction: '?/deleteEnvSet',
 	makeSecretAction: '?/makeEnvKeysSecret',
-	mergeAction: '?/mergeEnvSet'
+	mergeAction: '?/mergeEnvSet',
+	revealAction: '?/revealEnvKey'
 };
 
 function source(name: string): string {
@@ -131,7 +132,7 @@ describe('env-set inline edit and Add variable dialog', () => {
 		assert.match(dialog, /<Notice kind="error">\{addErrorText\(view\.draft\)\}<\/Notice>/);
 		// Key is marked invalid only for a key error; Value always points at the error.
 		assert.match(dialog, /aria-invalid=\{keyError \? true : undefined\}\s*aria-describedby=\{keyError \? id\('add-error'\) : undefined\}/);
-		assert.match(dialog, /aria-describedby=\{view\.draft\.error \? id\('add-error'\) : undefined\}/);
+		assert.match(dialog, /aria-describedby=\{\[view\.draft\.error \? id\('add-error'\) : null, valueWarnings\.length > 0 \? id\('add-warnings'\) : null\]/);
 		assert.match(dialog, /oninput=\{\(\) => \(view = \{ \.\.\.view, draft: addValueTyped\(view\.draft\) \}\)\}/);
 		// Close focus: the trigger is focused explicitly (restoreFocusTo) unless a success is closing it.
 		const close = dialog.slice(dialog.indexOf('function onCloseAutoFocus'), dialog.indexOf('function closeAfterSave'));
@@ -146,9 +147,9 @@ describe('env-set inline edit and Add variable dialog', () => {
 
 	test('a failed add keeps the key, clears a secret value and asks for it again', () => {
 		const secret = addFailed({ ...initialAddDraft(), key: 'TOKEN', value: TYPED, secret: true }, 'refused [redacted]');
-		assert.deepEqual(secret, { key: 'TOKEN', value: '', secret: true, error: 'refused [redacted]', errorField: 'form', retype: true });
+		assert.deepEqual(secret, { key: 'TOKEN', value: '', secret: true, error: 'refused [redacted]', errorField: 'form', retype: true, source: 'value', kind: 'password' });
 		const plain = addFailed({ ...initialAddDraft(), key: 'LOG', value: 'debug', secret: false }, 'refused');
-		assert.deepEqual(plain, { key: 'LOG', value: 'debug', secret: false, error: 'refused', errorField: 'form', retype: false });
+		assert.deepEqual(plain, { key: 'LOG', value: 'debug', secret: false, error: 'refused', errorField: 'form', retype: false, source: 'value', kind: 'password' });
 		assert.equal(addFailed({ ...initialAddDraft(), key: 'TOKEN' }, 'bad key').retype, false);
 		assert.equal(addKeyError('API_TOKEN'), null);
 		assert.equal(addKeyError('bad key'), ADD_KEY_MESSAGE);
@@ -164,7 +165,9 @@ describe('env-set inline edit and Add variable dialog', () => {
 			secret: true,
 			error: ADD_KEY_MESSAGE,
 			errorField: 'key',
-			retype: false
+			retype: false,
+			source: 'value',
+			kind: 'password'
 		});
 		const dialog = source('EnvAddVariablesDialog.svelte');
 		assert.match(dialog, /draft: addKeyRefused\(view\.draft, invalid\)/);

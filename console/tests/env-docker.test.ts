@@ -113,7 +113,7 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 			name: 'app',
 			keys: [
 				{ key: 'API_TOKEN', is_secret: true, value: SECRET, preview: SECRET },
-				{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: 'nope' }
+				{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: 'nope', reveal_pending: false, needs_value: false }
 			],
 			updated_at: '2026-10-14T00:00:00Z',
 			updated_by: USER.id
@@ -126,7 +126,7 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 
 		const shown = parseEnvSet({
 			name: 'app',
-			keys: [{ key: 'API_TOKEN', is_secret: true, value: SECRET, preview: 'supe\u2026' }],
+			keys: [{ key: 'API_TOKEN', is_secret: true, value: SECRET, preview: 'supe\u2026', reveal_pending: false, needs_value: false }],
 			updated_at: '2026-10-14T00:00:00Z',
 			updated_by: USER.id
 		});
@@ -135,7 +135,7 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 
 		const bullets = parseEnvSet({
 			name: 'app',
-			keys: [{ key: 'API_TOKEN', is_secret: true, value: null, preview: '\u2022\u2022\u2022\u2022' }],
+			keys: [{ key: 'API_TOKEN', is_secret: true, value: null, preview: '\u2022\u2022\u2022\u2022', reveal_pending: false, needs_value: false }],
 			updated_at: '2026-10-14T00:00:00Z',
 			updated_by: USER.id
 		});
@@ -740,7 +740,7 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 							name: 'app',
 							keys: [
 								{ key: 'API_TOKEN', is_secret: true, value: SECRET, preview: SECRET },
-								{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: null }
+								{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: null, reveal_pending: false, needs_value: false }
 							],
 							updated_at: '2026-10-14T00:00:00Z',
 							updated_by: USER.id
@@ -784,8 +784,8 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 			{
 				name: 'app',
 				keys: [
-					{ key: 'API_TOKEN', is_secret: true, value: SECRET, preview: 'supe\u2026' },
-					{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: null }
+					{ key: 'API_TOKEN', is_secret: true, value: SECRET, preview: 'supe\u2026', reveal_pending: false, needs_value: false },
+					{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: null, reveal_pending: false, needs_value: false }
 				],
 				updated_at: '2026-10-14T00:00:00Z',
 				updated_by: USER.id
@@ -836,8 +836,8 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 					{
 						name: 'app',
 						keys: [
-							{ key: 'API_TOKEN', is_secret: true, value: null, preview: 'supe\u2026' },
-							{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: null }
+							{ key: 'API_TOKEN', is_secret: true, value: null, preview: 'supe\u2026', reveal_pending: false, needs_value: false },
+							{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: null, reveal_pending: false, needs_value: false }
 						],
 						updated_at: '2026-10-14T00:00:00Z',
 						updated_by: USER.id

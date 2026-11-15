@@ -11,9 +11,14 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import * as Select from '$lib/components/ui/select';
 	import * as Tabs from '$lib/components/ui/tabs';
+	import * as ToggleGroup from '$lib/components/ui/toggle-group';
+	import { GENERATE_KINDS, GENERATE_LABELS, isGenerateKind } from '$lib/env-generate';
+	import { dotenvWarnings, envValueWarnings } from '$lib/env-lint';
 	import {
 		addErrorText,
+		addIsSecret,
 		addKeyError,
 		addKeyRefused,
 		addTabFailed,
@@ -22,6 +27,7 @@
 		initialAddVariables,
 		pasteTabFailed,
 		setAddSecret,
+		setAddSource,
 		settleAdd,
 		settleMerge,
 		switchAddTab,
@@ -36,6 +42,7 @@
 		mergeAction,
 		mergeError = null,
 		onAdded,
+		onGenerated = () => {},
 		onMerged
 	}: {
 		setName: string;
@@ -49,6 +56,8 @@
 		mergeError?: string | null;
 		/** After a successful Add variable, before the reload: the panel sets "Added {KEY}.". */
 		onAdded: (key: string) => void;
+		/** After a generated value is saved and the page reloaded: the panel opens the show-once dialog. */
+		onGenerated?: (key: string) => void;
 		/** After a successful Add variables, before the reload: the panel sets "Saved variables in {set}.". */
 		onMerged: () => void;
 	} = $props();
@@ -64,6 +73,11 @@
 	let closingAfterSave = false;
 
 	const keyError = $derived(view.draft.errorField === 'key');
+	const generating = $derived(view.draft.source === 'generate');
+	const secretShown = $derived(addIsSecret(view.draft));
+	// Paste lint (spec-env-generate §3.6): warnings only, naming the key, never the value.
+	const valueWarnings = $derived(generating ? [] : envValueWarnings(view.draft.key, view.draft.value));
+	const pasteWarnings = $derived(dotenvWarnings(view.paste));
 
 	// A new form-result failure opens the dialog on Paste several. Closing it stays closed while it is current.
 	$effect(() => {
@@ -108,8 +122,9 @@
 			void tick().then(() => focusById(id('add-key')));
 			return;
 		}
+		const generated = formData.get('generate_kind') != null;
 		return async ({ update, result }: { update: () => Promise<void>; result: { type: string; data?: unknown; location?: string } }) => {
-			await settleAdd(open, result.type, {
+			const outcome = await settleAdd(open, result.type, {
 				added: () => onAdded(key),
 				close: closeAfterSave,
 				failed: async () => {
@@ -122,6 +137,8 @@
 				tick,
 				focusStatus: () => focusById(id('status'))
 			});
+			// The value is shown once, in the panel's reveal dialog, after the reload.
+			if (outcome === 'added' && generated) onGenerated(key);
 		};
 	}
 
@@ -146,6 +163,16 @@
 	}
 </script>
 
+{#snippet warnings(warningsId: string, items: string[])}
+	{#if items.length > 0}
+		<ul id={warningsId} class="text-muted-foreground grid gap-1 text-sm break-words">
+			{#each items as item, index (index)}
+				<li>{item}</li>
+			{/each}
+		</ul>
+	{/if}
+{/snippet}
+
 <Dialog.Root bind:open {onOpenChange}>
 	<Dialog.Trigger id={triggerId} class={buttonVariants({ variant: 'outline', size: 'sm' })} aria-label="Add variables to {setName}">
 		Add variables
@@ -165,7 +192,10 @@
 					<form id={id('add-form')} method="POST" action={addAction} class="grid gap-3" use:enhance={submitOne}>
 						<Input type="hidden" name="set" value={setName} />
 						<Input type="hidden" name="op" value="add" />
-						<Input type="hidden" name="is_secret" value={view.draft.secret ? '1' : '0'} />
+						<Input type="hidden" name="is_secret" value={secretShown ? '1' : '0'} />
+						{#if generating}
+							<Input type="hidden" name="generate_kind" value={view.draft.kind} />
+						{/if}
 						<Label class="grid gap-1.5" for={id('add-key')}>
 							Key
 							<Input
@@ -180,23 +210,68 @@
 								aria-describedby={keyError ? id('add-error') : undefined}
 							/>
 						</Label>
-						<Label class="grid gap-1.5" for={id('add-value')}>
-							Value
-							<Input
-								id={id('add-value')}
-								name="value"
-								type={view.draft.secret ? 'password' : 'text'}
-								bind:value={view.draft.value}
-								oninput={() => (view = { ...view, draft: addValueTyped(view.draft) })}
-								autocomplete={view.draft.secret ? 'new-password' : 'off'}
-								spellcheck="false"
-								aria-describedby={view.draft.error ? id('add-error') : undefined}
-							/>
-						</Label>
+						<div class="grid gap-1.5">
+							<span id={id('add-source-label')} class="text-sm font-medium">Value</span>
+							<ToggleGroup.Root
+								type="single"
+								variant="outline"
+								size="sm"
+								class="justify-start"
+								aria-labelledby={id('add-source-label')}
+								bind:value={
+									() => view.draft.source,
+									(next) => {
+										// Clicking the pressed item sends '': ignore it, so one item always stays pressed.
+										if (next === 'value' || next === 'generate') view = { ...view, draft: setAddSource(view.draft, next) };
+									}
+								}
+							>
+								<ToggleGroup.Item value="value" id={id('add-source-value')}>Type a value</ToggleGroup.Item>
+								<ToggleGroup.Item value="generate" id={id('add-source-generate')}>Generate</ToggleGroup.Item>
+							</ToggleGroup.Root>
+						</div>
+						{#if generating}
+							<div class="grid gap-1.5">
+								<Label for={id('add-kind')}>Kind</Label>
+								<Select.Root
+									type="single"
+									value={view.draft.kind}
+									onValueChange={(next) => {
+										if (isGenerateKind(next)) view = { ...view, draft: { ...view.draft, kind: next } };
+									}}
+								>
+									<Select.Trigger id={id('add-kind')} class="w-full sm:w-64">
+										<Select.Value>{GENERATE_LABELS[view.draft.kind]}</Select.Value>
+									</Select.Trigger>
+									<Select.Content>
+										{#each GENERATE_KINDS as kind (kind)}
+											<Select.Item value={kind} label={GENERATE_LABELS[kind]}>{GENERATE_LABELS[kind]}</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+								<p class="text-muted-foreground text-sm">Deploybot makes the value. You see it once after saving.</p>
+							</div>
+						{:else}
+							<Label class="grid gap-1.5" for={id('add-value')}>
+								<span class="sr-only">Value</span>
+								<Input
+									id={id('add-value')}
+									name="value"
+									type={view.draft.secret ? 'password' : 'text'}
+									bind:value={view.draft.value}
+									oninput={() => (view = { ...view, draft: addValueTyped(view.draft) })}
+									autocomplete={view.draft.secret ? 'new-password' : 'off'}
+									spellcheck="false"
+									aria-describedby={[view.draft.error ? id('add-error') : null, valueWarnings.length > 0 ? id('add-warnings') : null].filter(Boolean).join(' ') || undefined}
+								/>
+							</Label>
+							{@render warnings(id('add-warnings'), valueWarnings)}
+						{/if}
 						<Label class="flex items-center gap-2">
 							<Checkbox
 								id={id('add-secret')}
-								checked={view.draft.secret}
+								checked={secretShown}
+								disabled={generating}
 								aria-label="Secret"
 								onCheckedChange={(value) => (view = { ...view, draft: setAddSecret(view.draft, value === true) })}
 							/>
@@ -225,9 +300,10 @@
 								spellcheck="false"
 								autocomplete="off"
 								aria-invalid={view.pasteError ? true : undefined}
-								aria-describedby={view.pasteError ? id('merge-error') : undefined}
+								aria-describedby={[view.pasteError ? id('merge-error') : null, pasteWarnings.length > 0 ? id('merge-warnings') : null].filter(Boolean).join(' ') || undefined}
 							/>
 						</Label>
+						{@render warnings(id('merge-warnings'), pasteWarnings)}
 						<Input type="hidden" name="new_keys_secret" value={view.pasteSecret ? '1' : '0'} />
 						<Label class="flex items-center gap-2">
 							<Checkbox

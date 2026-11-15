@@ -31,7 +31,7 @@
 
 <div class="grid gap-1">
 	{#if item.is_secret}
-		<!-- Uncontrolled and empty: the stored secret never reaches the browser. -->
+		<!-- Uncontrolled and empty: the stored secret never reaches the browser (only a generated value, once, through the reveal dialog). -->
 		<Input
 			id={inputId}
 			form={formId}
