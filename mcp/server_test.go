@@ -168,7 +168,7 @@ func TestTools(t *testing.T) {
 	closed := map[string]bool{
 		"list_orgs": true, "list_projects": true, "list_hosts": true, "list_services": true,
 		"query_metrics": true, "list_processes": true, "service_health_history": true,
-		"get_health_checks": true, "list_catalog": true, "list_env_sets": true,
+		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -240,6 +240,15 @@ func TestTools(t *testing.T) {
 			}
 			if tool.Name == "delete_catalog_entry" && !strings.Contains(tool.Description, "not stopped") {
 				t.Errorf("%s description %q missing not stopped", tool.Name, tool.Description)
+			}
+		case tool.Name == "request_env_value":
+			if readOnly || open {
+				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
+			}
+			for _, phrase := range []string{"Secret values are never sent through this tool or shown to you.", "get_env_value_request", "Does not contact"} {
+				if !strings.Contains(tool.Description, phrase) {
+					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
+				}
 			}
 		case live[tool.Name]:
 			if tool.Name == "confirm" {
@@ -314,12 +323,13 @@ func TestTools(t *testing.T) {
 		"deploy_entry", "rollback_entry", "set_health_checks",
 		"create_catalog_entry", "update_catalog_entry", "delete_catalog_entry",
 		"confirm", "entry_logs", "entry_status", "create_env_set", "list_env_sets",
+		"request_env_value", "get_env_value_request",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	if len(seen) != 25 {
+	if len(seen) != 27 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -1655,6 +1665,15 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 		}
 	}
 	switch {
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/projects/"+projectID+"/env-sets/services/value-requests":
+		return http.StatusCreated, "ok", "ok", map[string]any{
+			"request_id": valueRequestID, "url": "https://console.example/fill/" + valueRequestID, "expires_at": "2026-11-15T10:15:00Z",
+		}
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/value-requests/"+valueRequestID:
+		return http.StatusOK, "ok", "ok", map[string]any{
+			"request_id": valueRequestID, "project_id": projectID, "set": "services", "key": "STRIPE_API_KEY",
+			"state": "pending", "expires_at": "2026-11-15T10:15:00Z", "created_at": "2026-11-15T10:00:00Z",
+		}
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/me":
 		return http.StatusOK, "ok", "", map[string]any{
 			"user":       map[string]any{"id": "55555555-5555-4555-8555-555555555555", "email": "ada@example", "name": "Ada", "avatar_url": nil},

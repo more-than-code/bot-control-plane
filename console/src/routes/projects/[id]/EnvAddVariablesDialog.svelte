@@ -13,8 +13,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
 	import * as Tabs from '$lib/components/ui/tabs';
-	import * as ToggleGroup from '$lib/components/ui/toggle-group';
-	import { GENERATE_KINDS, GENERATE_LABELS, isGenerateKind } from '$lib/env-generate';
+	import ValueSourceFields from '$lib/components/ValueSourceFields.svelte';
 	import { dotenvWarnings, envValueWarnings } from '$lib/env-lint';
 	import { looksSecretLine, secretLookingKeys } from '$lib/env-secret-name';
 	import {
@@ -232,50 +231,16 @@
 								aria-describedby={keyError ? id('add-error') : undefined}
 							/>
 						</Label>
-						<div class="grid gap-1.5">
-							<span id={id('add-source-label')} class="text-sm font-medium">Value</span>
-							<ToggleGroup.Root
-								type="single"
-								variant="outline"
-								size="sm"
-								class="justify-start"
-								aria-labelledby={id('add-source-label')}
-								bind:value={
-									() => view.draft.source,
-									(next) => {
-										// Clicking the pressed item sends '': ignore it, so one item always stays pressed.
-										if (next === 'value' || next === 'generate') view = { ...view, draft: setAddSource(view.draft, next) };
-									}
-								}
-							>
-								<ToggleGroup.Item value="value" id={id('add-source-value')}>Type a value</ToggleGroup.Item>
-								<ToggleGroup.Item value="generate" id={id('add-source-generate')} disabled={!placeholder.canGenerate} aria-describedby={placeholder.note ? id('add-placeholder') : undefined}>
-									Generate
-								</ToggleGroup.Item>
-							</ToggleGroup.Root>
-						</div>
-						{#if generating}
-							<div class="grid gap-1.5">
-								<Label for={id('add-kind')}>Kind</Label>
-								<Select.Root
-									type="single"
-									value={view.draft.kind}
-									onValueChange={(next) => {
-										if (isGenerateKind(next)) view = { ...view, draft: { ...view.draft, kind: next } };
-									}}
-								>
-									<Select.Trigger id={id('add-kind')} class="w-full sm:w-64">
-										<Select.Value>{GENERATE_LABELS[view.draft.kind]}</Select.Value>
-									</Select.Trigger>
-									<Select.Content>
-										{#each GENERATE_KINDS as kind (kind)}
-											<Select.Item value={kind} label={GENERATE_LABELS[kind]}>{GENERATE_LABELS[kind]}</Select.Item>
-										{/each}
-									</Select.Content>
-								</Select.Root>
-								<p class="text-muted-foreground text-sm">Deploybot makes the value. You see it once after saving.</p>
-							</div>
-						{:else}
+						<ValueSourceFields
+							idOf={(part) => id(`add-${part}`)}
+							source={view.draft.source}
+							kind={view.draft.kind}
+							onSource={(next) => (view = { ...view, draft: setAddSource(view.draft, next) })}
+							onKind={(next) => (view = { ...view, draft: { ...view.draft, kind: next } })}
+							generateDisabled={!placeholder.canGenerate}
+							generateDescribedBy={placeholder.note ? id('add-placeholder') : undefined}
+						/>
+						{#if !generating}
 							<Label class="grid gap-1.5" for={id('add-value')}>
 								<span class="sr-only">Value</span>
 								<Input

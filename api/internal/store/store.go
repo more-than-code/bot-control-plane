@@ -508,6 +508,8 @@ type Device struct {
 
 // Store is the full phase-1 persistence surface.
 type Store interface {
+	ValueRequestStore
+
 	// UpsertGoogleUser creates the user on first sign-in together with a
 	// personal org that the user owns (spec-organizations D-8).
 	UpsertGoogleUser(ctx context.Context, in GoogleSignIn) (User, error)

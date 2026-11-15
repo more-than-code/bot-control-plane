@@ -150,6 +150,12 @@ func contractRoutes() []route {
 		{"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}", false, (*Server).handleEnvKeyDelete, delegatedDeny},
 		{"POST /v1/projects/{id}/env-sets/{set}/secret", false, (*Server).handleEnvKeysSecret, delegatedDeny},
 		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal", false, (*Server).handleEnvKeyReveal, delegatedDeny},
+		// api-v1 v1.28 value requests: create decides in its handler; the fill page, fill and decline are console only.
+		{"POST /v1/projects/{id}/env-sets/{set}/value-requests", false, (*Server).handleValueRequestCreate, delegatedHandler},
+		{"GET /v1/value-requests/{request_id}", false, (*Server).handleValueRequestGet, delegatedAllow},
+		{"GET /v1/value-requests/{request_id}/fill", false, (*Server).handleValueRequestFillPage, delegatedDenyRead},
+		{"POST /v1/value-requests/{request_id}/fill", false, (*Server).handleValueRequestFill, delegatedDeny},
+		{"POST /v1/value-requests/{request_id}/decline", false, (*Server).handleValueRequestDecline, delegatedDeny},
 		{"GET /v1/projects/{id}/registries", false, (*Server).handleRegistryList, delegatedAllow},
 		{"PUT /v1/projects/{id}/registries/{host}", false, (*Server).handleRegistryPut, delegatedHandler},
 		{"DELETE /v1/projects/{id}/registries/{host}", false, (*Server).handleRegistryDelete, delegatedHandler},

@@ -698,6 +698,7 @@ func (m *Mem) DeleteEnvSet(_ context.Context, projectID uuid.UUID, name string) 
 	}
 	delete(m.envSets, envKey(projectID, name))
 	delete(m.envValues, envKey(projectID, name))
+	m.dropValueRequestsLocked(projectID, name)
 	return nil
 }
 
