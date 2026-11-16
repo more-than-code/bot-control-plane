@@ -12,6 +12,7 @@
 		networkSnippetHeading,
 		networkSnippetProblem,
 		sameSnippetAsk,
+		snippetHostLabel,
 		type NetworkSnippetAsk,
 		type NetworkSnippetResult
 	} from '$lib/settings-auto';
@@ -122,9 +123,8 @@
 			<div class="grid gap-1.5">
 				<Label for="network-snippet-host">Host</Label>
 				<Select.Root type="single" bind:value={hostId}>
-					<Select.Trigger id="network-snippet-host" class="w-full">
-						<Select.Value placeholder="Choose a host" />
-					</Select.Trigger>
+					<!-- The name, as the other selects do: Select.Value would show the chosen host's id. -->
+					<Select.Trigger id="network-snippet-host" class="w-full">{snippetHostLabel(hosts, hostId)}</Select.Trigger>
 					<Select.Content>
 						{#each hosts as host (host.id)}
 							<Select.Item value={host.id} label={host.name}>{host.name}</Select.Item>

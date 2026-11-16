@@ -258,6 +258,11 @@ export function networkSnippetHosts<H extends { id: string; name: string; access
 	return hosts.filter((host) => host.access_level === 'deploy' && runsContainers(host)).map((host) => ({ id: host.id, name: host.name }));
 }
 
+/** The Host select's trigger text: the chosen host's name (never its id), or the prompt. */
+export function snippetHostLabel(hosts: ReadonlyArray<{ id: string; name: string }>, hostId: string): string {
+	return hosts.find((host) => host.id === hostId)?.name ?? 'Choose a host';
+}
+
 /** The snippet answer: its runner.toml lines as text, or null when it is not `{"snippet": string}`. */
 export function parseNetworkSnippet(value: unknown): string | null {
 	const v = record(value);
