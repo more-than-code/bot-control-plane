@@ -20,6 +20,7 @@
 	import type { KnownSet } from '$lib/image-spec';
 	import type { ImageEditorState } from '$lib/project-action';
 	import CatalogImageForm from './CatalogImageForm.svelte';
+	import EntryRoutes from './EntryRoutes.svelte';
 	import PrivateKeys from './PrivateKeys.svelte';
 	import ReadinessList from './ReadinessList.svelte';
 
@@ -66,6 +67,8 @@
 	let open = $state(untrack(() => revealed));
 	// The readiness band sits above the scrolling form (spec-agent-usability-1 §3 A): the first scroll of the form folds it. A new open starts unfolded.
 	let readinessCollapsed = $state(false);
+	// A confirmed public-address change re-runs the readiness list (its `routes` check).
+	let routesSaved = $state(0);
 	let readinessBand = $state<HTMLElement | null>(null);
 	$effect(() => {
 		if (open) readinessCollapsed = false;
@@ -259,8 +262,9 @@
 		{#if mode === 'edit' && entry}
 			<!-- The entry checks (no host): what this entry still needs before a deploy (api-v1 v1.29). -->
 			<div bind:this={readinessBand} class="max-h-[35dvh] shrink-0 overflow-y-auto border-b px-4 pb-3">
-				<ReadinessList entry={entry.name} collapsed={readinessCollapsed} privateKeysId="private-keys-{entry.name}" />
+				<ReadinessList entry={entry.name} collapsed={readinessCollapsed} privateKeysId="private-keys-{entry.name}" refreshKey={routesSaved} />
 				<PrivateKeys entry={entry.name} collapsed={readinessCollapsed} />
+				<EntryRoutes {entry} collapsed={readinessCollapsed} onSaved={() => (routesSaved += 1)} />
 			</div>
 		{/if}
 		<CatalogImageForm {mode} {entry} {hosts} {hostsIncomplete} {projectSlug} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {tagsAction} {digestAction} {editor} onSettled={settle}>

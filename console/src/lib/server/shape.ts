@@ -10,6 +10,7 @@ import type {
 	EnvSet,
 	EnvSetKey,
 	Grant,
+	HostEdgePolicy,
 	Health,
 	HealthCheck,
 	HealthHistoryPoint,
@@ -352,6 +353,8 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 	if (shared_networks === undefined) return null;
 	const listed = Object.hasOwn(value, 'project_listed') ? value.project_listed : null;
 	if (listed !== null && typeof listed !== 'boolean') return null;
+	const edge = parseEdgePolicy(value.edge);
+	if (edge === undefined) return null;
 	return {
 		enabled: value.enabled,
 		run_as,
@@ -366,8 +369,21 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 		projects,
 		project_listed: listed,
 		shared_networks,
-		env_hash
+		env_hash,
+		edge
 	};
+}
+
+/**
+ * `programs.edge` (api-v1 v1.35, agent-protocol v1.15). Missing or null: an agent before 0.2.11 (null). A present
+ * value that does not parse is not a policy (undefined), like the other `programs` keys.
+ */
+function parseEdgePolicy(value: unknown): HostEdgePolicy | null | undefined {
+	if (value == null) return null;
+	if (!isRecord(value) || typeof value.enabled !== 'boolean') return undefined;
+	if (value.image == null || value.image === '') return { enabled: value.enabled, image: null };
+	const image = text(value.image, 300);
+	return image === null ? undefined : { enabled: value.enabled, image };
 }
 
 /** api-v1 v1.25 item 2: at most 8 shared networks per host (an entry joins at most SHARED_NETWORKS_MAX). */

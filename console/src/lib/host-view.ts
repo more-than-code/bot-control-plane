@@ -1,4 +1,4 @@
-import type { Host, HostAccess, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
+import type { Host, HostAccess, HostEdge, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
 import { isCatalogHost } from './catalog';
 import { parseRange, type RangeKey } from './ranges';
 import type { Column } from './table';
@@ -128,6 +128,10 @@ export type HostPage = {
 	/** The org's projects the access form may grant (it needs their slugs for the runner.toml note). */
 	accessProjects: Project[];
 	accessMessage: string | null;
+	/** The host's edge (api-v1 v1.35 item 2), read for org owners and admins only. */
+	edge?: HostEdge | null;
+	/** The edge read failed. */
+	edgeMessage?: string | null;
 };
 
 export function parseHostTab(value: string | null): HostTab {

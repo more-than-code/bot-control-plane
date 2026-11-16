@@ -1,4 +1,5 @@
 import type { CreatedJoin, JoinGrant, JoinToken, OrgRole } from './api-types';
+import type { DomainPlan } from './edge-routes';
 
 /** Org page tabs (spec-organizations §4.3). Hosts, Join tokens and Settings are for org owners and admins. */
 export type OrgScope = 'projects' | 'hosts' | 'members' | 'tokens' | 'settings';
@@ -24,7 +25,11 @@ export function cleanOrgMemberRole(value: string): 'admin' | 'member' | null {
 export type OrgActionData = {
 	scope?: OrgScope;
 	message?: string | null;
-	field?: 'createToken' | 'addMember' | 'createProject';
+	field?: 'createToken' | 'addMember' | 'createProject' | 'addDomain' | 'domain' | 'assignments';
+	/** The domain a `domain` or `assignments` message belongs to (api-v1 v1.35). */
+	domainId?: string | null;
+	/** A domain's Delete plan (202), shown in its row with Confirm. */
+	domainPlan?: DomainPlan;
 	/** The created join token, shown once in the Add a host dialog. */
 	created?: CreatedJoin;
 	/** The slug of the project the created token grants access to, for the agent instructions. */

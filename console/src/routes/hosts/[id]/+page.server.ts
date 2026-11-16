@@ -1,5 +1,5 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
-import type { Host, HostAccess, ProcessSample, Project } from '$lib/api-types';
+import type { Host, HostAccess, HostEdge, ProcessSample, Project } from '$lib/api-types';
 import type { HostPage, MetricChart, ProcessSort, ServiceLink } from '$lib/host-view';
 import { hostQuery, METRIC_SPECS } from '$lib/host-view';
 import { rangeWindow, type RangeKey } from '$lib/ranges';
@@ -21,6 +21,8 @@ import {
 	parseSnapshot
 } from '$lib/server/shape';
 import { isUuid } from '$lib/server/validate';
+import { setEdge } from '$lib/server/edge-actions';
+import { parseHostEdge } from '$lib/server/edge-shape';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
 type LoadEvent = Parameters<PageServerLoad>[0];
@@ -35,10 +37,12 @@ const noAccess = {
 	accessLoaded: false,
 	access: [] as HostAccess[],
 	accessProjects: [] as Project[],
-	accessMessage: null as string | null
+	accessMessage: null as string | null,
+	edge: null as HostEdge | null,
+	edgeMessage: null as string | null
 };
 
-type AccessData = Pick<HostPage, 'org' | 'canManageAccess' | 'accessLoaded' | 'access' | 'accessProjects' | 'accessMessage'>;
+type AccessData = Pick<HostPage, 'org' | 'canManageAccess' | 'accessLoaded' | 'access' | 'accessProjects' | 'accessMessage' | 'edge' | 'edgeMessage'>;
 
 function blank(tab: HostPage['tab'], range: RangeKey, processSort: ProcessSort, message: string): HostPage {
 	return {
@@ -166,14 +170,26 @@ async function loadProcesses(event: RequestEvent, host: Host, range: RangeKey, p
  * The host's org (for the breadcrumb) and, for org owners and admins, the Access section: the host's access
  * rows and the org's projects, read together. A failure stays in the section and does not replace the page.
  */
+/** The host's edge (api-v1 v1.35 item 2), for org owners and admins. A failure stays in the Edge section. */
+async function loadEdge(event: RequestEvent, hostId: string): Promise<{ edge: HostEdge | null; edgeMessage: string | null }> {
+	try {
+		const edge = parseHostEdge(await apiFetch(event, `/v1/hosts/${hostId}/edge`));
+		return edge ? { edge, edgeMessage: null } : { edge: null, edgeMessage: 'The API returned an unexpected response.' };
+	} catch (err) {
+		return { edge: null, edgeMessage: loadFailure(err).message };
+	}
+}
+
 async function loadAccess(event: RequestEvent, host: Host): Promise<AccessData> {
 	const org = event.locals.orgs.find((item) => item.id === host.org_id) ?? null;
 	const orgView = org ? { id: org.id, name: org.name, role: org.role } : null;
 	if (!org || !isOrgAdmin(event.locals.orgs, host.org_id)) return { org: orgView, ...noAccess };
+	const edgeRead = loadEdge(event, host.id);
 	try {
-		const [rows, projects] = await Promise.all([
+		const [rows, projects, edge] = await Promise.all([
 			apiList(event, `/v1/hosts/${host.id}/access`, parseHostAccess),
-			apiList(event, `/v1/orgs/${org.id}/projects`, parseProject)
+			apiList(event, `/v1/orgs/${org.id}/projects`, parseProject),
+			edgeRead
 		]);
 		const notes = [
 			rows.omitted > 0 ? `${rows.omitted} access ${rows.omitted === 1 ? 'row' : 'rows'} could not be read.` : null,
@@ -185,12 +201,13 @@ async function loadAccess(event: RequestEvent, host: Host): Promise<AccessData> 
 			accessLoaded: true,
 			access: rows.items,
 			accessProjects: projects.items,
-			accessMessage: notes.length > 0 ? notes.join(' ') : null
+			accessMessage: notes.length > 0 ? notes.join(' ') : null,
+			...edge
 		};
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
 		// The table and the grant form need both reads; without them only the message shows.
-		return { org: orgView, ...noAccess, canManageAccess: true, accessMessage: loadFailure(err).message };
+		return { org: orgView, ...noAccess, canManageAccess: true, accessMessage: loadFailure(err).message, ...(await edgeRead) };
 	}
 }
 
@@ -218,6 +235,7 @@ export const load: PageServerLoad = async (event) => {
 export const actions: Actions = {
 	setAccess: setAccessAction('access'),
 	removeAccess: removeAccessAction('access'),
+	setEdge,
 	snapshot: async (event) => {
 		requireUser(event);
 		const id = hostId(event.params);

@@ -35,7 +35,8 @@
 		openRequest = 0,
 		fallbackFocusId = null,
 		showTrigger = true,
-		triggerLabel = null
+		triggerLabel = null,
+		destructive: destructiveStyle = null
 	}: {
 		id: string;
 		action: string;
@@ -69,6 +70,8 @@
 		showTrigger?: boolean;
 		/** The text trigger's accessible name when `label` alone is ambiguous (it should start with `label`). */
 		triggerLabel?: string | null;
+		/** The destructive style when the label alone does not say so (Turn off edge). Null: picked from the label. */
+		destructive?: boolean | null;
 	} = $props();
 
 	let open = $state(false);
@@ -118,7 +121,7 @@
 		if (focusNotice()) event.preventDefault();
 	}
 
-	const destructive = $derived(confirmIsDestructive(label));
+	const destructive = $derived(destructiveStyle ?? confirmIsDestructive(label));
 
 	function rowIcon(text: string): Component {
 		if (/credential/i.test(text)) return ShieldOff;

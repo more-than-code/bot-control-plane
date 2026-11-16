@@ -8,6 +8,7 @@
 	import { accessFailureOf } from '$lib/host-access';
 	import { joinGrantText, type OrgActionData, type OrgScope } from '$lib/org-view';
 	import { actionUrlFrom } from '$lib/url';
+	import OrgDomainsSection from './OrgDomainsSection.svelte';
 	import OrgHostsSection from './OrgHostsSection.svelte';
 	import OrgMembersSection from './OrgMembersSection.svelte';
 	import OrgProjectsSection from './OrgProjectsSection.svelte';
@@ -118,6 +119,15 @@
 			{projectNames}
 		/>
 	{:else if scope === 'settings'}
+		<OrgDomainsSection
+			domains={data.domains.items}
+			omitted={data.domains.omitted}
+			projects={data.projects.items}
+			message={data.domains.message}
+			addMessage={fieldMessage('addDomain')}
+			rowMessage={fieldMessage('domain')}
+			rowMessageId={action?.domainId ?? null}
+		/>
 		<OrgSettingsSection org={data.org} canOwner={data.canOwner} message={sectionMessage} />
 	{/if}
 {/if}
