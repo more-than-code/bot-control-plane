@@ -58,6 +58,7 @@ import {
 	loadProjectSettings,
 	putEnvKey,
 	revealEnvKey,
+	revealPrivateKey,
 	deleteEnvKey,
 	makeEnvKeysSecret,
 	mergeEnvSet,
@@ -67,7 +68,7 @@ import {
 	viewProjectFile
 } from '$lib/server/image-actions';
 import { formText } from '$lib/server/form';
-import { catalogReadiness, connectGitHub, githubRefused, hostPolicySnippet, imageAccess } from '$lib/server/settings-auto';
+import { catalogPrivateKeys, catalogReadiness, connectGitHub, githubRefused, hostPolicySnippet, imageAccess, networkSnippet } from '$lib/server/settings-auto';
 import { githubNoteCode, type GitHubNoteCode } from '$lib/settings-auto';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
@@ -372,8 +373,9 @@ export const load: PageServerLoad = async (event) => {
 	// Each tab loads only what it shows, and independent calls run together.
 	// The copies on the Catalog & services tab wait for the host list and the catalog, because grouping and
 	// the row actions need both.
+	// Settings reads the hosts for its Networks card (spec-agent-usability-1 H2).
 	const hostsLoad =
-		tab === 'hosts' || tab === 'catalog'
+		tab === 'hosts' || tab === 'catalog' || (tab === 'settings' && canAdmin)
 			? loadList(event, `/v1/projects/${id}/hosts`, parseHost)
 			: Promise.resolve(emptyList<Host>());
 	// Settings reads the catalog too: each card's "Used by" note and the refused-login badge (api-v1 v1.29).
@@ -657,6 +659,7 @@ export const actions: Actions = {
 	mergeEnvSet,
 	putEnvKey,
 	revealEnvKey,
+	revealPrivateKey,
 	deleteEnvKey,
 	makeEnvKeysSecret,
 	deleteEnvSet,
@@ -669,6 +672,8 @@ export const actions: Actions = {
 	imageAccess,
 	catalogReadiness,
 	hostPolicySnippet,
+	networkSnippet,
+	catalogPrivateKeys,
 	askRevoke: async (event) => {
 		requireUser(event);
 		projectId(event.params);

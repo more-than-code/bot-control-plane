@@ -4,12 +4,13 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import { Badge } from '$lib/components/ui/badge';
-	import { buttonVariants } from '$lib/components/ui/button';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import {
 		checkLabel,
 		fixAsk,
 		fixHref,
 		fixLabel,
+		privateFixEntry,
 		readinessSummary,
 		statusWord,
 		type FixRights,
@@ -38,7 +39,9 @@
 		connectAction,
 		snippetAction,
 		onRefresh,
-		collapsed = false
+		collapsed = false,
+		privateKeysId = null,
+		onOpenEntry
 	}: {
 		result: Readiness | null;
 		message?: string | null;
@@ -53,7 +56,25 @@
 		onRefresh?: () => void;
 		/** True once the form beside it scrolls: open details close and the rows needing action fold away. */
 		collapsed?: boolean;
+		/** In the entry's own Edit drawer: the id of its "Secrets for this entry" list, which a private-set fix shows. */
+		privateKeysId?: string | null;
+		/** Elsewhere (Deploy): opens the entry's Edit drawer for a private-set fix. */
+		onOpenEntry?: () => void;
 	} = $props();
+
+	/** Show the entry's secrets list in this drawer: open it when folded, bring it into view and focus it. */
+	function showPrivateKeys() {
+		if (!privateKeysId) return;
+		const target = document.getElementById(privateKeysId);
+		if (target == null) return;
+		if (target instanceof HTMLDetailsElement) target.open = true;
+		target.scrollIntoView({ block: 'nearest' });
+		const focusable = target instanceof HTMLDetailsElement ? target.querySelector('summary') : target;
+		if (focusable instanceof HTMLElement) {
+			if (focusable === target) target.tabIndex = -1;
+			focusable.focus();
+		}
+	}
 
 	const headingId = $props.id();
 
@@ -75,6 +96,10 @@
 		}
 	});
 	const summaryClass = 'text-muted-foreground hover:text-foreground w-fit cursor-pointer text-sm underline-offset-4 hover:underline';
+
+	// The outline OK badge's grey border and text were faint in dark mode: the up token (≥4.5:1 on background and
+	// popover in both themes, tests/contrast.test.ts) for both. Tokens only.
+	const OK_BADGE = 'border-status-up text-status-up';
 
 	function badgeVariant(status: ReadyStatus): 'outline' | 'destructive' | 'secondary' {
 		if (status === 'missing') return 'destructive';
@@ -141,7 +166,7 @@
 			<li class="flex min-w-0 flex-wrap items-start justify-between gap-2 border-b pb-2 last:border-b-0" data-check={check.check}>
 				<div class="grid min-w-0 flex-1 basis-48 gap-0.5">
 					<p class="flex flex-wrap items-center gap-2 text-sm">
-						<Badge variant={badgeVariant(check.status)}>{statusWord(check.status)}</Badge>
+						<Badge variant={badgeVariant(check.status)} class={check.status === 'ok' ? OK_BADGE : undefined}>{statusWord(check.status)}</Badge>
 						<span class="font-medium">{checkLabel(check.check)}</span>
 					</p>
 					<p class="text-muted-foreground text-sm break-words">{check.message}</p>
@@ -152,6 +177,10 @@
 							<p class="text-muted-foreground text-sm break-words" data-fix-ask>{ask}</p>
 						{:else if check.fix.action === 'connect_github' && rights.githubConnect}
 							<GitHubConnect action={connectAction} />
+						{:else if privateFixEntry(check.fix) === entry && privateKeysId}
+							<Button type="button" variant="outline" size="sm" onclick={showPrivateKeys}>{label}</Button>
+						{:else if privateFixEntry(check.fix) === entry && onOpenEntry}
+							<Button type="button" variant="outline" size="sm" onclick={onOpenEntry}>{label}</Button>
 						{:else if check.fix.action === 'host_policy_snippet' && hostId}
 							<HostPolicyDialog action={snippetAction} {entry} {hostId} {hostName} />
 						{:else}

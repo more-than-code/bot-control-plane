@@ -53,7 +53,8 @@
 		cancel,
 		projectId = null,
 		projectSlug = null,
-		onViewLogs
+		onViewLogs,
+		onOpenEntry
 	}: {
 		entry: ImageEntry;
 		hosts: Host[];
@@ -78,6 +79,8 @@
 		projectSlug?: string | null;
 		/** The link was clicked: the drawer closes while the page navigates. */
 		onViewLogs?: () => void;
+		/** Opens the entry's Edit drawer (a readiness fix for its private secrets). */
+		onOpenEntry?: () => void;
 	} = $props();
 
 	const eligible = $derived(hosts.filter((host) => isCatalogHost(host)));
@@ -477,7 +480,7 @@
 		</form>
 		<!-- Advisory (api-v1 v1.29): Deploy stays enabled whatever it says. Outside the deploy form: it posts its own. -->
 		<div class="mt-4 shrink-0">
-			<ReadinessList entry={entry.name} hostId={hostId === '' ? null : hostId} hostName={hostLabel === '' ? null : hostLabel} refreshKey={result?.resultId ?? null} />
+			<ReadinessList entry={entry.name} hostId={hostId === '' ? null : hostId} hostName={hostLabel === '' ? null : hostLabel} refreshKey={result?.resultId ?? null} {onOpenEntry} />
 		</div>
 
 		{#if result?.confirmation && result.confirmKind}

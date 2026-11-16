@@ -27,6 +27,7 @@
 		projectId = null,
 		projectSlug = null,
 		openRequest = 0,
+		onOpenEntry,
 		fallbackFocusId = null
 	}: {
 		entry: ImageEntry;
@@ -47,6 +48,8 @@
 		openRequest?: number;
 		/** Where focus goes when it closes and its own trigger is hidden (the menu button). */
 		fallbackFocusId?: string | null;
+		/** Opens the entry's Edit drawer; this drawer closes first. */
+		onOpenEntry?: () => void;
 	} = $props();
 
 	let open = $state(untrack(() => result != null));
@@ -131,6 +134,12 @@
 			{projectId}
 			{projectSlug}
 			onViewLogs={() => (open = false)}
+			onOpenEntry={onOpenEntry
+				? () => {
+						open = false;
+						onOpenEntry();
+					}
+				: undefined}
 		>
 			{#snippet cancel()}
 				<Sheet.Close type="button" class={buttonVariants({ variant: 'outline' })} disabled={flight}>Cancel</Sheet.Close>

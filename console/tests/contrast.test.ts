@@ -127,6 +127,8 @@ test('theme tokens keep their contrast floors', () => {
 		for (const status of STATUS) {
 			assertAtLeast(contrastRatio(y(tokens, status), y(tokens, 'background')), 4.5, `${selector} ${status} on background`);
 		}
+		// The readiness OK badge (border and text in --status-up) sits on drawers and dialogs, painted with --popover.
+		assertAtLeast(contrastRatio(y(tokens, 'status-up'), y(tokens, 'popover')), 4.5, `${selector} status-up on popover`);
 		for (const surface of ['background', 'card'] as const) {
 			assertAtLeast(contrastRatio(y(tokens, 'input'), y(tokens, surface)), 3, `${selector} input on ${surface}`);
 		}

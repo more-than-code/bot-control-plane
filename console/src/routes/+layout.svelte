@@ -7,6 +7,7 @@
 	import Building2 from '@lucide/svelte/icons/building-2';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import FolderKanban from '@lucide/svelte/icons/folder-kanban';
+	import Inbox from '@lucide/svelte/icons/inbox';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -133,6 +134,11 @@
 								<DropdownMenu.Item>
 									{#snippet child({ props })}
 										<a href="/account/apps" {...props}><AppWindow class="size-4" />Connected apps</a>
+									{/snippet}
+								</DropdownMenu.Item>
+								<DropdownMenu.Item>
+									{#snippet child({ props })}
+										<a href="/requests" {...props}><Inbox class="size-4" />Open requests</a>
 									{/snippet}
 								</DropdownMenu.Item>
 							</DropdownMenu.Content>

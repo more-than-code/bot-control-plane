@@ -205,8 +205,8 @@ describe('project services', { concurrency: false }, () => {
 			// Catalog & services: the entries, their running copies, the hosts they run on, and members for Permissions.
 			catalog: ['catalog', 'hosts', 'members', 'services'],
 			members: ['invites', 'members'],
-			// Settings reads the catalog for each card's "Used by" note (api-v1 v1.29).
-			settings: ['catalog', 'env-sets', 'files', 'registries']
+			// Settings reads the catalog for each card's "Used by" note (api-v1 v1.29), and the hosts for Networks (H2).
+			settings: ['catalog', 'env-sets', 'files', 'hosts', 'registries']
 		};
 		const overlap: Record<string, number> = {};
 		for (const [tab, want] of Object.entries(expected)) {

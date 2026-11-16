@@ -7,7 +7,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import Notice from '$lib/components/Notice.svelte';
 	import { secretOverrideNote, setConflictNotes, setOrderLine, type EnvOverrides } from '$lib/env-precedence';
-	import type { KnownSet } from '$lib/image-spec';
+	import { isOwnPrivateRow, type KnownSet } from '$lib/image-spec';
 
 	/**
 	 * The Env sets checkboxes and Secret env rows of a catalog entry form (image or program).
@@ -24,9 +24,15 @@
 		overrides,
 		invalid = () => false,
 		describedBy = () => undefined,
-		notice
+		notice,
+		entryName = null
 	}: {
 		fieldId: string;
+		/**
+		 * The entry being edited. Its rows that refer to its own private set `@<entry>` (api-v1 v1.33 item 6) are
+		 * read-only: posted back unchanged, with no set picker. Removing one drops that key from the entry.
+		 */
+		entryName?: string | null;
 		envSets: string[];
 		secrets: Array<{ key: string; set: string; name: string }>;
 		sets: readonly KnownSet[];
@@ -119,6 +125,18 @@
 	<p class="text-sm font-medium">Secret env</p>
 	{#each secrets as row, index (index)}
 		{@const note = secretOverrideNote(overrides, row.key)}
+		{#if isOwnPrivateRow(row, entryName)}
+			<div class="flex min-w-0 flex-wrap items-center justify-between gap-2" data-private-secret={row.key}>
+				<Input type="hidden" name="secret_key" value={row.key} />
+				<Input type="hidden" name="secret_set" value={row.set} />
+				<Input type="hidden" name="secret_name" value={row.name} />
+				<p class="min-w-0 text-sm break-words">
+					<span class="font-mono break-all">{row.key}</span>{#if row.name !== row.key}<span class="text-muted-foreground">{' from '}<span class="font-mono break-all">{row.name}</span></span>{/if}
+					<span class="text-muted-foreground">{' — private, managed for this entry'}</span>
+				</p>
+				<Button type="button" variant="outline" aria-label="Remove private secret {row.key}" onclick={() => (secrets = secrets.filter((_, item) => item !== index))}>Remove</Button>
+			</div>
+		{:else}
 		<div class="grid gap-2">
 			<div class="flex flex-wrap items-center gap-2">
 				<Label class="sr-only" for="{fieldId}-secret-key-{index}">Secret key {index + 1}</Label>
@@ -162,6 +180,7 @@
 				{/each}
 			</div>
 		</div>
+		{/if}
 	{/each}
 	<Button type="button" variant="outline" disabled={secrets.length >= 64} onclick={() => (secrets = [...secrets, { key: '', set: '', name: '' }])}>Add secret</Button>
 	{@render notice?.('secret_env')}

@@ -519,14 +519,27 @@ export function loggingForPreview(maxSizeMb: string, maxFiles: string): ImageLog
 	return read.ok ? read.logging : null;
 }
 
+/** The private set of entry `entryName` (api-v1 v1.33 item 6): `@<entry>`. */
+export function privateSetOf(entryName: string): string {
+	return `@${entryName}`;
+}
+
+/** A secret row that refers to the private set of the entry being edited: carried through as is, never re-picked. */
+export function isOwnPrivateRow(row: { set: string }, entryName: string | null | undefined): boolean {
+	return entryName != null && entryName !== '' && row.set.trim() === privateSetOf(entryName);
+}
+
 /**
  * `env_sets` and `secret_env` for an image or program entry (api-v1 rules 6 and 7, and v1.22 for programs).
  * With `knownSets`, every set and secret key must exist; without it the API checks that.
+ * `entryName` is the entry being edited: its own private set `@<entry>` (v1.33 item 6) is accepted as stored and
+ * is never in `knownSets`; any other `@x` is refused. On create there is none.
  */
 export function cleanEnvSources(
 	draftSets: readonly string[],
 	secrets: readonly { key: string; set: string; name: string }[],
-	knownSets?: readonly KnownSet[]
+	knownSets?: readonly KnownSet[],
+	entryName: string | null = null
 ): { ok: true; envSets: string[]; secretEnv: Record<string, string> } | { ok: false; field: string; message: string } {
 	if (draftSets.length > 8) return fail('env_sets', 'At most 8 env sets.');
 	const envSets: string[] = [];
@@ -544,11 +557,12 @@ export function cleanEnvSources(
 		if (key === '' && setName === '' && secretName === '') continue;
 		if (!ENV_KEY.test(key)) return fail('secret_env', 'Secret env keys use A-Z, digits, and underscore.');
 		if (deniedEnvKey(key) || RESERVED_ENV.has(key)) return fail('secret_env', 'This variable changes what the program runs.');
-		if (!SET_NAME.test(setName) || !ENV_KEY.test(secretName)) return fail('secret_env', 'Pick a set and a key from that set.');
+		const own = isOwnPrivateRow(row, entryName);
+		if ((!own && !SET_NAME.test(setName)) || !ENV_KEY.test(secretName)) return fail('secret_env', 'Pick a set and a key from that set.');
 		const reference = `${setName}.${secretName}`;
 		if (Object.hasOwn(secretEnv, key)) return fail('secret_env', 'Each secret env key can appear once.');
 		if (Object.keys(secretEnv).length >= 64) return fail('secret_env', 'At most 64 secret env keys.');
-		if (knownSets) {
+		if (knownSets && !own) {
 			const set = knownSets.find((item) => item.name === setName);
 			if (!set || !set.keys.includes(secretName)) return fail('secret_env', `Unknown secret ${reference}.`);
 		}
@@ -565,7 +579,9 @@ export function imageSpecFromDraft(
 	draft: ImageDraft,
 	knownSets?: readonly KnownSet[],
 	includeName = false,
-	knownFiles?: readonly string[]
+	knownFiles?: readonly string[],
+	/** The entry being edited, whose own private set its secret rows may keep (api-v1 v1.33 item 6). */
+	entryName: string | null = null
 ): ImageCheck {
 	let name: string | null = null;
 	if (includeName) {
@@ -584,7 +600,7 @@ export function imageSpecFromDraft(
 	if (!ports.ok) return ports;
 	const env = cleanInlineEnv(draft.env);
 	if (!env.ok) return env;
-	const sources = cleanEnvSources(draft.envSets, draft.secrets, knownSets);
+	const sources = cleanEnvSources(draft.envSets, draft.secrets, knownSets, entryName);
 	if (!sources.ok) return sources;
 	const envSets = sources.envSets;
 	const secretEnv = sources.secretEnv;
@@ -1369,7 +1385,7 @@ export function envSourcesFromForm(form: FormData): {
 	}
 	const secrets = secretKey.values.map((key, index) => ({
 		key: key.slice(0, 64),
-		set: (secretSet.values[index] ?? '').slice(0, 48),
+		set: (secretSet.values[index] ?? '').slice(0, 49),
 		name: (secretName.values[index] ?? '').slice(0, 64)
 	}));
 	return { envSets: sets, secrets, message: null };
@@ -1471,7 +1487,7 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	draft.envSets = envSets.values.map((name) => name.slice(0, 48));
 	draft.secrets = secretKey.values.map((key, index) => ({
 		key: key.slice(0, 64),
-		set: (secretSet.values[index] ?? '').slice(0, 48),
+		set: (secretSet.values[index] ?? '').slice(0, 49),
 		name: (secretName.values[index] ?? '').slice(0, 64)
 	}));
 	draft.volumes = volumeName.values.map((name, index) => ({

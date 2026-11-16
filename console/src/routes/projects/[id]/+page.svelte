@@ -214,6 +214,8 @@
 			githubRefused={data.githubRefused ?? false}
 			catalog={data.catalog ?? []}
 			catalogKnown={data.catalogMessage == null && !(data.catalogTruncated ?? false) && (data.catalogOmitted ?? 0) === 0}
+			hosts={data.hosts ?? []}
+			{hostsIncomplete}
 		/>
 	{/if}
 {/if}

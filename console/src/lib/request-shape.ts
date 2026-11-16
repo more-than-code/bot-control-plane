@@ -5,6 +5,11 @@
 
 /** The 43-character base64url id the API mints for every request type. */
 const REQUEST_ID = /^[A-Za-z0-9_-]{43}$/;
+/**
+ * A handle (api-v1 v1.33 item 8): `h-` and the stored SHA-256 of the id, 64 lowercase hex. The `/requests` page links
+ * by it; the API answers it for the request's own signed-in user only. It is passed to the API unchanged.
+ */
+const REQUEST_HANDLE = /^h-[0-9a-f]{64}$/;
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -16,8 +21,14 @@ export type RequestState = (typeof REQUEST_STATES)[number];
 /** What a fill page shows: the form, or one problem with no form. `error` is a load failure: its message only. */
 export type RequestView = 'form' | 'used' | 'expired' | 'missing' | 'invalid' | 'error';
 
+/** A request id or a handle (`h-` + 64 hex): what a fill, file or connect page accepts in its path. */
 export function isRequestId(value: unknown): value is string {
-	return typeof value === 'string' && REQUEST_ID.test(value);
+	return typeof value === 'string' && (REQUEST_ID.test(value) || REQUEST_HANDLE.test(value));
+}
+
+/** A bare handle (64 lowercase hex), as `GET /v1/me/requests` sends it. */
+export function isRequestHandle(value: unknown): value is string {
+	return typeof value === 'string' && REQUEST_HANDLE.test(`h-${value}`);
 }
 
 export function isRequestState(value: unknown): value is RequestState {

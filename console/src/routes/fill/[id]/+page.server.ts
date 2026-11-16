@@ -4,6 +4,7 @@ import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { requestPage } from '$lib/server/request-page';
 import { revealFailedText } from '$lib/env-generate';
+import { privateKeyRevealPath, privateSetEntry } from '$lib/private-keys';
 import { FILL_TEXT, fillBody, isValueRequestId, parseFillRequest, withoutValue } from '$lib/fill-request';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -54,7 +55,15 @@ export const actions: Actions = {
 		const loaded = await page.loadRequest(event, event.params.id);
 		const request = loaded.request;
 		if (!request || request.state !== 'filled' || request.key !== key) return fail(404, { revealError: revealFailedText(key) });
-		const path = `/v1/projects/${request.project_id}/env-sets/${encodeURIComponent(request.set)}/keys/${encodeURIComponent(request.key)}/reveal`;
+		// A private set (`@<entry>`, api-v1 v1.33) is revealed through its entry; the request's `entry` wins over the @ name.
+		const privateEntry = request.entry !== '' ? request.entry : privateSetEntry(request.set);
+		const isPrivate = request.set.startsWith('@');
+		const path = isPrivate
+			? privateEntry == null
+				? null
+				: privateKeyRevealPath(request.project_id, privateEntry, request.key)
+			: `/v1/projects/${request.project_id}/env-sets/${encodeURIComponent(request.set)}/keys/${encodeURIComponent(request.key)}/reveal`;
+		if (!path) return fail(404, { revealError: revealFailedText(key) });
 		try {
 			const payload = await apiFetch(event, path, { method: 'POST', body: '{}' });
 			const item = payload != null && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;

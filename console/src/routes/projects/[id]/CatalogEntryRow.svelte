@@ -237,6 +237,7 @@
 						{projectSlug}
 						openRequest={requests.deploy}
 						fallbackFocusId={menuId}
+						onOpenEntry={canEdit ? () => (requests.edit += 1) : undefined}
 					/>
 				{:else}
 					<span class="block size-7" aria-hidden="true" data-empty-slot></span>

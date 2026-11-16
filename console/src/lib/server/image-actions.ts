@@ -1,6 +1,8 @@
 import { error, fail, isHttpError, isRedirect, redirect, type RequestEvent } from '@sveltejs/kit';
 import { randomUUID } from 'node:crypto';
 import { ENV_KEY, byteLength, duplicateEntryMessage, isCatalogName, isIdempotencyKey } from '$lib/catalog';
+import { pastedText } from '$lib/file-request';
+import { privateKeyRevealPath, privateSetEntry } from '$lib/private-keys';
 import {
 	STILL_RUNNING,
 	deployTimeoutMs,
@@ -120,7 +122,7 @@ export async function saveImageEntry(event: RequestEvent, mode: 'create' | 'edit
 	const name = mode === 'edit' ? (isCatalogName(formText(form, 'entry_name')) ? formText(form, 'entry_name') : null) : null;
 	if (mode === 'edit' && !name) return editorFailure(event, 400, mode, null, built.draft, null, 'That catalog entry is not valid.');
 	if (built.message) return editorFailure(event, 400, mode, name, built.draft, built.field, built.message);
-	const check = imageSpecFromDraft(built.draft, undefined, mode === 'create');
+	const check = imageSpecFromDraft(built.draft, undefined, mode === 'create', undefined, name);
 	if (!check.ok) return editorFailure(event, 400, mode, name, built.draft, check.field, check.message);
 	const body = imageRequestBody(check.spec, check.name);
 	const path = mode === 'create' ? `/v1/projects/${id}/catalog` : `/v1/projects/${id}/catalog/${name}`;
@@ -572,6 +574,36 @@ export async function revealEnvKey(event: RequestEvent) {
 	}
 }
 
+/**
+ * Show a generated entry-private value once (api-v1 v1.33), for the Secrets band's reveal dialog fetch only, as
+ * revealEnvKey: the value goes to that fetch and never into page data or `form`. The dialog posts `set` `@<entry>`.
+ */
+export async function revealPrivateKey(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const form = await event.request.formData();
+	const key = formText(form, 'key');
+	const entry = privateSetEntry(formText(form, 'set'));
+	const path = entry == null ? null : privateKeyRevealPath(id, entry, key);
+	if (!path) return fail(400, { scope: 'catalog' as const, revealError: 'That entry key is not valid.' });
+	const accept = event.request.headers.get('accept') ?? '';
+	if (event.request.headers.get('x-sveltekit-action') !== 'true' || !accept.includes('application/json')) {
+		return fail(400, { scope: 'catalog' as const, revealError: 'Showing a value needs JavaScript.' });
+	}
+	try {
+		const payload = await apiFetch(event, path, { method: 'POST', body: '{}' });
+		const item = payload != null && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+		if (!item || item.key !== key || typeof item.value !== 'string') return fail(502, { scope: 'catalog' as const, revealError: revealFailedText(key) });
+		return { scope: 'catalog' as const, revealed: { key, value: item.value } };
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		// As revealEnvKey: an API answer (already shown, not generated, not found) names the key only; a lost answer
+		// may have used up the one view, so it says how to get a new value.
+		const answered = err instanceof ApiError && !stillRunning(err) && err.code !== 'unavailable';
+		return fail(apiStatus(err), { scope: 'catalog' as const, revealError: answered ? apiMessage(err) : revealFailedText(key) });
+	}
+}
+
 export async function deleteEnvKey(event: RequestEvent) {
 	requireUser(event);
 	const id = projectIdOf(event.params);
@@ -694,7 +726,8 @@ export async function saveProjectFile(event: RequestEvent) {
 	const id = projectIdOf(event.params);
 	const form = await event.request.formData();
 	const name = formText(form, 'name').trim();
-	const content = formText(form, 'content');
+	// The Files dialog is a paste box: the browser sends its line breaks as CRLF; the file gets LF, as on the fill-file page.
+	const content = pastedText(formText(form, 'content'));
 	const secret = formText(form, 'secret') !== '0';
 	const path = filePath(id, name);
 	if (!path) return settingsFailure(event, 400, 'File names use lowercase letters, digits, dots, underscores, and hyphens.', 'file');

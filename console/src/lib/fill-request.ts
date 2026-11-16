@@ -7,6 +7,8 @@ import { GENERATE_KINDS, isGenerateKind, PASSWORD_LENGTH, type GenerateKind } fr
 import { boundedText, isRequestId, isRequestState, requestView, UUID, type RequestState, type RequestView } from '$lib/request-shape';
 
 const SET_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
+/** An entry-private set (api-v1 v1.33 item 6): `@` and the entry's name. */
+const PRIVATE_SET_NAME = /^@[a-z0-9][a-z0-9-]{0,47}$/;
 const ENV_KEY = /^[A-Z_][A-Z0-9_]{0,63}$/;
 export type FillState = RequestState;
 
@@ -20,6 +22,10 @@ export type FillRequest = {
 	expires_at: string;
 	/** The agent's note. Plain text only: render it as text, never as HTML or a link. */
 	reason: string;
+	/** Filling replaces a stored secret value (api-v1 v1.33 item 3). Missing (an older API) is false. */
+	replace: boolean;
+	/** The entry of a private set `@<entry>` (v1.33 item 6), as the API names it. Missing or malformed is ''. */
+	entry: string;
 };
 
 /** What the page shows: the form, or one problem with no form. `error` is a load failure: its message only. */
@@ -31,6 +37,7 @@ export const FILL_TEXT = {
 	missing: 'This request was not found. It belongs to the account that asked for it, so sign in as that person. You must also still be an owner or admin of the project.',
 	invalid: 'This link is not valid. Check that you copied all of it.',
 	saved: 'Saved. You can close this tab.',
+	replaceNote: "Saving replaces the current value. The old value can't be recovered.",
 	declined: 'Declined. The agent will see that you declined. You can close this tab.',
 	unexpected: 'The API returned an unexpected response.',
 	noValue: 'Enter a value, or choose Generate.',
@@ -47,15 +54,27 @@ export function parseFillRequest(payload: unknown, id: string): FillRequest | nu
 	const record = payload as Record<string, unknown>;
 	const project_id = text(record, 'project_id', 36);
 	const project_name = text(record, 'project_name', 200);
-	const set = text(record, 'set', 48);
+	const set = text(record, 'set', 49);
 	const key = text(record, 'key', 64);
 	const state = text(record, 'state', 16);
 	const expires_at = text(record, 'expires_at', 64);
 	const reason = text(record, 'reason', 1000);
 	if (record.request_id !== id || !project_id || !UUID.test(project_id) || project_name == null) return null;
-	if (!set || !SET_NAME.test(set) || !key || !ENV_KEY.test(key) || !expires_at || reason == null) return null;
+	if (!set || !(SET_NAME.test(set) || PRIVATE_SET_NAME.test(set)) || !key || !ENV_KEY.test(key) || !expires_at || reason == null) return null;
 	if (!isRequestState(state)) return null;
-	return { request_id: id, project_id, project_name, set, key, state, expires_at, reason };
+	const replace = record.replace === true;
+	const entryName = text(record, 'entry', 48);
+	const entry = entryName != null && SET_NAME.test(entryName) ? entryName : '';
+	return { request_id: id, project_id, project_name, set, key, state, expires_at, reason, replace, entry };
+}
+
+/**
+ * What the page names the request's place by: a shared env set by its name, an entry-private set `@<entry>`
+ * (api-v1 v1.33 item 6) by its entry.
+ */
+export function fillSubject(set: string, entry = ''): { label: 'Env set' | 'Entry'; name: string } {
+	if (entry !== '') return { label: 'Entry', name: entry };
+	return PRIVATE_SET_NAME.test(set) ? { label: 'Entry', name: set.slice(1) } : { label: 'Env set', name: set };
 }
 
 /** The view for a loaded request. */

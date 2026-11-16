@@ -7,13 +7,17 @@ import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { isUuid } from '$lib/server/validate';
 import { isCatalogName } from '$lib/catalog';
+import { parsePrivateKeys, type PrivateKey } from '$lib/private-keys';
 import { imageRepository } from '$lib/image-tags';
 import {
 	GITHUB_REGISTRY,
 	imageRegistryHost,
 	isGitHubAuthorizeUrl,
+	NETWORK_SNIPPET_NO_ACCESS,
+	networkSnippetProblem,
 	parseHostPolicySnippet,
 	parseImageAccess,
+	parseNetworkSnippet,
 	parseReadiness,
 	type HostPolicySnippet,
 	type ImageAccessResult,
@@ -122,6 +126,50 @@ export async function hostPolicySnippet(event: RequestEvent) {
 		const snippet = parseHostPolicySnippet(await apiFetch(event, `/v1/projects/${id}/catalog/${entry}/host-policy-snippet?host_id=${hostId}`));
 		if (!snippet) return failed(502, UNEXPECTED);
 		return present(event, { scope: 'catalog' as const, hostPolicy: snippet, hostPolicyMessage: null as string | null });
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return failed(apiStatus(err), apiMessage(err));
+	}
+}
+
+/** The runner.toml lines that would open a shared network to this project on one host (api-v1 v1.33 item 7). Text only. */
+export async function networkSnippet(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const form = await event.request.formData();
+	const hostId = formText(form, 'host_id');
+	const network = formText(form, 'network').trim();
+	const subnet = formText(form, 'subnet').trim();
+	const failed = (status: number, message: string) =>
+		fail(status, present(event, { scope: 'settings' as const, networkSnippet: null as string | null, networkSnippetMessage: message }));
+	if (!isUuid(hostId)) return failed(400, 'Choose a host.');
+	const problem = networkSnippetProblem(network, subnet);
+	if (problem) return failed(400, problem);
+	const query = `?network=${encodeURIComponent(network)}&subnet=${encodeURIComponent(subnet)}`;
+	try {
+		const snippet = parseNetworkSnippet(await apiFetch(event, `/v1/projects/${id}/hosts/${hostId}/network-snippet${query}`));
+		if (snippet == null) return failed(502, UNEXPECTED);
+		return present(event, { scope: 'settings' as const, networkSnippet: snippet as string | null, networkSnippetMessage: null as string | null });
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		// The API answers not_found unless this project deploys to the host (or the caller is an org admin there).
+		if (err instanceof ApiError && err.code === 'not_found') return failed(404, NETWORK_SNIPPET_NO_ACCESS);
+		return failed(apiStatus(err), apiMessage(err));
+	}
+}
+
+/** An entry's private keys (api-v1 v1.33 item 6), for the edit drawer. Names and flags only, never a value. */
+export async function catalogPrivateKeys(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const entry = formText(await event.request.formData(), 'entry');
+	const failed = (status: number, message: string) =>
+		fail(status, present(event, { scope: 'catalog' as const, privateKeys: null as PrivateKey[] | null, privateKeysMessage: message }));
+	if (!isCatalogName(entry)) return failed(400, 'That entry is not valid.');
+	try {
+		const keys = parsePrivateKeys(await apiFetch(event, `/v1/projects/${id}/catalog/${entry}`));
+		if (!keys) return failed(502, UNEXPECTED);
+		return present(event, { scope: 'catalog' as const, privateKeys: keys as PrivateKey[] | null, privateKeysMessage: null as string | null });
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
 		return failed(apiStatus(err), apiMessage(err));
