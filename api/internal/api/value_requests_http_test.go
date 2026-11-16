@@ -165,7 +165,6 @@ func TestValueRequestCreate(t *testing.T) {
 		{"reason bidi", "svc", `{"key":"PH","reason":"pay \u202eevil"}`, 400, "bad_request", msgReason},
 		{"reason zero width", "svc", `{"key":"PH","reason":"a\u200bb"}`, 400, "bad_request", msgReason},
 		{"reason line separator", "svc", `{"key":"PH","reason":"a\u2028b"}`, 400, "bad_request", msgReason},
-		{"has value", "svc", `{"key":"HAS"}`, 409, "conflict", "HAS already has a value; edit it in the console"},
 		{"plain has value", "svc", `{"key":"PLAIN"}`, 409, "conflict", "PLAIN already has a value; edit it in the console"},
 		{"unknown field", "svc", `{"key":"PH","value":"x"}`, 400, "bad_request", "invalid json"},
 	}
@@ -344,7 +343,7 @@ func TestValueRequestFillPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := objectPayload(t, env)
-	if page["project_name"] != "Proj" || page["reason"] != reason || page["state"] != "pending" || page["key"] != "PH" || len(page) != 9 {
+	if page["project_name"] != "Proj" || page["reason"] != reason || page["state"] != "pending" || page["key"] != "PH" || page["replace"] != false || len(page) != 10 {
 		t.Fatalf("page %v", page)
 	}
 }
@@ -496,7 +495,9 @@ func TestValueRequestDecline(t *testing.T) {
 func TestValueRequestKeyFilledMeanwhile(t *testing.T) {
 	f := newVRFixture(t)
 	id := f.create(t, f.mcp, "LATER", "")
-	status, env, _ := mustCall(t, f.w, f.tok, http.MethodPut, envKeyPath(f.project, "svc", "LATER"), `{"value":"typed-in-console"}`)
+	// A plain value typed meanwhile is not replaced by a request (api-v1
+	// v1.33 item 3 replaces secret values only).
+	status, env, _ := mustCall(t, f.w, f.tok, http.MethodPut, envKeyPath(f.project, "svc", "LATER"), `{"value":"typed-in-console","is_secret":false}`)
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	status, env = f.call(t, f.tok, http.MethodPost, reqPath(id)+"/fill", `{"value":"`+vrSecret+`"}`)
 	mustHTTP(t, status, env, http.StatusConflict, "conflict", "LATER already has a value; edit it in the console")
@@ -632,7 +633,7 @@ func TestValueRequestReviewCases(t *testing.T) {
 	t.Run("key with a value is checked before the body", func(t *testing.T) {
 		f := newVRFixture(t)
 		id := f.create(t, f.mcp, "LATER", "")
-		status, env, _ := mustCall(t, f.w, f.tok, http.MethodPut, envKeyPath(f.project, "svc", "LATER"), `{"value":"typed-in-console"}`)
+		status, env, _ := mustCall(t, f.w, f.tok, http.MethodPut, envKeyPath(f.project, "svc", "LATER"), `{"value":"typed-in-console","is_secret":false}`)
 		mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 		for _, body := range []string{`{"value":"a","generate":{"kind":"hex"}}`, `{"value":""}`, `not json`} {
 			status, env = f.call(t, f.tok, http.MethodPost, reqPath(id)+"/fill", body)

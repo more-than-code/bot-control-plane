@@ -84,6 +84,17 @@ type readiness struct {
 	// sets holds the material of each referenced set that exists. Values
 	// are opened only for the ${KEY} check and never leave this request.
 	sets map[string][]store.EnvMaterial
+	// draftPrivate is, for readiness from a spec, the secret_env keys given
+	// as private key objects (api-v1 v1.33 item 6), true for {"fill": true}
+	// (no value until the person fills it), false for generate. They live
+	// in catalog.DraftPrivateSet, which is never read from the store.
+	draftPrivate map[string]bool
+}
+
+// draftPrivateMsg is the env_values row of a spec key given as
+// {"fill": true}: like a stored private placeholder, it has no value yet.
+func draftPrivateMsg(key string) string {
+	return "env " + key + " in the entry's private set has no value yet; after the entry is created, fill it with request_env_value"
 }
 
 // handleReadiness is api-v1 v1.29 item 7. It is advisory: deploy keeps its
@@ -161,6 +172,12 @@ func (s *Server) handleReadinessSpec(w http.ResponseWriter, r *http.Request) {
 		}
 		hostID = &id
 	}
+	// api-v1 v1.33 item 6: secret_env objects are judged as the write path
+	// judges them, under the draft's own private set.
+	spec, draftPrivate, ok := s.draftPrivateSpec(w, body.Spec)
+	if !ok {
+		return
+	}
 	names, err := s.Store.ListEnvKeyNames(r.Context(), projectID)
 	if err != nil {
 		s.fail(w, err)
@@ -171,7 +188,15 @@ func (s *Server) handleReadinessSpec(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	img, err := catalog.BuildImageDraft(body.Spec, names, known)
+	if names == nil {
+		names = map[string][]string{}
+	}
+	// A stored set of the same name (an entry called draft) is never read.
+	delete(names, catalog.DraftPrivateSet)
+	for key := range draftPrivate {
+		names[catalog.DraftPrivateSet] = append(names[catalog.DraftPrivateSet], key)
+	}
+	img, err := catalog.BuildImageDraft(spec, names, known)
 	if err != nil {
 		s.writeField(w, err)
 		return
@@ -182,8 +207,36 @@ func (s *Server) handleReadinessSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	// A spec has no entry: no name (so no deploy history for host_policy)
 	// and no grants (owner or admin only, checked above).
-	rd := readiness{projectID: projectID, entry: store.CatalogEntry{Kind: "image"}, isImage: true, img: img, refs: img.EnvRefs()}
+	rd := readiness{projectID: projectID, entry: store.CatalogEntry{Kind: "image"}, isImage: true, img: img, refs: img.EnvRefs(), draftPrivate: draftPrivate}
 	s.writeReadiness(w, r, p, rd, host, level)
+}
+
+// draftPrivateSpec splits the spec's secret_env (api-v1 v1.33 item 6): a
+// private key object becomes a "@draft.KEY" ref, with the write path's
+// checks and texts. It returns the spec to build and the object keys (true
+// for fill). A "@draft.KEY" string names no stored key, as for a new entry
+// on the write path ("unknown env key"). ok is false when it has answered.
+func (s *Server) draftPrivateSpec(w http.ResponseWriter, raw json.RawMessage) (json.RawMessage, map[string]bool, bool) {
+	field := catalog.SecretEnvField(raw)
+	refs, objects, err := catalog.SplitSecretEnv(catalog.DraftEntry, field)
+	if err != nil {
+		s.writeField(w, err)
+		return nil, nil, false
+	}
+	keys := map[string]bool{}
+	for _, o := range objects {
+		keys[o.Key] = o.Generate == nil
+	}
+	for key, ref := range refs {
+		if _, object := keys[key]; !object && strings.HasPrefix(ref, catalog.DraftPrivateSet+".") {
+			writeCode(w, "bad_request", "unknown env key")
+			return nil, nil, false
+		}
+	}
+	if len(objects) == 0 {
+		return raw, keys, true
+	}
+	return catalog.RewriteSecretEnv(raw, refs), keys, true
 }
 
 // readinessHost loads the optional host and the project's access level on
@@ -268,6 +321,9 @@ func (s *Server) readinessAllowed(r *http.Request, p principal, projectID uuid.U
 func (s *Server) checkEnv(ctx context.Context, rd *readiness, list *readyList) error {
 	missingSet := false
 	for _, set := range rd.refs.SetNames() {
+		if rd.draftPrivate != nil && set == catalog.DraftPrivateSet {
+			continue
+		}
 		mats, err := s.Store.ListEnvMaterial(ctx, rd.projectID, set)
 		if errors.Is(err, store.ErrNotFound) {
 			missingSet = true
@@ -304,6 +360,12 @@ func (s *Server) checkEnv(ctx context.Context, rd *readiness, list *readyList) e
 	sort.Strings(keys)
 	for _, key := range keys {
 		set, name, ok := strings.Cut(rd.refs.Secret[key], ".")
+		if rd.draftPrivate != nil && set == catalog.DraftPrivateSet {
+			if rd.draftPrivate[name] {
+				list.add("env_values", readyMissing, draftPrivateMsg(name), readyFix{Action: fixFillValue, Key: name})
+			}
+			continue
+		}
 		mats, exists := rd.sets[set]
 		if !ok || !exists || reported[set+"."+name] {
 			continue
@@ -330,10 +392,69 @@ func (s *Server) checkEnv(ctx context.Context, rd *readiness, list *readyList) e
 
 	if !rd.isImage {
 		list.add("env_refs", readyOK, "a program takes its env literally; ${KEY} is not resolved", readyFix{})
-		return nil
+	} else {
+		s.checkEnvRefs(ctx, *rd, list)
 	}
-	s.checkEnvRefs(ctx, *rd, list)
+	checkEnvPairs(*rd, list)
 	return nil
+}
+
+// pairSuffixes are api-v1 v1.33 item 5: an id key and the secret key that
+// belongs with it, by suffix.
+var pairSuffixes = [][2]string{
+	{"_CLIENT_ID", "_CLIENT_SECRET"},
+	{"_KEY_ID", "_SECRET"},
+	{"_ID", "_SECRET"},
+}
+
+// checkEnvPairs adds env_pairs (api-v1 v1.33 item 5): warn for each id and
+// secret pair whose keys resolve from different places (inline env, a set,
+// or the entry's private set), else ok. Advisory; names keys and sets only.
+func checkEnvPairs(rd readiness, list *readyList) {
+	names := map[string][]string{}
+	for set, mats := range rd.sets {
+		for _, m := range mats {
+			names[set] = append(names[set], m.Key)
+		}
+	}
+	src := envSources(rd.refs, names)
+	keys := make([]string, 0, len(src))
+	for key := range src {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	place := func(set string) string {
+		if set == "" {
+			return "the entry's env"
+		}
+		if rd.draftPrivate != nil && set == catalog.DraftPrivateSet {
+			return "the entry's private set"
+		}
+		if catalog.IsPrivateSet(set) {
+			return "the entry's private set " + set
+		}
+		return "env set " + set
+	}
+	seen := map[string]bool{}
+	before := len(list.checks)
+	for _, key := range keys {
+		for _, pair := range pairSuffixes {
+			stem, ok := strings.CutSuffix(key, pair[0])
+			if !ok || stem == "" {
+				continue
+			}
+			partner := stem + pair[1]
+			other, ok := src[partner]
+			if !ok || seen[key+"/"+partner] || other == src[key] {
+				continue
+			}
+			seen[key+"/"+partner] = true
+			list.add("env_pairs", readyWarn, fmt.Sprintf("%s comes from %s but %s comes from %s; keep a pair in one place", key, place(src[key]), partner, place(other)), readyFix{})
+		}
+	}
+	if len(list.checks) == before {
+		list.add("env_pairs", readyOK, "paired keys come from one place", readyFix{})
+	}
 }
 
 // checkEnvRefs merges the env as a deploy does (mergeEnvWith, tolerant of
@@ -342,7 +463,18 @@ func (s *Server) checkEnv(ctx context.Context, rd *readiness, list *readyList) e
 // from the same error, unless the referencing value is secret (its message
 // leaves the name out too).
 func (s *Server) checkEnvRefs(ctx context.Context, rd readiness, list *readyList) {
-	merged, err := s.mergeEnvWith(ctx, rd.projectID, rd.refs, true)
+	refs := rd.refs
+	if len(rd.draftPrivate) > 0 {
+		// The draft's private keys are not stored: merge without them and
+		// add them as empty secrets, as a placeholder merges.
+		refs.Secret = map[string]string{}
+		for key, ref := range rd.refs.Secret {
+			if !strings.HasPrefix(ref, catalog.DraftPrivateSet+".") {
+				refs.Secret[key] = ref
+			}
+		}
+	}
+	merged, err := s.mergeEnvWith(ctx, rd.projectID, refs, true)
 	if err != nil {
 		list.add("env_refs", readyUnknown, "the env values could not be read", readyFix{})
 		return
@@ -350,6 +482,14 @@ func (s *Server) checkEnvRefs(ctx context.Context, rd readiness, list *readyList
 	secret := make(map[string]bool, len(merged.secretKeys))
 	for _, key := range merged.secretKeys {
 		secret[key] = true
+	}
+	for key, ref := range rd.refs.Secret {
+		if len(rd.draftPrivate) > 0 && strings.HasPrefix(ref, catalog.DraftPrivateSet+".") {
+			if _, inline := rd.refs.Inline[key]; !inline {
+				merged.env[key] = ""
+				secret[key] = true
+			}
+		}
 	}
 	_, err = catalog.ResolveEnvRefs(merged.env, secret)
 	var refErr *catalog.RefError

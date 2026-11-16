@@ -83,6 +83,9 @@ type ProgramInput struct {
 	EnvSets   []string
 	SecretEnv map[string]string
 	Sets      SetKeys
+	// Entry is the entry name; secret_env may name its private set
+	// "@<entry>" (api-v1 v1.33 item 6). Empty accepts no private set.
+	Entry string
 }
 
 // SetState is a project's env sets as a program spec_hash sees them: the key
@@ -133,7 +136,7 @@ func BuildProgram(in ProgramInput) (Program, error) {
 	if len(secretEnv) > maxSecretEnv {
 		return Program{}, fieldErr("invalid secret_env")
 	}
-	if err := validateSecretEnv(secretEnv, in.Sets); err != nil {
+	if err := validateSecretEnv(secretEnv, in.Sets, in.Entry); err != nil {
 		return Program{}, err
 	}
 	for k := range secretEnv {

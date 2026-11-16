@@ -55,14 +55,9 @@ func (s *Server) handleEnvSetCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name string `json:"name"`
-		Keys []struct {
-			Key      string            `json:"key"`
-			Generate *catalog.Generate `json:"generate"`
-			IsSecret *bool             `json:"is_secret"`
-			Value    *string           `json:"value"`
-		} `json:"keys"`
-		Key string `json:"idempotency_key"`
+		Name string           `json:"name"`
+		Keys []envCreateKeyIn `json:"keys"`
+		Key  string           `json:"idempotency_key"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -75,43 +70,9 @@ func (s *Server) handleEnvSetCreate(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "bad_request", "keys must list 1 to 64 keys")
 		return
 	}
-	keys := make([]envCreateKey, 0, len(body.Keys))
-	seen := map[string]bool{}
-	for _, k := range body.Keys {
-		if !envKeyOK(w, k.Key) {
-			return
-		}
-		if seen[k.Key] {
-			writeCode(w, "bad_request", "duplicate key "+k.Key)
-			return
-		}
-		seen[k.Key] = true
-		item := envCreateKey{Key: k.Key, Generate: k.Generate, IsSecret: true}
-		if k.Value != nil {
-			// Secret is the default, so the caller must say plain.
-			if k.Generate != nil || k.IsSecret == nil || *k.IsSecret {
-				writeCode(w, "bad_request", errPlainValueOnly)
-				return
-			}
-			if err := catalog.ValidateEnvValue(*k.Value); err != nil {
-				s.writeField(w, err)
-				return
-			}
-			item.Value = k.Value
-		}
-		if k.Generate != nil {
-			if err := k.Generate.Validate(); err != nil {
-				s.writeField(w, err)
-				return
-			}
-			if k.IsSecret != nil && !*k.IsSecret {
-				writeCode(w, "bad_request", "a generated value is secret")
-				return
-			}
-		} else if k.IsSecret != nil {
-			item.IsSecret = *k.IsSecret
-		}
-		keys = append(keys, item)
+	keys, ok := s.normalizeCreateKeys(w, body.Keys)
+	if !ok {
+		return
 	}
 	if needsSecretsKey(keys) && s.Secrets == nil {
 		s.logger().Error("secrets key not configured")
@@ -131,11 +92,78 @@ func (s *Server) handleEnvSetCreate(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, http.StatusCreated, set)
 }
 
+// envCreateKeyIn is one request key of a create (v1.27 item 4, v1.32 item 2)
+// or of an update's add list (v1.33 item 1).
+type envCreateKeyIn struct {
+	Key      string            `json:"key"`
+	Generate *catalog.Generate `json:"generate"`
+	IsSecret *bool             `json:"is_secret"`
+	Value    *string           `json:"value"`
+}
+
+// normalizeCreateKeys checks the request keys (valid, distinct names; a
+// value only on a plain key; a valid generate object, always secret) and
+// returns them normalized. ok is false when it wrote a refusal.
+func (s *Server) normalizeCreateKeys(w http.ResponseWriter, in []envCreateKeyIn) ([]envCreateKey, bool) {
+	keys := make([]envCreateKey, 0, len(in))
+	seen := map[string]bool{}
+	for _, k := range in {
+		if !envKeyOK(w, k.Key) {
+			return nil, false
+		}
+		if seen[k.Key] {
+			writeCode(w, "bad_request", "duplicate key "+k.Key)
+			return nil, false
+		}
+		seen[k.Key] = true
+		item := envCreateKey{Key: k.Key, Generate: k.Generate, IsSecret: true}
+		if k.Value != nil {
+			// Secret is the default, so the caller must say plain.
+			if k.Generate != nil || k.IsSecret == nil || *k.IsSecret {
+				writeCode(w, "bad_request", errPlainValueOnly)
+				return nil, false
+			}
+			if err := catalog.ValidateEnvValue(*k.Value); err != nil {
+				s.writeField(w, err)
+				return nil, false
+			}
+			item.Value = k.Value
+		}
+		if k.Generate != nil {
+			if err := k.Generate.Validate(); err != nil {
+				s.writeField(w, err)
+				return nil, false
+			}
+			if k.IsSecret != nil && !*k.IsSecret {
+				writeCode(w, "bad_request", "a generated value is secret")
+				return nil, false
+			}
+		} else if k.IsSecret != nil {
+			item.IsSecret = *k.IsSecret
+		}
+		keys = append(keys, item)
+	}
+	return keys, true
+}
+
 // createEnvSetNames generates and seals the values, then creates the set.
 // Generated values are drawn at apply time, so a plan never holds one.
 func (s *Server) createEnvSetNames(r *http.Request, projectID uuid.UUID, name string, keys []envCreateKey, confirm []byte, actor uuid.UUID) (store.EnvSet, error) {
+	in, err := s.envKeyCreates(projectID, name, keys)
+	if err != nil {
+		return store.EnvSet{}, err
+	}
+	set, err := s.Store.CreateEnvSetNames(r.Context(), projectID, name, in, confirm, actor, s.now())
+	if err != nil {
+		return store.EnvSet{}, err
+	}
+	return createdEnvSetBody(set), nil
+}
+
+// envKeyCreates draws the generated values and seals the secret keys.
+func (s *Server) envKeyCreates(projectID uuid.UUID, name string, keys []envCreateKey) ([]store.EnvKeyCreate, error) {
 	if needsSecretsKey(keys) && s.Secrets == nil {
-		return store.EnvSet{}, errSecretsKey
+		return nil, errSecretsKey
 	}
 	in := make([]store.EnvKeyCreate, 0, len(keys))
 	for _, k := range keys {
@@ -145,23 +173,19 @@ func (s *Server) createEnvSetNames(r *http.Request, projectID uuid.UUID, name st
 			if item.Generated {
 				value, err := k.Generate.NewValue()
 				if err != nil {
-					return store.EnvSet{}, err
+					return nil, err
 				}
 				plain = value
 			}
 			sealed, err := s.sealValue(projectID, name, k.Key, plain)
 			if err != nil {
-				return store.EnvSet{}, err
+				return nil, err
 			}
 			item.Nonce, item.Ciphertext, item.KeyVersion = sealed.Nonce, sealed.Ciphertext, sealed.KeyVersion
 		}
 		in = append(in, item)
 	}
-	set, err := s.Store.CreateEnvSetNames(r.Context(), projectID, name, in, confirm, actor, s.now())
-	if err != nil {
-		return store.EnvSet{}, err
-	}
-	return createdEnvSetBody(set), nil
+	return in, nil
 }
 
 // needsSecretsKey reports whether any key is sealed: a generated key or a
@@ -247,6 +271,18 @@ const plainSecretWarning = " looks like a secret but will be stored as plain tex
 // is not shown (api-v1 v1.32 item 2); a plain value under a secret-looking
 // key name adds one reminder sentence per key after the plan.
 func envSetCreatePlan(name string, keys []envCreateKey) string {
+	plan := "create env set " + name + " with "
+	phrase, warnings := envKeysPhrase(keys)
+	plan += phrase
+	if len(warnings) > 0 {
+		plan += ". " + strings.Join(warnings, " ")
+	}
+	return plan
+}
+
+// envKeysPhrase lists keys as the create plan does, and the reminder
+// sentences for plain values under secret-looking names.
+func envKeysPhrase(keys []envCreateKey) (string, []string) {
 	parts := make([]string, 0, len(keys))
 	var warnings []string
 	for _, k := range keys {
@@ -267,11 +303,7 @@ func envSetCreatePlan(name string, keys []envCreateKey) string {
 		}
 		parts = append(parts, k.Key+" ("+desc+", secret)")
 	}
-	plan := "create env set " + name + " with " + strings.Join(parts, ", ")
-	if len(warnings) > 0 {
-		plan += ". " + strings.Join(warnings, " ")
-	}
-	return plan
+	return strings.Join(parts, ", "), warnings
 }
 
 // issueEnvSetCreate stores a delegated plan and answers 202. A set that
@@ -351,8 +383,22 @@ func (s *Server) confirmEnvSetCreate(w http.ResponseWriter, r *http.Request, p p
 		writeCode(w, "conflict", "idempotency_key does not match the request that issued this confirmation")
 		return
 	}
+	// api-v1 v1.33 items 1 and 2: update and delete plans share the table.
+	var change envChangePlanBody
+	isChange := json.Unmarshal(c.Body, &change) == nil && change.Action != ""
+	denyAction := audit.ActionEnvSetCreate
+	switch change.Action {
+	case envChangeUpdate:
+		denyAction = audit.ActionEnvSetUpdate
+	case envChangeDelete:
+		denyAction = audit.ActionEnvSetDelete
+	}
 	if err := authz.Authorize(r.Context(), p.User.ID, c.ProjectID, authz.CapMembers); err != nil {
-		s.deny(w, r, p, idPtr(c.ProjectID), nil, nil, audit.ActionEnvSetCreate, err)
+		s.deny(w, r, p, idPtr(c.ProjectID), nil, nil, denyAction, err)
+		return
+	}
+	if isChange {
+		s.confirmEnvSetChange(w, r, p, hash, c, change)
 		return
 	}
 	var plan envCreatePlanBody
@@ -399,10 +445,13 @@ type envSetNamesOnly struct {
 	Keys      []envKeyNamesOnly `json:"keys"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	UpdatedBy uuid.UUID         `json:"updated_by"`
+	// Entry and UsedBy are api-v1 v1.33 items 6 and 4.
+	Entry  string    `json:"entry,omitempty"`
+	UsedBy *[]string `json:"used_by,omitempty"`
 }
 
 func namesOnly(set store.EnvSet) envSetNamesOnly {
-	out := envSetNamesOnly{Name: set.Name, Keys: make([]envKeyNamesOnly, 0, len(set.Keys)), UpdatedAt: set.UpdatedAt, UpdatedBy: set.UpdatedBy}
+	out := envSetNamesOnly{Name: set.Name, Keys: make([]envKeyNamesOnly, 0, len(set.Keys)), UpdatedAt: set.UpdatedAt, UpdatedBy: set.UpdatedBy, Entry: set.Entry, UsedBy: set.UsedBy}
 	for _, k := range set.Keys {
 		out.Keys = append(out.Keys, envKeyNamesOnly{Key: k.Key, IsSecret: k.IsSecret, RevealPending: k.RevealPending, NeedsValue: k.NeedsValue})
 	}

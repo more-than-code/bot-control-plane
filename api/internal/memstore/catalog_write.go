@@ -60,7 +60,7 @@ func (m *Mem) CommitCatalogWrite(_ context.Context, hash []byte, userID uuid.UUI
 	var err error
 	switch c.Action {
 	case "create":
-		if in.Kind != "image" || !store.SameJSON(c.Body, in.ImageRaw) {
+		if in.Kind != "image" || !store.SameJSON(c.Body, in.PlanJSON()) {
 			return "", store.CatalogEntry{}, store.ErrConflict
 		}
 		entry, err = m.createCatalogEntryLocked(c.ProjectID, in)
@@ -68,7 +68,7 @@ func (m *Mem) CommitCatalogWrite(_ context.Context, hash []byte, userID uuid.UUI
 			return "", store.CatalogEntry{}, store.ErrConflict
 		}
 	case "update":
-		if in.Kind != "image" || !store.SameJSON(c.Body, in.ImageRaw) {
+		if in.Kind != "image" || !store.SameJSON(c.Body, in.PlanJSON()) {
 			return "", store.CatalogEntry{}, store.ErrConflict
 		}
 		id, found := m.entryByName[entryKey(c.ProjectID, c.EntryName)]

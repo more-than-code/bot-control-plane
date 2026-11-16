@@ -511,6 +511,10 @@ type Store interface {
 	ValueRequestStore
 	FileRequestStore
 	ConnectRequestStore
+	// ListOpenRequests is the user's pending, unexpired value, file and
+	// connect requests at at, newest first, at most max (api-v1 v1.33 item
+	// 8), in projects that are not deleted.
+	ListOpenRequests(ctx context.Context, userID uuid.UUID, at time.Time, max int) ([]OpenRequest, error)
 
 	// UpsertGoogleUser creates the user on first sign-in together with a
 	// personal org that the user owns (spec-organizations D-8).
@@ -891,6 +895,16 @@ type Store interface {
 	DeleteEnvKey(ctx context.Context, projectID uuid.UUID, name, key string, actor uuid.UUID, at time.Time) error
 	// DeleteEnvSet returns ErrConflict when an image entry references the set.
 	DeleteEnvSet(ctx context.Context, projectID uuid.UUID, name string) error
+	// ApplyEnvSetChange applies a confirmed env set plan (api-v1 v1.33 items
+	// 1 and 2) in one transaction: it locks and checks the plan (confirm, a
+	// token hash: a missing, used, expired or foreign plan, or a missing set,
+	// is ErrNotFound), then deletes the set (ErrConflict when an entry names
+	// it), or applies Set (existing plain keys only), Add (new keys only),
+	// Remove (existing keys) and MakeSecret (existing keys; seal is called
+	// with each plain value), and marks the plan used. A key whose state no
+	// longer fits is ErrConflict. Any error writes nothing and leaves the
+	// plan unused. Referencing entries are rehashed.
+	ApplyEnvSetChange(ctx context.Context, projectID uuid.UUID, name string, ch EnvSetChange, confirm []byte, seal EnvSealer, actor uuid.UUID, at time.Time) (EnvSet, error)
 	// ListEnvMaterial returns plaintext and ciphertext for one set. It is not an HTTP body.
 	ListEnvMaterial(ctx context.Context, projectID uuid.UUID, name string) ([]EnvMaterial, error)
 

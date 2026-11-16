@@ -632,7 +632,7 @@ func TestEnvRegistryRoutes(t *testing.T) {
 	}
 	createImage(t, w, tok, sc.project.ID, "web", `{"kind":"service","image":"nginx","env_sets":["svc"]}`)
 	status, env, _ = mustCall(t, w, tok, http.MethodDelete, envPath(project, "svc"), "")
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "env set svc is used by entries web")
 	status, env, _ = mustCall(t, w, tok, http.MethodPut, "/v1/projects/"+project+"/catalog/web", `{"kind":"image","spec":{"kind":"service","image":"nginx"}}`)
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	status, env, _ = mustCall(t, w, tok, http.MethodDelete, envPath(project, "svc"), "")
@@ -774,7 +774,6 @@ func TestEnvRegistryConsoleOnly(t *testing.T) {
 		body   string
 	}{
 		{http.MethodPut, envPath(project, "svc"), `{"dotenv":"FOO=next\n"}`},
-		{http.MethodDelete, envPath(project, "svc"), ""},
 		{http.MethodPut, envPath(project, "svc") + "/keys/FOO", `{"value":"next"}`},
 		{http.MethodDelete, envPath(project, "svc") + "/keys/FOO", ""},
 		{http.MethodGet, "/v1/projects/" + project + "/registries", ""},

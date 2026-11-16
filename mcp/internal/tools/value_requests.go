@@ -38,11 +38,12 @@ var valueRequestKind = requestKind{
 const requestEnvValueSchema = `{
   "type": "object",
   "additionalProperties": false,
-  "required": ["project_id", "set", "key"],
+  "required": ["project_id", "key"],
   "properties": {
     "project_id": {"type": "string", "description": "Project UUID."},
-    "set": {"type": "string", "description": "Env set name. The set must exist."},
-    "key": {"type": "string", "description": "Env key, for example STRIPE_API_KEY. It must be new to the set or a placeholder that has no value yet."},
+    "set": {"type": "string", "description": "Env set name. The set must exist. Give set or entry, not both."},
+    "entry": {"type": "string", "description": "Catalog entry name, for a key of the entry's private secrets (secret_env KEY: {\"fill\": true}, stored as @<entry>.KEY). Give set or entry, not both."},
+    "key": {"type": "string", "description": "Env key, for example STRIPE_API_KEY. New to the set, a placeholder without a value, or a secret key whose value the person replaces. A plain key with a value is changed with update_env_set."},
     "reason": {"type": "string", "maxLength": 200, "description": "Optional short note shown to the person on the fill page, as plain text. At most 200 characters, no line breaks. Never put a value here."}
   }
 }`
@@ -64,7 +65,8 @@ func registerValueRequests(server *mcp.Server, api *apiclient.Client) {
 			"Deploybot makes a one-time link, valid for 15 minutes, that only that person can use; they type or paste the value " +
 			"(or let Deploybot generate one) in their own browser, and it is stored encrypted as a secret. You get the link, never the value. " +
 			"The result always has the link as text, alone on its first line; show it to the person. " + severalLinks + " A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
-			"Needs owner or admin on the project. The key must be new to the set or a placeholder without a value; a key that already has a value is changed in the console. " +
+			"Needs owner or admin on the project. Name an env set with set, or an entry with entry for one of its private secrets (secret_env KEY: {\"fill\": true}). " +
+			"The key may be new to the set, a placeholder without a value, or a secret that already has a value: the person then replaces it (a rotation). A plain key with a value is refused; change it with update_env_set. " +
 			"Asking again for the same key replaces your earlier link, which then stops working. " +
 			"Check the outcome with get_env_value_request. Does not contact any host.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, OpenWorldHint: &closedWorld},
@@ -104,6 +106,7 @@ func registerValueRequests(server *mcp.Server, api *apiclient.Client) {
 type requestEnvValueArgs struct {
 	ProjectID string  `json:"project_id"`
 	Set       string  `json:"set"`
+	Entry     string  `json:"entry"`
 	Key       string  `json:"key"`
 	Reason    *string `json:"reason"`
 }
@@ -112,7 +115,14 @@ func (a requestEnvValueArgs) validate() error {
 	if err := requireUUID("project_id", a.ProjectID); err != nil {
 		return err
 	}
-	if !envSetPattern.MatchString(a.Set) {
+	if (a.Set == "") == (a.Entry == "") {
+		return errors.New("give set or entry, not both")
+	}
+	if a.Entry != "" {
+		if err := requireEntryName(a.Entry); err != nil {
+			return err
+		}
+	} else if !envSetPattern.MatchString(a.Set) {
 		return errors.New("set must be an env set name (lowercase letters, digits and dashes)")
 	}
 	if !envKeyPattern.MatchString(a.Key) {
@@ -124,8 +134,25 @@ func (a requestEnvValueArgs) validate() error {
 	return nil
 }
 
+// setName is the set the request names: the given set, or the entry's
+// private set "@<entry>" (api-v1 v1.33 item 6).
+func (a requestEnvValueArgs) setName() string {
+	if a.Entry != "" {
+		return "@" + a.Entry
+	}
+	return a.Set
+}
+
 // subject is how the summaries name the requested key.
-func (a requestEnvValueArgs) subject() string { return a.Set + "." + a.Key }
+func (a requestEnvValueArgs) subject() string { return a.setName() + "." + a.Key }
+
+// createPath is the v1.28 create route, or the v1.33 item 6 entry route.
+func (a requestEnvValueArgs) createPath() string {
+	if a.Entry != "" {
+		return idPath("v1", "projects", a.ProjectID, "catalog", a.Entry, "value-requests")
+	}
+	return idPath("v1", "projects", a.ProjectID, "env-sets", a.Set, "value-requests")
+}
 
 func requestEnvValue(ctx context.Context, api *apiclient.Client, call requestCall) *mcp.CallToolResult {
 	var in requestEnvValueArgs
@@ -142,7 +169,7 @@ func requestEnvValue(ctx context.Context, api *apiclient.Client, call requestCal
 	if in.Reason != nil {
 		body["reason"] = *in.Reason
 	}
-	payload, fail := post(ctx, api, idPath("v1", "projects", in.ProjectID, "env-sets", in.Set, "value-requests"), body)
+	payload, fail := post(ctx, api, in.createPath(), body)
 	if fail != nil {
 		return keepFixedMessage(fail, "conflict", in.Key+" already has a value; edit it in the console")
 	}
@@ -172,7 +199,7 @@ func requestEnvValueRetry(ctx context.Context, api *apiclient.Client, in request
 	if err != nil {
 		return toolError("error", errStatusShape.Error())
 	}
-	if view.set != in.Set || view.key != in.Key {
+	if view.set != in.setName() || view.key != in.Key {
 		return badRequest(errors.New("requestState belongs to another set or key"))
 	}
 	created.ExpiresAt = view.expiresAt
@@ -180,7 +207,7 @@ func requestEnvValueRetry(ctx context.Context, api *apiclient.Client, in request
 }
 
 func fillMessage(in requestEnvValueArgs) string {
-	return fmt.Sprintf("Deploybot needs a value for %s.%s. Open this link in your browser to enter it; the agent never sees the value.", in.Set, in.Key)
+	return fmt.Sprintf("Deploybot needs a value for %s. Open this link in your browser to enter it; the agent never sees the value.", in.subject())
 }
 
 type valueRequestView struct {
@@ -203,7 +230,7 @@ func projectValueRequest(payload json.RawMessage) (valueRequestView, error) {
 		CreatedAt string `json:"created_at"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil || !valueRequestKind.stateOK(body.State) ||
-		!envSetPattern.MatchString(body.Set) || !envKeyPattern.MatchString(body.Key) || !uuidPattern.MatchString(body.ProjectID) {
+		!anySetName(body.Set) || !envKeyPattern.MatchString(body.Key) || !uuidPattern.MatchString(body.ProjectID) {
 		return valueRequestView{}, errStatusShape
 	}
 	out, err := json.Marshal(map[string]any{

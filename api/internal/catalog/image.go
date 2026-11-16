@@ -205,7 +205,7 @@ func BuildImage(name string, raw []byte, sets SetKeys, files map[string]struct{}
 	if len(secretEnv) > maxSecretEnv {
 		return Image{}, fieldErr("invalid secret_env")
 	}
-	if err := validateSecretEnv(secretEnv, sets); err != nil {
+	if err := validateSecretEnv(secretEnv, sets, name); err != nil {
 		return Image{}, err
 	}
 	volumes, err := decodeVolumes(fields["volumes"])
@@ -1102,7 +1102,10 @@ func validTarget(target string) bool {
 	return true
 }
 
-func validateSecretEnv(env map[string]string, sets SetKeys) error {
+// validateSecretEnv is image rule 7. entry is the writing entry's name: its
+// own private set "@<entry>" is accepted as a source (api-v1 v1.33 item 6);
+// any other private set name is invalid.
+func validateSecretEnv(env map[string]string, sets SetKeys, entry string) error {
 	for key, ref := range env {
 		if !envKeyRe.MatchString(key) {
 			return fieldErr("invalid env key")
@@ -1114,7 +1117,8 @@ func validateSecretEnv(env map[string]string, sets SetKeys) error {
 			return fieldErr("this variable changes what the program runs")
 		}
 		set, inner, ok := strings.Cut(ref, ".")
-		if !ok || !ValidName(set) || !envKeyRe.MatchString(inner) {
+		own := entry != "" && set == PrivateSet(entry)
+		if !ok || !(ValidName(set) || own) || !envKeyRe.MatchString(inner) {
 			return fieldErr("invalid secret_env")
 		}
 		keys, exists := sets[set]

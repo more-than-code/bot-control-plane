@@ -75,3 +75,24 @@ func (r RequestMeta) OpenErr(at time.Time) error {
 		return ErrRequestUsed
 	}
 }
+
+// Request types in the open-requests list (api-v1 v1.33 item 8).
+const (
+	RequestTypeValue   = "value"
+	RequestTypeFile    = "file"
+	RequestTypeConnect = "connect"
+)
+
+// OpenRequest is one row of ListOpenRequests. Hash is the stored SHA-256 of
+// the request id; the id itself is not stored. Subject is "set.KEY" for a
+// value request, the file name for a file request and "ghcr.io" for a
+// connect request.
+type OpenRequest struct {
+	Type        string
+	Hash        []byte
+	ProjectID   uuid.UUID
+	ProjectName string
+	Subject     string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+}

@@ -140,6 +140,11 @@ func (m *Mem) createCatalogEntryLocked(projectID uuid.UUID, in store.CatalogWrit
 		CreatedAt:      in.At,
 		UpdatedAt:      in.At,
 	}
+	// syncPrivateEnvLocked fails only before it writes, so an error leaves
+	// nothing behind.
+	if err := m.syncPrivateEnvLocked(e, in.Private, in.Actor, in.At); err != nil {
+		return store.CatalogEntry{}, err
+	}
 	m.entries[e.ID] = e
 	m.entryByName[entryKey(projectID, in.Name)] = e.ID
 	admin, viewer := store.DefaultGrantActions(kind)
@@ -167,6 +172,9 @@ func (m *Mem) replaceCatalogEntryLocked(projectID uuid.UUID, name string, in sto
 		e.ImageRaw = append([]byte(nil), in.ImageRaw...)
 	} else {
 		e.Spec = normWrite(in.Spec)
+	}
+	if err := m.syncPrivateEnvLocked(e, in.Private, in.Actor, in.At); err != nil {
+		return "", store.CatalogEntry{}, err
 	}
 	e.SpecHash = in.SpecHash
 	e.CommandDisplay = in.CommandDisplay
@@ -502,6 +510,7 @@ func (m *Mem) deleteEntryLocked(id uuid.UUID) {
 	if !ok {
 		return
 	}
+	m.dropPrivateSetLocked(e)
 	delete(m.entries, id)
 	delete(m.entryByName, entryKey(e.ProjectID, e.Name))
 	delete(m.grants, id)

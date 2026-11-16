@@ -90,7 +90,7 @@ func (d *DB) CommitCatalogWrite(ctx context.Context, hash []byte, userID uuid.UU
 	var entry store.CatalogEntry
 	switch c.Action {
 	case "create":
-		if in.Kind != "image" || !store.SameJSON(c.Body, in.ImageRaw) {
+		if in.Kind != "image" || !store.SameJSON(c.Body, in.PlanJSON()) {
 			return "", store.CatalogEntry{}, store.ErrConflict
 		}
 		entry, err = insertCatalogEntry(ctx, tx, c.ProjectID, in)
@@ -98,7 +98,7 @@ func (d *DB) CommitCatalogWrite(ctx context.Context, hash []byte, userID uuid.UU
 			return "", store.CatalogEntry{}, store.ErrConflict
 		}
 	case "update":
-		if in.Kind != "image" || !store.SameJSON(c.Body, in.ImageRaw) {
+		if in.Kind != "image" || !store.SameJSON(c.Body, in.PlanJSON()) {
 			return "", store.CatalogEntry{}, store.ErrConflict
 		}
 		var current string

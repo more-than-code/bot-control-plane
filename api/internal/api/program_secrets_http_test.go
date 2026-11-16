@@ -115,7 +115,7 @@ func TestProgramSecretsWrite(t *testing.T) {
 
 	// v1.22 item 2: deleting a set a program uses is conflict.
 	status, env, _ = mustCall(t, w, tok, http.MethodDelete, envPath(project, "gh"), "")
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "env set gh is used by entries gh")
 }
 
 // api-v1 v1.22 items 3, 4 and 6: the frame, the gates and the redaction.

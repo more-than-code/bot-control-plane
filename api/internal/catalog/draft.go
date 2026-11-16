@@ -9,6 +9,14 @@ import (
 // entry exists. It only has to pass ValidImageName.
 const draftName = "draft"
 
+// DraftPrivateSet is the private set name secret_env objects of a draft
+// spec are judged under (api-v1 v1.33 item 6): "@draft". Readiness from a
+// spec reports its keys without reading a stored set of that name.
+const DraftPrivateSet = PrivatePrefix + draftName
+
+// DraftEntry is the entry name a draft spec is built with.
+const DraftEntry = draftName
+
 // BuildImageDraft validates an image spec as BuildImage does for a create,
 // with the same error texts, except that the env sets, set keys and managed
 // files the spec names need not exist yet: readiness from a spec (api-v1

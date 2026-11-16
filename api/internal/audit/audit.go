@@ -74,8 +74,11 @@ const (
 	ActionEnvSetCreate             = "env_set.create"
 	ActionEnvSetWriteConfirmation  = "env_set.write_confirmation_issued"
 	ActionEnvSetDelete             = "env_set.delete"
-	ActionEnvSetList               = "env_set.list"
-	ActionEnvSetGet                = "env_set.get"
+	// ActionEnvSetUpdate is a confirmed update_env_set plan (api-v1 v1.33
+	// item 1). Detail names keys per action, never a value.
+	ActionEnvSetUpdate = "env_set.update"
+	ActionEnvSetList   = "env_set.list"
+	ActionEnvSetGet    = "env_set.get"
 	// Value requests (api-v1 v1.28). The fill itself is env_set.key_put
 	// with detail via "value_request".
 	ActionEnvSetValueRequested       = "env_set.value_requested"

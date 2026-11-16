@@ -413,16 +413,21 @@ func (d *DB) GetEnvSet(ctx context.Context, projectID uuid.UUID, name string) (s
 func envSetView(ctx context.Context, q queryer, projectID uuid.UUID, name string) (store.EnvSet, error) {
 	var set store.EnvSet
 	var by string
+	var entry *string
 	err := q.QueryRow(ctx, `
-SELECT name, updated_at, updated_by::text
-FROM app.env_sets
-WHERE project_id = $1::uuid AND name = $2
-`, projectID.String(), name).Scan(&set.Name, &set.UpdatedAt, &by)
+SELECT s.name, s.updated_at, s.updated_by::text, e.name
+FROM app.env_sets s
+LEFT JOIN app.catalog_entries e ON e.id = s.entry_id
+WHERE s.project_id = $1::uuid AND s.name = $2
+`, projectID.String(), name).Scan(&set.Name, &set.UpdatedAt, &by, &entry)
 	if err != nil {
 		return store.EnvSet{}, mapErr(err)
 	}
 	if set.UpdatedBy, err = parseID(by); err != nil {
 		return store.EnvSet{}, err
+	}
+	if entry != nil {
+		set.Entry = *entry
 	}
 	rows, err := q.Query(ctx, `
 SELECT key, is_secret, value, reveal_pending, needs_value, generated
@@ -1066,12 +1071,18 @@ SELECT EXISTS (SELECT 1 FROM app.env_sets WHERE project_id = $1::uuid AND name =
 	if !exists {
 		return nil, store.ErrNotFound
 	}
-	rows, err := d.pool.Query(ctx, `
+	return envMaterialRows(ctx, d.pool, projectID, name, "")
+}
+
+// envMaterialRows reads one set's values through q; lock is "" or a
+// locking clause such as "FOR UPDATE".
+func envMaterialRows(ctx context.Context, q queryer, projectID uuid.UUID, name, lock string) ([]store.EnvMaterial, error) {
+	rows, err := q.Query(ctx, `
 SELECT key, is_secret, value, nonce, ciphertext, key_version, generated, needs_value
 FROM app.env_values
 WHERE project_id = $1::uuid AND set_name = $2
 ORDER BY key
-`, projectID.String(), name)
+`+lock, projectID.String(), name)
 	if err != nil {
 		return nil, mapErr(err)
 	}

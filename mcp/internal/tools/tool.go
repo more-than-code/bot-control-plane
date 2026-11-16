@@ -54,6 +54,8 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerDeleteCatalogEntry(server, api)
 	registerCreateEnvSet(server, api)
 	registerListEnvSets(server, api)
+	registerUpdateEnvSet(server, api)
+	registerDeleteEnvSet(server, api)
 	registerConfirm(server, api)
 	registerEntryLogs(server, api)
 	registerEntryStatus(server, api)
@@ -61,6 +63,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerFileRequests(server, api)
 	registerConnectRequests(server, api)
 	registerReadiness(server, api)
+	registerSharedNetworkSnippet(server, api)
 }
 
 func addTool(server *mcp.Server, tool *mcp.Tool, h func(context.Context, json.RawMessage) *mcp.CallToolResult) {
@@ -225,6 +228,14 @@ func actedOrPending(status int, payload json.RawMessage) *mcp.CallToolResult {
 	case http.StatusOK:
 		if isNullJSON(payload) {
 			return catalogWriteResult(payload, "deleted")
+		}
+		// api-v1 v1.33 items 1 and 2: an env set update or delete plan.
+		if name, ok := envSetDeletedPayload(payload); ok {
+			out, _ := json.Marshal(map[string]any{"name": name, "deleted": true})
+			return present(out, "deleted env set "+name+".")
+		}
+		if envSetPayload(payload) {
+			return envSetUpdated(payload)
 		}
 		if catalogEntryPayload(payload) {
 			return catalogWriteResult(payload, "updated")

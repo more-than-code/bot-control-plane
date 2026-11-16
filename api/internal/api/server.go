@@ -88,6 +88,8 @@ func contractRoutes() []route {
 		{"GET /v1/oauth/requests/{id}", false, (*Server).handleOAuthRequestGet, delegatedAllow},
 		{"POST /v1/oauth/requests/{id}/approve", false, (*Server).handleOAuthRequestApprove, delegatedHandler},
 		{"POST /v1/oauth/requests/{id}/deny", false, (*Server).handleOAuthRequestDeny, delegatedHandler},
+		// api-v1 v1.33 item 8: the caller's open requests, console only.
+		{"GET /v1/me/requests", false, (*Server).handleMyRequests, delegatedDenyRead},
 		{"GET /v1/me/grants", false, (*Server).handleGrantList, delegatedAllow},
 		{"DELETE /v1/me/grants/{id}", false, (*Server).handleGrantDelete, delegatedHandler},
 		{"POST /v1/auth/device/code", true, (*Server).handleDeviceCode, delegatedAllow},
@@ -150,6 +152,8 @@ func contractRoutes() []route {
 		{"POST /v1/projects/{id}/env-sets", false, (*Server).handleEnvSetCreate, delegatedHandler},
 		{"GET /v1/projects/{id}/env-sets/{set}", false, (*Server).handleEnvSetGet, delegatedAllow},
 		{"PUT /v1/projects/{id}/env-sets/{set}", false, (*Server).handleEnvSetPut, delegatedHandler},
+		// api-v1 v1.33 items 1 and 2: update is a plan for console and delegated; a delegated delete is a plan.
+		{"PATCH /v1/projects/{id}/env-sets/{set}", false, (*Server).handleEnvSetPatch, delegatedHandler},
 		{"DELETE /v1/projects/{id}/env-sets/{set}", false, (*Server).handleEnvSetDelete, delegatedHandler},
 		{"PUT /v1/projects/{id}/env-sets/{set}/keys/{key}", false, (*Server).handleEnvKeyPut, delegatedDeny},
 		{"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}", false, (*Server).handleEnvKeyDelete, delegatedDeny},
@@ -157,6 +161,10 @@ func contractRoutes() []route {
 		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal", false, (*Server).handleEnvKeyReveal, delegatedDeny},
 		// api-v1 v1.28 value requests: create decides in its handler; the fill page, fill and decline are console only.
 		{"POST /v1/projects/{id}/env-sets/{set}/value-requests", false, (*Server).handleValueRequestCreate, delegatedHandler},
+		// api-v1 v1.33 item 6: a value request for a key of the entry's private set.
+		{"POST /v1/projects/{id}/catalog/{name}/value-requests", false, (*Server).handleEntryValueRequestCreate, delegatedHandler},
+		// api-v1 v1.33 item 6 (review A): show-once reveal of a generated private key, console only.
+		{"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/reveal", false, (*Server).handlePrivateKeyReveal, delegatedDeny},
 		{"GET /v1/value-requests/{request_id}", false, (*Server).handleValueRequestGet, delegatedAllow},
 		{"GET /v1/value-requests/{request_id}/fill", false, (*Server).handleValueRequestFillPage, delegatedDenyRead},
 		{"POST /v1/value-requests/{request_id}/fill", false, (*Server).handleValueRequestFill, delegatedDeny},
@@ -178,6 +186,8 @@ func contractRoutes() []route {
 		// api-v1 v1.32 item 3: readiness of a spec before the entry exists.
 		{"POST /v1/projects/{id}/catalog/readiness", false, (*Server).handleReadinessSpec, delegatedAllow},
 		{"GET /v1/projects/{id}/catalog/{name}/host-policy-snippet", false, (*Server).handleHostPolicySnippet, delegatedAllow},
+		// api-v1 v1.33 item 7: the runner.toml lines that open a shared network to the project.
+		{"GET /v1/projects/{id}/hosts/{host_id}/network-snippet", false, (*Server).handleNetworkSnippet, delegatedAllow},
 		{"GET /v1/projects/{id}/image-tags", false, (*Server).handleImageTags, delegatedAllow},
 		{"GET /v1/projects/{id}/image-digest", false, (*Server).handleImageDigest, delegatedAllow},
 		{"GET /v1/projects/{id}/files", false, (*Server).handleFileList, delegatedAllow},

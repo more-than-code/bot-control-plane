@@ -1,7 +1,12 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -76,6 +81,9 @@ type EnvKey struct {
 	RevealPending bool    `json:"reveal_pending"`
 	NeedsValue    bool    `json:"needs_value"`
 	Generated     bool    `json:"-"`
+	// Replaced is set by FillValueRequest when the fill replaced a stored
+	// secret value (api-v1 v1.33 item 3). It is not JSON.
+	Replaced bool `json:"-"`
 }
 
 // EnvKeyPut is one key for PutEnvKey.
@@ -99,6 +107,35 @@ type EnvSet struct {
 	Keys      []EnvKey  `json:"keys"`
 	UpdatedAt time.Time `json:"updated_at"`
 	UpdatedBy uuid.UUID `json:"updated_by"`
+	// Entry is the owning entry's name for a private set "@<entry>"
+	// (api-v1 v1.33 item 6), empty for a shared set.
+	Entry string `json:"entry,omitempty"`
+	// UsedBy is set by the env-set reads only (api-v1 v1.33 item 4): the
+	// entries naming the set in env_sets or secret_env, sorted.
+	UsedBy *[]string `json:"used_by,omitempty"`
+}
+
+// EnvSetChange is one confirmed env-set plan (api-v1 v1.33 items 1 and 2):
+// delete the set, or set plain values, add keys, remove keys and make plain
+// keys secret, all in one transaction. Set values are plain and never secret.
+type EnvSetChange struct {
+	// StateHash, when set, is EnvStateHash of the set when the plan was
+	// made; a set that differs under the lock is ErrEnvSetChanged.
+	StateHash  string
+	Delete     bool
+	Set        map[string]string
+	Add        []EnvKeyCreate
+	Remove     []string
+	MakeSecret []string
+}
+
+// PrivateEnv is the private set write of an image or program entry write
+// (api-v1 v1.33 item 6). Keys is the final key list of "@<entry>": keys of
+// the set not in it are removed, and the set is deleted when it is empty.
+// Add holds the new keys (generated or secret placeholders), already sealed.
+type PrivateEnv struct {
+	Keys []string
+	Add  []EnvKeyCreate
 }
 
 // EnvSecret is one env value prepared for PutEnvSet, CreateEnvSet, and MergeEnvSet.
@@ -245,4 +282,29 @@ func DefaultGrantActions(kind string) (admin, viewer []string) {
 		return []string{"run", "stop", "restart", "logs", "deploy"}, []string{"logs"}
 	}
 	return []string{"run", "stop", "restart", "logs"}, []string{"logs"}
+}
+
+// ErrEnvSetChanged is a confirmed env set plan whose set no longer matches
+// the state it was planned on (api-v1 v1.33 items 1 and 2).
+var ErrEnvSetChanged = errors.New("env set changed since the plan")
+
+// EnvStateHash is a digest of an env set's state as a plan sees it: each
+// key in byte order with is_secret, needs_value, and the plain value or the
+// ciphertext of a secret. reveal_pending and generated are left out, so a
+// reveal does not change it; every value or key write does. It holds no
+// value in clear and is stored only in a plan body.
+func EnvStateHash(mats []EnvMaterial) string {
+	rows := append([]EnvMaterial(nil), mats...)
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Key < rows[j].Key })
+	h := sha256.New()
+	for _, m := range rows {
+		fmt.Fprintf(h, "%s\x00%t\x00%t\x00", m.Key, m.IsSecret, m.NeedsValue)
+		if m.IsSecret {
+			h.Write([]byte(hex.EncodeToString(m.Ciphertext)))
+		} else {
+			h.Write([]byte(m.Plain))
+		}
+		h.Write([]byte{0xff})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

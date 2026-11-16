@@ -69,7 +69,7 @@ func (s *Server) auditDelegatedDenial(r *http.Request, p principal, projectID, h
 
 // issueCatalogImage validates the idempotency key and stores a plan.
 // The image was already built. Nothing is written to the catalog.
-func (s *Server) issueCatalogImage(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, name string, img catalog.Image, hash, key string, replace bool) {
+func (s *Server) issueCatalogImage(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, name string, img catalog.Image, draft privateDraft, final []string, key string, replace bool) {
 	action := "create"
 	var base string
 	var oldImg catalog.Image
@@ -96,7 +96,12 @@ func (s *Server) issueCatalogImage(w http.ResponseWriter, r *http.Request, p pri
 		if err == nil {
 			// Confirm already created the entry. The same key replays the
 			// stored response. A key that was never claimed stays free.
-			reqHash := catalogWriteRequestHash("create", projectID, name, []byte(catalog.SpecJSON(img)))
+			body, err := draft.planBody([]byte(catalog.SpecJSON(img)))
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			reqHash := catalogWriteRequestHash("create", projectID, name, body)
 			if s.replayStoredIdempotency(w, r, p.User.ID, key, reqHash) {
 				return
 			}
@@ -112,7 +117,11 @@ func (s *Server) issueCatalogImage(w http.ResponseWriter, r *http.Request, p pri
 		writeCode(w, "bad_request", "invalid idempotency_key")
 		return
 	}
-	spec := []byte(catalog.SpecJSON(img))
+	spec, err := draft.planBody([]byte(catalog.SpecJSON(img)))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	var plan string
 	if replace {
 		plan = catalogUpdatePlan(name, oldImg, img)
@@ -123,6 +132,9 @@ func (s *Server) issueCatalogImage(w http.ResponseWriter, r *http.Request, p pri
 			return
 		}
 		plan = catalogCreatePlan(project.Name, name, img)
+	}
+	if phrase := draft.privatePlanPhrase(final); phrase != "" {
+		plan += "; " + phrase
 	}
 	reqHash := catalogWriteRequestHash(action, projectID, name, spec)
 	if !s.claimOrReplay(w, r, p.User.ID, key, reqHash) {
@@ -162,6 +174,12 @@ func (s *Server) issueCatalogDelete(w http.ResponseWriter, r *http.Request, p pr
 		return
 	}
 	plan := catalogDeletePlan(entry.Name)
+	if keys, err := s.privateKeys(r.Context(), projectID, entry.Name); err != nil {
+		s.fail(w, err)
+		return
+	} else if len(keys) > 0 {
+		plan += "; its private env set " + catalog.PrivateSet(entry.Name) + " (" + keyCount(len(keys)) + ") is deleted"
+	}
 	reqHash := catalogWriteRequestHash("delete", projectID, name, nil)
 	if !s.claimOrReplay(w, r, p.User.ID, body.Key, reqHash) {
 		return
@@ -301,6 +319,10 @@ func (s *Server) confirmCatalogWrite(w http.ResponseWriter, r *http.Request, p p
 	in := store.CatalogWrite{Name: c.EntryName, Actor: p.User.ID, At: now}
 	if c.Action != "delete" {
 		built, err := s.rebuildCatalogWrite(r.Context(), c.ProjectID, c.EntryName, c.Body, p.User.ID, now)
+		if errors.Is(err, errSecretsKey) {
+			s.secretWriteErr(w, err)
+			return
+		}
 		if err != nil {
 			s.writeField(w, err)
 			return
@@ -324,7 +346,7 @@ func (s *Server) confirmCatalogWrite(w http.ResponseWriter, r *http.Request, p p
 	}
 	status := http.StatusOK
 	var payload any
-	detail := map[string]any{"name": entry.Name, "spec_hash": entry.SpecHash}
+	detail := withPrivateAudit(map[string]any{"name": entry.Name, "spec_hash": entry.SpecHash}, entry.Name, in.Private)
 	if c.Action == "create" || c.Action == "update" {
 		actions, aerr := s.callerActions(r, c.ProjectID, p.User.ID, entry)
 		if aerr != nil {
@@ -363,13 +385,22 @@ func (s *Server) rebuildCatalogWrite(ctx context.Context, projectID uuid.UUID, n
 	if err != nil {
 		return store.CatalogWrite{}, err
 	}
-	img, err := catalog.BuildImage(name, body, names, known)
+	draft, err := draftPrivate(name, catalog.SecretEnvField(body), names)
+	if err != nil {
+		return store.CatalogWrite{}, err
+	}
+	img, err := catalog.BuildImage(name, draft.spec(body), names, known)
+	if err != nil {
+		return store.CatalogWrite{}, err
+	}
+	final := draft.finish(img.SecretEnv, names)
+	private, err := s.privateWrite(projectID, draft, final)
 	if err != nil {
 		return store.CatalogWrite{}, err
 	}
 	return store.CatalogWrite{
 		Name: name, Kind: "image", ImageRaw: json.RawMessage(catalog.SpecJSON(img)),
 		SpecHash: catalog.ImageHash(img, digestMap(names, img)), CommandDisplay: img.Image,
-		Actor: actor, At: at,
+		Actor: actor, At: at, Private: private, PlanBody: body,
 	}, nil
 }

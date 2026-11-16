@@ -49,7 +49,7 @@ func TestProgramEnvSetsOnlyKeyDelete(t *testing.T) {
 		t.Fatalf("hash after key delete %v, was %s, want %s", got, hash, want)
 	}
 	status, env, _ = mustCall(t, w, gtok, http.MethodDelete, envPath(gpath, "gh"), "")
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "env set gh is used by entries gh")
 }
 
 // api-v1 v1.24 item 4 ordering: the deploy access check comes first, then

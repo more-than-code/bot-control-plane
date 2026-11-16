@@ -80,7 +80,7 @@ const hostPolicySnippetSchema = `{
 
 var (
 	readyCheckNames = map[string]bool{
-		"env_sets": true, "env_values": true, "env_refs": true, "files": true, "registry": true,
+		"env_sets": true, "env_values": true, "env_refs": true, "env_pairs": true, "files": true, "registry": true,
 		"host_access": true, "host_online": true, "host_images": true, "host_policy": true, "networks": true,
 	}
 	readyStatuses = map[string]bool{"ok": true, "missing": true, "warn": true, "unknown": true}
@@ -325,12 +325,20 @@ func projectReadiness(payload json.RawMessage, projectID, entry string) (json.Ra
 
 // missingKeyMsg is the readiness text for a secret_env source key that does
 // not exist. Like the v1.27 env refusals it holds names only.
-var missingKeyMsg = regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} in set [a-z0-9][a-z0-9-]{0,47} does not exist$`)
+var missingKeyMsg = regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} in set @?[a-z0-9][a-z0-9-]{0,47} does not exist$`)
+
+// pairMsg is the env_pairs warning (api-v1 v1.33 item 5): key and set names
+// and fixed text only, so it passes unredacted like the env refusals.
+var pairMsg = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63} comes from (the entry's env|env set [a-z0-9][a-z0-9-]{0,47}|the entry's private set( @[a-z0-9][a-z0-9-]{0,47})?) but [A-Z_][A-Z0-9_]{0,63} comes from (the entry's env|env set [a-z0-9][a-z0-9-]{0,47}|the entry's private set( @[a-z0-9][a-z0-9-]{0,47})?); keep a pair in one place$`)
+
+// draftPrivateMsg is the readiness-from-spec row of a secret_env key given
+// as {"fill": true} (api-v1 v1.33 item 6): a key name and fixed text.
+var draftPrivateMsg = regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} in the entry's private set has no value yet; after the entry is created, fill it with request_env_value$`)
 
 // readinessMessage passes the fixed env texts unredacted (the keyword rule
 // would hide the key the person has to fix) and redacts anything else.
 func readinessMessage(msg string) string {
-	if envRefusal(msg) || missingKeyMsg.MatchString(msg) {
+	if envRefusal(msg) || missingKeyMsg.MatchString(msg) || pairMsg.MatchString(msg) || draftPrivateMsg.MatchString(msg) {
 		return msg
 	}
 	return clip(publicString(msg), maxErrorBytes)
@@ -350,7 +358,7 @@ func projectFix(in map[string]any) map[string]any {
 			out[key] = s
 		}
 	}
-	keep("set", envSetPattern)
+	keep("set", anySetPattern)
 	keep("key", envKeyPattern)
 	keep("name", fileNamePattern)
 	keep("registry", registryHostPattern)
@@ -364,6 +372,13 @@ func nextStep(fix map[string]any, projectID, entry string) string {
 	str := func(k string) string { s, _ := fix[k].(string); return s }
 	switch fix["action"] {
 	case "fill_value":
+		if str("set") == "" && str("key") != "" {
+			// A spec's private key (api-v1 v1.33 item 6): no entry exists yet.
+			return fmt.Sprintf("after create_catalog_entry and confirm, call request_env_value with project_id %s, entry (the new entry's name) and key %s; the person enters the value.", projectID, str("key"))
+		}
+		if set := str("set"); strings.HasPrefix(set, "@") && str("key") != "" {
+			return fmt.Sprintf("call request_env_value with project_id %s, entry %s and key %s; the person enters the value.", projectID, set[1:], str("key"))
+		}
 		if str("key") != "" {
 			return fmt.Sprintf("call request_env_value with project_id %s, set %s and key %s; the person enters the value.", projectID, str("set"), str("key"))
 		}
@@ -412,4 +427,75 @@ func accessSummary(registry, access, login string) string {
 	default:
 		return "The registry could not be checked (timeout, unreachable, or a registry Deploybot does not look up)."
 	}
+}
+
+const sharedNetworkSnippetSchema = `{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project_id", "host_id", "network"],
+  "properties": {
+    "project_id": {"type": "string", "format": "uuid"},
+    "host_id": {"type": "string", "format": "uuid"},
+    "network": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "Shared network name."},
+    "subnet": {"type": "string", "description": "IPv4 CIDR inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16, prefix 16 to 28, for example 10.200.10.0/24. Leave out when the host already defines the network."}
+  }
+}`
+
+// snippetLine is one runner.toml line the network snippet may hold.
+var snippetLine = regexp.MustCompile(`^(# [ -~]{1,200}|shared_networks = \["[a-z0-9][a-z0-9-]{0,31}=[0-9./]{9,18}"\]|shared_network_projects = \["[a-z0-9][a-z0-9-]{0,31}:[a-z0-9][a-z0-9-]{0,79}"\])$`)
+
+// registerSharedNetworkSnippet is api-v1 v1.33 item 7.
+func registerSharedNetworkSnippet(server *mcp.Server, api *apiclient.Client) {
+	addTool(server, &mcp.Tool{
+		Name: "shared_network_snippet",
+		Description: noSecretRule + " Get the runner.toml lines a host's root adds so a shared network on that host is open to this project (shared_networks and shared_network_projects). " +
+			"Show the snippet to the person: only the host's root can apply it, over SSH or Cloud Assistant; Deploybot never edits runner.toml or creates a network. " +
+			"Use it when list_hosts shows no shared network open to the project, or a deploy was refused for a closed network. Needs owner or admin. Text only. Does not contact any host.",
+		Annotations: readOnlyAnnotations(false),
+		InputSchema: json.RawMessage(sharedNetworkSnippetSchema),
+	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
+		var in struct {
+			ProjectID string `json:"project_id"`
+			HostID    string `json:"host_id"`
+			Network   string `json:"network"`
+			Subnet    string `json:"subnet"`
+		}
+		if err := decodeArgs(raw, &in); err != nil {
+			return badRequest(err)
+		}
+		if err := requireUUID("project_id", in.ProjectID); err != nil {
+			return badRequest(err)
+		}
+		if err := requireUUID("host_id", in.HostID); err != nil {
+			return badRequest(err)
+		}
+		if !networkNamePattern.MatchString(in.Network) {
+			return badRequest(errors.New("network must be 1 to 32 lowercase letters, digits or dashes"))
+		}
+		q := url.Values{}
+		q.Set("network", in.Network)
+		if in.Subnet != "" {
+			q.Set("subnet", in.Subnet)
+		}
+		payload, fail := get(ctx, api, idPath("v1", "projects", in.ProjectID, "hosts", in.HostID, "network-snippet"), q)
+		if fail != nil {
+			return fail
+		}
+		var body struct {
+			Snippet string `json:"snippet"`
+		}
+		if err := json.Unmarshal(payload, &body); err != nil || body.Snippet == "" || len(body.Snippet) > 1024 {
+			return toolError("error", errStatusShape.Error())
+		}
+		for _, line := range strings.Split(strings.TrimSuffix(body.Snippet, "\n"), "\n") {
+			if !snippetLine.MatchString(line) {
+				return toolError("error", errStatusShape.Error())
+			}
+		}
+		out, err := json.Marshal(map[string]any{"snippet": body.Snippet})
+		if err != nil {
+			return toolError("error", "internal error")
+		}
+		return present(out, "Show this to the person; the host's root applies it (Deploybot never edits runner.toml):\n"+body.Snippet)
+	})
 }

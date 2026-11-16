@@ -170,7 +170,7 @@ func TestTools(t *testing.T) {
 		"query_metrics": true, "list_processes": true, "service_health_history": true,
 		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
 		"get_registry_connect_request": true,
-		"check_readiness":              true, "image_access": true, "host_policy_snippet": true,
+		"check_readiness":              true, "image_access": true, "host_policy_snippet": true, "shared_network_snippet": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -219,6 +219,18 @@ func TestTools(t *testing.T) {
 				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
 			}
 			for _, phrase := range []string{"Nothing changes until confirm", "user agrees", "console", "No secret value is sent or returned", "Never put a secret here", "${KEY}", "If the plan warns that a key looks like a secret, tell the person before confirming.", "plan and result name keys only", "Does not contact"} {
+				if !strings.Contains(tool.Description, phrase) {
+					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
+				}
+			}
+		case tool.Name == "update_env_set" || tool.Name == "delete_env_set":
+			if readOnly || open {
+				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
+			}
+			for _, phrase := range []string{"Nothing changes until confirm", "user agrees", "update those entries first", "No secret value is sent or returned", "Does not contact"} {
+				if tool.Name == "delete_env_set" && phrase == "No secret value is sent or returned" {
+					phrase = "No value is sent or returned"
+				}
 				if !strings.Contains(tool.Description, phrase) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
@@ -346,12 +358,13 @@ func TestTools(t *testing.T) {
 		"request_env_value", "get_env_value_request", "request_file", "get_file_request",
 		"connect_registry", "get_registry_connect_request",
 		"check_readiness", "image_access", "host_policy_snippet",
+		"update_env_set", "delete_env_set", "shared_network_snippet",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	if len(seen) != 34 {
+	if len(seen) != 37 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -849,7 +862,6 @@ func TestInputValidationSkipsAPI(t *testing.T) {
 		{name: "lines negative", tool: "entry_logs", args: map[string]any{"project_id": projectID, "entry": entryName, "host_id": hostID, "lines": -1}},
 		{name: "logs bad entry", tool: "entry_logs", args: map[string]any{"project_id": projectID, "entry": "Bad", "host_id": hostID, "lines": 10}},
 		{name: "confirm entry only", tool: "confirm", args: map[string]any{"confirmation_id": confirmationID, "idempotency_key": "k", "entry": imageEntry}},
-		{name: "confirm project only", tool: "confirm", args: map[string]any{"confirmation_id": confirmationID, "idempotency_key": "k", "project_id": projectID}},
 		{name: "confirm bad entry", tool: "confirm", args: map[string]any{"confirmation_id": confirmationID, "idempotency_key": "k", "project_id": projectID, "entry": "Bad"}},
 		{name: "deploy missing key", tool: "deploy_entry", args: map[string]any{"project_id": projectID, "entry": imageEntry, "host_id": hostID}},
 		{name: "deploy missing project", tool: "deploy_entry", args: map[string]any{"entry": imageEntry, "host_id": hostID, "idempotency_key": "k"}},
@@ -1645,6 +1657,10 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 	switch mode {
 	case "env-sets":
 		if reply, ok := envSetsReply(r, plan); ok {
+			return reply.status, reply.code, reply.msg, reply.payload
+		}
+	case "v133":
+		if reply, ok := v133Reply(r, plan); ok {
 			return reply.status, reply.code, reply.msg, reply.payload
 		}
 	case "needs-value":

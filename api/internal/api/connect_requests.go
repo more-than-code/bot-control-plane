@@ -195,12 +195,14 @@ func (s *Server) startConnectRequest(w http.ResponseWriter, r *http.Request, p p
 		return "", true
 	}
 	id := *body.ConnectRequestID
-	if !requestIDPattern.MatchString(id) {
+	// A console session may name the request by its handle (api-v1 v1.33 item 8).
+	hash, ok := requestHash(id, true)
+	if !ok {
 		writeCode(w, "not_found", "not found")
 		return "", false
 	}
 	// The caller already passed the owner-or-admin check on this project.
-	req, err := s.Store.GetConnectRequest(r.Context(), secret.Hash(id))
+	req, err := s.Store.GetConnectRequest(r.Context(), hash)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && (req.UserID != p.User.ID || req.ProjectID != projectID)) {
 		writeCode(w, "not_found", "not found")
 		return "", false

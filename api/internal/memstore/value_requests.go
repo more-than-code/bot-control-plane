@@ -15,7 +15,7 @@ import (
 func (m *Mem) CreateValueRequest(_ context.Context, hash []byte, in store.ValueRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !catalog.ValidName(in.Set) {
+	if !catalog.ValidEnvSetName(in.Set) {
 		return store.ErrInvalid
 	}
 	if err := catalog.ValidateEnvKey(in.Key); err != nil {
@@ -85,6 +85,8 @@ func (m *Mem) FillValueRequest(_ context.Context, hash []byte, userID uuid.UUID,
 	if err != nil {
 		return store.EnvKey{}, err
 	}
+	// A secret key that is not a placeholder is a rotation (v1.33 item 3).
+	replaced := idx >= 0 && m.envValues[id][idx].IsSecret && !m.envValues[id][idx].NeedsValue
 	// Written secret whatever a placeholder was, as in the Postgres store.
 	row := envValueRec{
 		Key:           req.Key,
@@ -110,7 +112,7 @@ func (m *Mem) FillValueRequest(_ context.Context, hash []byte, userID uuid.UUID,
 	req.State = store.RequestFilled
 	req.DoneAt = &done
 	m.valueRequests[hashKey(hash)] = req
-	return store.EnvKey{Key: req.Key, IsSecret: true, RevealPending: in.Generated, Generated: in.Generated}, nil
+	return store.EnvKey{Key: req.Key, IsSecret: true, RevealPending: in.Generated, Generated: in.Generated, Replaced: replaced}, nil
 }
 
 func (m *Mem) DeclineValueRequest(_ context.Context, hash []byte, userID uuid.UUID, at time.Time) error {
@@ -171,14 +173,15 @@ func (m *Mem) openRequestLocked(hash []byte, userID uuid.UUID, at time.Time) (st
 	return req, nil
 }
 
-// keyOpenLocked returns the key's index in the set, -1 when absent. A key
-// with a value (present and not needs_value) is ErrKeyExists.
+// keyOpenLocked returns the key's index in the set, -1 when absent. A plain
+// key with a value is ErrKeyExists; a secret key with a value may be
+// replaced (api-v1 v1.33 item 3).
 func (m *Mem) keyOpenLocked(projectID uuid.UUID, set, key string) (int, error) {
 	for i, v := range m.envValues[envKey(projectID, set)] {
 		if v.Key != key {
 			continue
 		}
-		if !v.NeedsValue {
+		if !v.NeedsValue && !v.IsSecret {
 			return i, store.ErrKeyExists
 		}
 		return i, nil

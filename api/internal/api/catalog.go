@@ -24,7 +24,7 @@ type catalogBody struct {
 	RunAs          string            `json:"run_as"`
 	Env            map[string]string `json:"env"`
 	EnvSets        []string          `json:"env_sets"`
-	SecretEnv      map[string]string `json:"secret_env"`
+	SecretEnv      json.RawMessage   `json:"secret_env"`
 	Port           *int              `json:"port"`
 	Restart        string            `json:"restart"`
 	Spec           json.RawMessage   `json:"spec"`
@@ -39,7 +39,7 @@ type catalogReplaceBody struct {
 	RunAs          string            `json:"run_as"`
 	Env            map[string]string `json:"env"`
 	EnvSets        []string          `json:"env_sets"`
-	SecretEnv      map[string]string `json:"secret_env"`
+	SecretEnv      json.RawMessage   `json:"secret_env"`
 	Port           *int              `json:"port"`
 	Restart        string            `json:"restart"`
 	Spec           json.RawMessage   `json:"spec"`
@@ -184,7 +184,7 @@ func (s *Server) handleCatalogCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Kind == "image" {
-		if programFieldsSet(body.Command, body.Dir, body.RunAs, body.Restart, body.Shell, body.Env, body.Port) || body.EnvSets != nil || body.SecretEnv != nil {
+		if programFieldsSet(body.Command, body.Dir, body.RunAs, body.Restart, body.Shell, body.Env, body.Port) || body.EnvSets != nil || specPresent(body.SecretEnv) {
 			writeCode(w, "bad_request", "invalid json")
 			return
 		}
@@ -203,9 +203,9 @@ func (s *Server) handleCatalogCreate(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "bad_request", "invalid name")
 		return
 	}
-	prog, hash, ok := s.buildProgram(w, r, id, catalog.ProgramInput{
+	prog, hash, private, ok := s.buildProgram(w, r, id, body.Name, body.SecretEnv, catalog.ProgramInput{
 		Command: body.Command, Shell: body.Shell, Dir: body.Dir, RunAs: body.RunAs, Env: body.Env,
-		Port: body.Port, Restart: body.Restart, EnvSets: body.EnvSets, SecretEnv: body.SecretEnv,
+		Port: body.Port, Restart: body.Restart, EnvSets: body.EnvSets,
 	})
 	if !ok {
 		return
@@ -217,6 +217,7 @@ func (s *Server) handleCatalogCreate(w http.ResponseWriter, r *http.Request) {
 		CommandDisplay: prog.Display,
 		Actor:          p.User.ID,
 		At:             s.now(),
+		Private:        private,
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -226,7 +227,7 @@ func (s *Server) handleCatalogCreate(w http.ResponseWriter, r *http.Request) {
 	s.auditOK(r.Context(), p, store.AuditRow{
 		ProjectID: idPtr(id),
 		Action:    audit.ActionCatalogCreate,
-		Detail:    map[string]any{"name": entry.Name, "spec_hash": entry.SpecHash},
+		Detail:    withPrivateAudit(map[string]any{"name": entry.Name, "spec_hash": entry.SpecHash}, entry.Name, private),
 	})
 	writeOK(w, http.StatusCreated, entry)
 }
@@ -249,7 +250,36 @@ func (s *Server) handleCatalogGet(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeOK(w, http.StatusOK, entry)
+	// api-v1 v1.33 item 6: the entry's private keys, names and flags only.
+	keys, err := s.privateKeys(r.Context(), id, entry.Name)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	body, err := withField(entry, "private_keys", keys)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, body)
+}
+
+// withField is v marshalled as a JSON object with one more member.
+func withField(v any, name string, value any) (map[string]json.RawMessage, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	extra, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	out[name] = extra
+	return out, nil
 }
 
 func (s *Server) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +321,7 @@ func (s *Server) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing.Kind == "image" {
-		if programFieldsSet(body.Command, body.Dir, body.RunAs, body.Restart, body.Shell, body.Env, body.Port) || body.EnvSets != nil || body.SecretEnv != nil {
+		if programFieldsSet(body.Command, body.Dir, body.RunAs, body.Restart, body.Shell, body.Env, body.Port) || body.EnvSets != nil || specPresent(body.SecretEnv) {
 			writeCode(w, "bad_request", "invalid json")
 			return
 		}
@@ -302,9 +332,9 @@ func (s *Server) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "bad_request", "invalid json")
 		return
 	}
-	prog, hash, ok := s.buildProgram(w, r, id, catalog.ProgramInput{
+	prog, hash, private, ok := s.buildProgram(w, r, id, name, body.SecretEnv, catalog.ProgramInput{
 		Command: body.Command, Shell: body.Shell, Dir: body.Dir, RunAs: body.RunAs, Env: body.Env,
-		Port: body.Port, Restart: body.Restart, EnvSets: body.EnvSets, SecretEnv: body.SecretEnv,
+		Port: body.Port, Restart: body.Restart, EnvSets: body.EnvSets,
 	})
 	if !ok {
 		return
@@ -315,6 +345,7 @@ func (s *Server) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
 		CommandDisplay: prog.Display,
 		Actor:          p.User.ID,
 		At:             s.now(),
+		Private:        private,
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -323,7 +354,7 @@ func (s *Server) handleCatalogPut(w http.ResponseWriter, r *http.Request) {
 	s.auditOK(r.Context(), p, store.AuditRow{
 		ProjectID: idPtr(id),
 		Action:    audit.ActionCatalogUpdate,
-		Detail:    map[string]any{"name": entry.Name, "old_spec_hash": old, "spec_hash": entry.SpecHash},
+		Detail:    withPrivateAudit(map[string]any{"name": entry.Name, "old_spec_hash": old, "spec_hash": entry.SpecHash}, entry.Name, private),
 	})
 	entry.MyActions = myActions(heldActions(entry.Kind, authz.RoleOwner, p.User.ID, nil))
 	writeOK(w, http.StatusOK, s.replacedLastDeployed(r, id, entry))
@@ -554,28 +585,51 @@ func (s *Server) catalogByName(r *http.Request, projectID uuid.UUID, name string
 }
 
 // buildProgram validates a program body against the project's env sets and
-// returns the spec and its spec_hash (api-v1 v1.22 items 1 and 2).
-func (s *Server) buildProgram(w http.ResponseWriter, r *http.Request, projectID uuid.UUID, in catalog.ProgramInput) (catalog.Program, string, bool) {
+// returns the spec, its spec_hash (api-v1 v1.22 items 1 and 2) and the
+// private set write of the entry (api-v1 v1.33 item 6). secretRaw is the
+// body's secret_env: "<set>.<KEY>" strings or private key objects.
+func (s *Server) buildProgram(w http.ResponseWriter, r *http.Request, projectID uuid.UUID, entry string, secretRaw json.RawMessage, in catalog.ProgramInput) (catalog.Program, string, *store.PrivateEnv, bool) {
 	names, err := s.Store.ListEnvKeyNames(r.Context(), projectID)
 	if err != nil {
 		s.fail(w, err)
-		return catalog.Program{}, "", false
+		return catalog.Program{}, "", nil, false
 	}
 	if names == nil {
 		names = map[string][]string{}
 	}
+	draft, err := draftPrivate(entry, secretRaw, names)
+	if err != nil {
+		s.writeField(w, err)
+		return catalog.Program{}, "", nil, false
+	}
+	in.SecretEnv = draft.refs
+	in.Entry = entry
 	in.Sets = names
 	prog, err := catalog.BuildProgram(in)
 	if err != nil {
 		s.writeField(w, err)
-		return catalog.Program{}, "", false
+		return catalog.Program{}, "", nil, false
 	}
+	final := draft.finish(prog.SecretEnv, names)
 	sets, err := s.programSetState(r.Context(), projectID, prog.EnvRefs())
 	if err != nil {
 		s.fail(w, err)
-		return catalog.Program{}, "", false
+		return catalog.Program{}, "", nil, false
 	}
-	return prog, catalog.ProgramHash(prog, sets), true
+	// The private set's key names as they will be stored.
+	if sets.Keys == nil {
+		sets.Keys = map[string][]string{}
+	}
+	sets.Keys[catalog.PrivateSet(entry)] = names[catalog.PrivateSet(entry)]
+	if len(final) == 0 {
+		delete(sets.Keys, catalog.PrivateSet(entry))
+	}
+	private, err := s.privateWrite(projectID, draft, final)
+	if err != nil {
+		s.secretWriteErr(w, err)
+		return catalog.Program{}, "", nil, false
+	}
+	return prog, catalog.ProgramHash(prog, sets), private, true
 }
 
 func (s *Server) writeField(w http.ResponseWriter, err error) {

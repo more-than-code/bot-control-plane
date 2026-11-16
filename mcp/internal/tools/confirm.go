@@ -25,7 +25,7 @@ const confirmSchema = `{
 func registerConfirm(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "confirm",
-		Description: "Perform a pending catalog run, stop, restart, deploy, or rollback, or replace health checks, or create, replace, or delete a catalog entry, after the user agrees. The action is real and is audited. This contacts the host now for a program or an image deploy or rollback. Pass the same idempotency_key as the run, stop, restart, deploy_entry, rollback_entry, set_health_checks, create_catalog_entry, update_catalog_entry, or delete_catalog_entry call that returned this confirmation; a different key is refused and nothing runs. A program confirm with project_id and entry waits up to 30 seconds. A deploy or rollback confirm waits up to 50 seconds, with or without project_id and entry. Pass project_id and entry when you have them: for a program they keep the shorter wait. Returns the program status, or for an image the outcome, short digest, exit code, and last log lines. Right after a program run or restart, its ports and started_at can still be empty; they appear in entry_status after the host's next status report, a few seconds later. A health-check confirm reports how many checks were set. A catalog-entry confirm does not contact the host. It returns the entry name and image reference without env values, or says the entry was deleted. A deploy or rollback still going after 50 seconds keeps running on the host: the result is \"still running on the host\"; check entry_status for the outcome.",
+		Description: "Perform a pending catalog run, stop, restart, deploy, or rollback, or replace health checks, or create, replace, or delete a catalog entry, or create, update, or delete an env set, after the user agrees. The action is real and is audited. This contacts the host now for a program or an image deploy or rollback. Pass the same idempotency_key as the run, stop, restart, deploy_entry, rollback_entry, set_health_checks, create_catalog_entry, update_catalog_entry, delete_catalog_entry, create_env_set, update_env_set, or delete_env_set call that returned this confirmation; a different key is refused and nothing runs. A program confirm with project_id and entry waits up to 30 seconds. A deploy or rollback confirm waits up to 50 seconds, with or without project_id and entry. Pass project_id and entry when you have them for a run, stop, restart, deploy, or rollback: for a program they keep the shorter wait. For any other plan leave entry out; project_id alone is ignored. Returns the program status, or for an image the outcome, short digest, exit code, and last log lines. Right after a program run or restart, its ports and started_at can still be empty; they appear in entry_status after the host's next status report, a few seconds later. A health-check confirm reports how many checks were set. A catalog-entry confirm does not contact the host. It returns the entry name and image reference without env values, or says the entry was deleted. A deploy or rollback still going after 50 seconds keeps running on the host: the result is \"still running on the host\"; check entry_status for the outcome.",
 		Annotations: mutatingAnnotations(true),
 		InputSchema: json.RawMessage(confirmSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -44,8 +44,14 @@ func registerConfirm(server *mcp.Server, api *apiclient.Client) {
 		if err := requireIdempotencyKey(in.IdempotencyKey); err != nil {
 			return badRequest(err)
 		}
-		if (in.ProjectID == "") != (in.Entry == "") {
-			return badRequest(errors.New("project_id and entry are both required to confirm a deploy or rollback"))
+		// project_id and entry only choose the wait of a program run, stop or
+		// restart, or a deploy or rollback. project_id alone (as an agent
+		// passes for an env set or catalog-entry plan) is ignored.
+		if in.Entry != "" && in.ProjectID == "" {
+			return badRequest(errors.New("entry needs project_id: pass both for a program run, stop or restart or an image deploy or rollback, or leave entry out"))
+		}
+		if in.Entry == "" {
+			in.ProjectID = ""
 		}
 		if in.ProjectID != "" {
 			if err := requireUUID("project_id", in.ProjectID); err != nil {
