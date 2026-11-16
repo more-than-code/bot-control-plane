@@ -67,6 +67,6 @@ The `deploybot` CLI is not part of the server bundle. bot-agent is released from
 
 GNU Affero General Public License v3.0 only (AGPL-3.0-only). See [LICENSE](LICENSE). You may self-host and change this software. If you offer a changed version to users over a network, you must offer them its source code. bot-agent is Apache-2.0.
 
-Outside pull requests are not merged yet; see [CONTRIBUTING.md](CONTRIBUTING.md).
+The Deploybot name and logo are not licensed under the code licence; forks must use a different name. Outside pull requests are not merged yet; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Commercial licences are available for organisations that cannot use AGPL-3.0. Contact licensing@deploybot.dev.
