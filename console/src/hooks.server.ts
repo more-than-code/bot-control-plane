@@ -12,10 +12,21 @@ import {
 } from '$lib/server/session';
 import { applyThemeMarker, parseTheme, THEME_COOKIE } from '$lib/theme';
 
+/**
+ * `no-referrer` everywhere, except the pages whose Connect GitHub forms post natively
+ * (so the browser follows the redirect to github.com). Under `no-referrer` a native
+ * form POST carries `Origin: null`, which SvelteKit's CSRF check refuses in
+ * production. `same-origin` sends the real Origin to the console and still no
+ * Referer to github.com.
+ */
+export function referrerPolicyFor(pathname: string): 'no-referrer' | 'same-origin' {
+	return pathname.startsWith('/projects/') || pathname.startsWith('/connect/') ? 'same-origin' : 'no-referrer';
+}
+
 function applyHeaders(pathname: string, response: Response): Response {
 	response.headers.set('x-content-type-options', 'nosniff');
 	response.headers.set('x-frame-options', 'DENY');
-	response.headers.set('referrer-policy', 'no-referrer');
+	response.headers.set('referrer-policy', referrerPolicyFor(pathname));
 	if (needsNoStore(pathname)) response.headers.set('cache-control', 'no-store');
 	return response;
 }
