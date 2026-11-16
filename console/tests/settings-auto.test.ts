@@ -348,7 +348,8 @@ describe('Registries card and readiness markup', () => {
 		assert.equal(/deployBlocked = \$derived\([^)]*readiness/i.test(deploy), false);
 		const drawer = readFileSync(new URL('../src/routes/projects/[id]/CatalogImageDialog.svelte', import.meta.url), 'utf8');
 		// A private-set fix points at the drawer's own "Secrets for this entry" list (v1.33 item 6).
-		assert.match(drawer, /<ReadinessList entry=\{entry\.name\} collapsed=\{readinessCollapsed\} privateKeysId="private-keys-\{entry\.name\}" \/>/);
+		// A confirmed public-address change re-runs it (refreshKey, api-v1 v1.35 `routes` check).
+		assert.match(drawer, /<ReadinessList entry=\{entry\.name\} collapsed=\{readinessCollapsed\} privateKeysId="private-keys-\{entry\.name\}" refreshKey=\{routesSaved\} \/>/);
 		// The first scroll of the form below folds the band; a scroll inside the band itself does not.
 		assert.match(drawer, /onscrollcapture=\{foldReadinessOnScroll\}/);
 		assert.match(drawer, /readinessBand\?\.contains\(target\)/);

@@ -13,6 +13,7 @@
 	import type { KnownSet } from '$lib/image-spec';
 	import type { CatalogEditorState } from '$lib/project-action';
 	import CatalogEntryForm from './CatalogEntryForm.svelte';
+	import EntryRoutes from './EntryRoutes.svelte';
 
 	let {
 		mode,
@@ -137,6 +138,12 @@
 				};
 			}}
 		></form>
+		{#if mode === 'edit' && entry}
+			<!-- Public addresses (api-v1 v1.35): saved on their own, as a plan to confirm; not part of the program form. -->
+			<div class="max-h-[35dvh] shrink-0 overflow-y-auto border-b px-4 pb-3">
+				<EntryRoutes {entry} />
+			</div>
+		{/if}
 		<CatalogEntryForm {mode} {entry} {hosts} {saveAction} {parseAction} {editor} {sets} {setsMessage} {setsStatus} {retrySets}>
 			{#snippet cancel()}
 				<Sheet.Close type="button" class={buttonVariants({ variant: 'outline' })}>Cancel</Sheet.Close>

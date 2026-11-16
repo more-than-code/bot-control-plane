@@ -70,7 +70,7 @@ export function accessLine(result: ImageAccessResult): { text: string; connect: 
 	}
 }
 
-export const READY_CHECKS = ['env_sets', 'env_values', 'env_refs', 'files', 'registry', 'host_access', 'host_online', 'host_images', 'host_policy', 'networks', 'env_pairs'] as const;
+export const READY_CHECKS = ['env_sets', 'env_values', 'env_refs', 'files', 'registry', 'host_access', 'host_online', 'host_images', 'host_policy', 'networks', 'env_pairs', 'routes'] as const;
 export type ReadyCheckName = (typeof READY_CHECKS)[number];
 export const READY_STATUSES = ['ok', 'missing', 'warn', 'unknown'] as const;
 export type ReadyStatus = (typeof READY_STATUSES)[number];
@@ -118,7 +118,9 @@ const CHECK_LABELS: Record<ReadyCheckName, string> = {
 	host_policy: 'Host policy',
 	networks: 'Shared networks',
 	/** api-v1 v1.33 item 5: a client ID and its secret come from different places. Advisory (`warn`). */
-	env_pairs: 'Env pairs'
+	env_pairs: 'Env pairs',
+	/** api-v1 v1.35 item 4: the entry's public addresses (domain, published port, the host's edge). Advisory (`warn`). */
+	routes: 'Public addresses'
 };
 
 export function checkLabel(name: ReadyCheckName): string {

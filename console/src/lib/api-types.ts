@@ -189,6 +189,68 @@ export type HostPrograms = {
 	shared_networks: SharedNetwork[] | null;
 	/** True when the agent applies env value changes without Force (agent-protocol v1.14). Missing on older hellos is false. */
 	env_hash: boolean;
+	/** The host's edge policy (api-v1 v1.35, agent-protocol v1.15). Null or absent when the agent did not send it (before 0.2.11). */
+	edge?: HostEdgePolicy | null;
+};
+
+/** `HostPrograms.edge` (api-v1 v1.35): `enabled` is the root's runner.toml `edge = true`, not the org admin's switch. */
+export type HostEdgePolicy = {
+	enabled: boolean;
+	/** The pinned edge image the agent ships. Null when not sent. */
+	image: string | null;
+};
+
+/** Domain verification state (api-v1 v1.35 item 1). */
+export type DomainStatus = 'pending' | 'verified' | 'lapsed';
+
+/** `@` is the domain itself; `*` is one label below it. */
+export type DomainPattern = '@' | '*';
+
+export type DomainAssignment = {
+	project_id: string;
+	project_name: string;
+	pattern: DomainPattern;
+};
+
+/** `GET /v1/orgs/{id}/domains` item. Org owners and admins, console session only. */
+export type OrgDomain = {
+	id: string;
+	name: string;
+	status: DomainStatus;
+	/** `_deploybot.<name>`. */
+	txt_name: string;
+	/** `deploybot-verify=<token>`. */
+	txt_value: string;
+	verified_at: string | null;
+	last_check_at: string | null;
+	assignments: DomainAssignment[];
+};
+
+export type EdgeStatus = 'off' | 'pending' | 'applied' | 'error';
+
+/** `GET /v1/hosts/{id}/edge` (api-v1 v1.35 item 2). Owners and admins of the host's org. */
+export type HostEdge = {
+	/** The host's hello reports `edge.enabled` (its root allowed the edge in runner.toml). */
+	available: boolean;
+	enabled: boolean;
+	status: EdgeStatus;
+	detail: string | null;
+	config_hash: string | null;
+	applied_at: string | null;
+	routes: number;
+};
+
+export type RouteState = 'live' | 'pending' | 'error';
+
+/** One route of a catalog entry (api-v1 v1.35 item 3). */
+export type EdgeRoute = {
+	hostname: string;
+	path_prefix: string;
+	port: number;
+	client_ip_from: 'cloudflare' | null;
+	no_store_paths: string[];
+	host_id: string | null;
+	state: RouteState;
 };
 
 /**

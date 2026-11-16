@@ -11,6 +11,7 @@
 	import { page } from '$app/state';
 	import { actionUrlFrom } from '$lib/url';
 	import { accessFailureOf } from '$lib/host-access';
+	import HostEdgeSection from './HostEdgeSection.svelte';
 	import OverviewTab from './OverviewTab.svelte';
 	import ProcessesTab from './ProcessesTab.svelte';
 
@@ -92,6 +93,12 @@
 		/>
 	{/if}
 	{#if data.canManageAccess}
+		<HostEdgeSection
+			hostName={data.host.name}
+			edge={data.edge ?? null}
+			loadMessage={data.edgeMessage ?? null}
+			actionMessage={typeof form?.edgeMessage === 'string' ? form.edgeMessage : null}
+		/>
 		<section id="access" class="mt-8">
 			<h2 class="mb-3 text-lg font-semibold tracking-tight">Access</h2>
 			{#if data.accessMessage}

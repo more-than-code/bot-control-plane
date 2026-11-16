@@ -68,6 +68,7 @@ import {
 	viewProjectFile
 } from '$lib/server/image-actions';
 import { formText } from '$lib/server/form';
+import { catalogRoutes, catalogRoutesConfirm, catalogRoutesSave } from '$lib/server/edge-actions';
 import { catalogPrivateKeys, catalogReadiness, connectGitHub, githubRefused, hostPolicySnippet, imageAccess, networkSnippet } from '$lib/server/settings-auto';
 import { githubNoteCode, type GitHubNoteCode } from '$lib/settings-auto';
 import { requireUser } from '$lib/server/guard';
@@ -674,6 +675,9 @@ export const actions: Actions = {
 	hostPolicySnippet,
 	networkSnippet,
 	catalogPrivateKeys,
+	catalogRoutes,
+	catalogRoutesSave,
+	catalogRoutesConfirm,
 	askRevoke: async (event) => {
 		requireUser(event);
 		projectId(event.params);

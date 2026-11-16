@@ -159,7 +159,8 @@ test('Make secret confirms with the default button; Delete, Remove and Revoke st
 	}
 	// ConfirmAction derives it from its label and passes it to the form.
 	const action = readFileSync(new URL('../src/lib/components/ConfirmAction.svelte', import.meta.url), 'utf8');
-	assert.match(action, /const destructive = \$derived\(confirmIsDestructive\(label\)\);/);
+	// The label picks the style unless a caller says so (Turn off edge, api-v1 v1.35, is destructive without the word).
+	assert.match(action, /const destructive = \$derived\(destructiveStyle \?\? confirmIsDestructive\(label\)\);/);
 	assert.match(action, /<ConfirmForm [^>]*\{destructive\}/);
 	// The Make secret row action's label is the fixed "Make secret"; key Delete is "Delete {key}".
 	const table = readFileSync(new URL('../src/routes/projects/[id]/EnvSetTable.svelte', import.meta.url), 'utf8');

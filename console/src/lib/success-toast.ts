@@ -19,3 +19,8 @@ export function toastHealthSaved(): void {
 export function toastMemberAdded(email: string): void {
 	toast.success(`Added ${email}.`);
 }
+
+/** "Saved public addresses." after an entry's routes are confirmed (api-v1 v1.35). */
+export function toastRoutesSaved(): void {
+	toast.success('Saved public addresses.');
+}

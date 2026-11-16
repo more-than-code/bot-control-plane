@@ -1,8 +1,10 @@
 import { error, fail, redirect } from '@sveltejs/kit';
-import type { Host, JoinToken, OrgMember, Project } from '$lib/api-types';
+import type { Host, JoinToken, OrgDomain, OrgMember, Project } from '$lib/api-types';
 import { cleanOrgMemberRole, orgTabOf, type OrgScope } from '$lib/org-view';
 import { buildJoinTokenBody, cleanAccessLevel, removeAccessAction, revokeCredentialAction, setAccessAction, type JoinGrantBody } from '$lib/server/access-actions';
-import { actionFailure, apiFetch, apiList, emptyList, loadFailure, loadList } from '$lib/server/api';
+import { addDomain, confirmDomainDelete, deleteDomain, setDomainAssignments, verifyDomain } from '$lib/server/edge-actions';
+import { parseDomainList } from '$lib/server/edge-shape';
+import { actionFailure, apiFetch, apiList, emptyList, loadFailure, loadList, type ListLoad } from '$lib/server/api';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
@@ -31,8 +33,20 @@ const empty = {
 	projects: emptyList<Project>(),
 	hosts: emptyList<Host>(),
 	members: emptyList<OrgMember>(),
-	tokens: emptyList<JoinToken>()
+	tokens: emptyList<JoinToken>(),
+	domains: emptyList<OrgDomain>()
 };
+
+/** The org's domains (api-v1 v1.35 item 1), for Settings. A failure stays in the Domains card. */
+async function loadDomains(event: RequestEvent, orgId: string): Promise<ListLoad<OrgDomain>> {
+	try {
+		const list = parseDomainList(await apiFetch(event, `/v1/orgs/${orgId}/domains`));
+		if (!list) return { ...emptyList<OrgDomain>(), message: 'The API returned an unexpected response.' };
+		return { items: list.items, omitted: list.omitted, truncated: false, message: null };
+	} catch (err) {
+		return { ...emptyList<OrgDomain>(), message: loadFailure(err).message };
+	}
+}
 
 export const load: PageServerLoad = async (event) => {
 	requireUser(event);
@@ -53,13 +67,14 @@ export const load: PageServerLoad = async (event) => {
 	// The Add a host dialog polls this key while it waits for the new host.
 	if (tab === 'hosts') event.depends('org:enrol');
 
-	const [projects, hosts, members, tokens] = await Promise.all([
-		tab === 'projects' || tab === 'hosts' || tab === 'tokens' ? loadList(event, `/v1/orgs/${id}/projects`, parseProject) : emptyList<Project>(),
+	const [projects, hosts, members, tokens, domains] = await Promise.all([
+		tab === 'projects' || tab === 'hosts' || tab === 'tokens' || tab === 'settings' ? loadList(event, `/v1/orgs/${id}/projects`, parseProject) : emptyList<Project>(),
 		tab === 'hosts' ? loadList(event, `/v1/orgs/${id}/hosts`, parseHost) : emptyList<Host>(),
 		tab === 'members' ? loadList(event, `/v1/orgs/${id}/members`, parseOrgMember) : emptyList<OrgMember>(),
-		(tab === 'tokens' || tab === 'hosts') && canAdmin ? loadList(event, `/v1/orgs/${id}/join-tokens`, parseJoinToken) : emptyList<JoinToken>()
+		(tab === 'tokens' || tab === 'hosts') && canAdmin ? loadList(event, `/v1/orgs/${id}/join-tokens`, parseJoinToken) : emptyList<JoinToken>(),
+		tab === 'settings' && canAdmin ? loadDomains(event, id) : emptyList<OrgDomain>()
 	]);
-	return present(event, { org, message: null, tab, canAdmin, canOwner, userId, projects, hosts, members, tokens });
+	return present(event, { org, message: null, tab, canAdmin, canOwner, userId, projects, hosts, members, tokens, domains });
 };
 
 /** The slug of an org project, for the created token's agent instructions. Null when it cannot be read. */
@@ -76,6 +91,11 @@ export const actions: Actions = {
 	setAccess: setAccessAction('hosts'),
 	removeAccess: removeAccessAction('hosts'),
 	revokeCredential: revokeCredentialAction('hosts'),
+	addDomain,
+	verifyDomain,
+	setDomainAssignments,
+	deleteDomain,
+	confirmDomainDelete,
 
 	createProject: async (event) => {
 		requireUser(event);
