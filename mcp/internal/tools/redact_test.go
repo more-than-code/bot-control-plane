@@ -192,3 +192,15 @@ func TestEnvRefusalUnredacted(t *testing.T) {
 		}
 	}
 }
+
+// API refusal texts that name secrets must pass the keyword redaction intact
+// (a "secret" followed by a word reads as secret <value>).
+func TestRedactKeepsAPIRefusalTexts(t *testing.T) {
+	for _, msg := range []string{
+		"the key is secret; change its value in the console or with request_env_value",
+	} {
+		if got := redactText(msg); got != msg {
+			t.Fatalf("redactText(%q) = %q", msg, got)
+		}
+	}
+}

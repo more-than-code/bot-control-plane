@@ -26,7 +26,7 @@ import (
 // value (set, or add with value), as for create (v1.32 item 2).
 
 const (
-	msgChangeSecretValue = "change secret values in the console or with request_env_value"
+	msgChangeSecretValue = "the key is secret; change its value in the console or with request_env_value"
 	msgPatchEmpty        = "send at least one of set, add, remove or make_secret"
 )
 
