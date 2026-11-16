@@ -338,8 +338,8 @@ describe('Registries card and readiness markup', () => {
 		assert.match(html, /Readiness/);
 		assert.match(html, /Checking…/);
 		assert.match(html, /action="[^"]*catalogReadiness"/);
-		// Check again has its visible name only.
-		assert.equal(/aria-label="Check readiness again"/.test(html), false);
+		// Check again is an icon button (spec-agent-usability-1 §3 A), named for screen readers and disabled while checking.
+		assert.match(html, /<button[^>]*\sdisabled[\s=>][^>]*aria-label="Check readiness again"/);
 	});
 
 	test('the deploy drawer, the entry drawer and the program dialogs show readiness; nothing is gated by it', () => {
@@ -444,6 +444,15 @@ describe('rendered readiness, access line and Used by states', () => {
 		]
 	};
 
+	/** The markup inside the first `<details>` carrying `attr`, or '' when there is none. */
+	function detailsOf(html: string, attr: string): string {
+		const m = html.match(new RegExp(`<details[^>]*${attr}[^>]*>([\\s\\S]*?)</details>`));
+		return m ? m[1] : '';
+	}
+	/** The markup outside every `<details>`. */
+	const outsideDetails = (html: string) => html.replace(/<details[\s\S]*?<\/details>/g, '');
+	const ok = (check: string) => ({ check, status: 'ok', message: `${check} is fine`, fix: { action: 'none' } });
+
 	test('ready, error and loading states', () => {
 		const ready = view({ result: { ready: true, checks: [{ check: 'env_sets', status: 'ok', message: 'every env set the entry names exists', fix: { action: 'none' } }] } });
 		assert.match(ready, /Ready as far as Deploybot can check/);
@@ -451,9 +460,65 @@ describe('rendered readiness, access line and Used by states', () => {
 		assert.equal(/<a [^>]*opens in a new tab/.test(ready), false);
 		const failed = view({ message: 'forbidden' });
 		assert.match(failed, /role="alert"[\s\S]*forbidden/);
+		assert.equal(failed.includes('<details'), false);
+		assert.equal(failed.includes('data-check'), false);
 		const loading = view({ loading: true, result: missing });
-		assert.match(loading, /Checking…/);
+		assert.match(loading, /<p[^>]*role="status"[^>]*>Checking…<\/p>/);
 		assert.equal(loading.includes('Missing'), false);
+		assert.equal(loading.includes('<details'), false);
+		assert.match(loading, /<button[^>]*\sdisabled[\s=>][^>]*aria-label="Check readiness again"/);
+		const loadingReady = view({ loading: true, result: { ready: true, checks: [ok('env_sets')] } });
+		assert.equal(loadingReady.includes('checks passed') || loadingReady.includes('check passed'), false);
+	});
+
+	test('all OK: one status line, the full list only inside a closed Details', () => {
+		const checks = [ok('env_sets'), ok('env_values'), ok('files'), { check: 'host_policy', status: 'unknown', message: 'checked at deploy', fix: { action: 'none' } }];
+		const html = view({ result: { ready: true, checks } });
+		assert.match(html, /<section[^>]*aria-labelledby="[^"]+"[^>]*aria-busy="false"/);
+		assert.match(html, /<h3[^>]*class="sr-only"[^>]*>Readiness<\/h3>/);
+		// One summary line with the icon and the count of OK checks; `unknown` is not a problem and not counted as passed.
+		const lines = [...html.matchAll(/role="status"/g)];
+		assert.equal(lines.length, 1);
+		assert.match(html, /<p[^>]*role="status"[^>]*data-readiness-line[^>]*>[\s\S]*?<svg[\s\S]*?Ready: 3 checks passed\s*<\/p>/);
+		// Closed by default; every row (OK and unknown) is inside it, none outside.
+		assert.match(html, /<details(?![^>]*\sopen[\s=>])[^>]*data-readiness-details/);
+		const inside = detailsOf(html, 'data-readiness-details');
+		assert.match(inside, /<summary[^>]*>Details<\/summary>/);
+		assert.equal([...inside.matchAll(/data-check="/g)].length, 4);
+		assert.match(inside, /Ready as far as Deploybot can check/);
+		assert.equal(outsideDetails(html).includes('data-check'), false);
+		assert.equal(html.includes('passed checks'), false);
+		// Check again: ghost icon button with a name and a tooltip, enabled.
+		assert.match(html, /<button(?![^>]*\sdisabled[\s=>])[^>]*aria-label="Check readiness again"/);
+		assert.equal(/>\s*Check again\s*</.test(html), false);
+		// One check reads in the singular.
+		assert.match(view({ result: { ready: true, checks: [ok('env_sets')] } }), /Ready: 1 check passed/);
+	});
+
+	test('a warning is not all OK: it shows outside, the passed ones behind the toggle', () => {
+		const html = view({ result: { ready: true, checks: [ok('env_sets'), { check: 'host_online', status: 'warn', message: 'pi4 is offline', fix: { action: 'none' } }] } });
+		assert.equal(html.includes('data-readiness-details'), false);
+		assert.match(html, /<h3[^>]*class="text-sm font-medium"[^>]*>Readiness<\/h3>/);
+		const outside = outsideDetails(html);
+		assert.match(outside, /data-check="host_online"/);
+		assert.equal(outside.includes('data-check="env_sets"'), false);
+		assert.match(detailsOf(html, 'data-readiness-passed'), /<summary[^>]*>Show 1 passed check<\/summary>[\s\S]*data-check="env_sets"/);
+	});
+
+	test('missing: only the rows that are not OK outside, and Show N passed checks closed', () => {
+		const html = view({ result: { ...missing, checks: [ok('env_sets'), ...missing.checks, ok('networks')] } });
+		assert.match(html, /<p[^>]*role="status"[^>]*>5 items missing\. You can still deploy; the deploy may be refused\.<\/p>/);
+		assert.equal(html.includes('data-readiness-line'), false);
+		const outside = outsideDetails(html);
+		const shown = [...outside.matchAll(/data-check="([a-z_]+)"/g)].map((m) => m[1]);
+		assert.deepEqual(shown, ['env_values', 'registry', 'files', 'host_access', 'host_policy', 'host_online']);
+		assert.match(outside, /Fill value/);
+		assert.match(html, /<details(?![^>]*\sopen[\s=>])[^>]*data-readiness-passed/);
+		const passed = detailsOf(html, 'data-readiness-passed');
+		assert.match(passed, /<summary[^>]*>Show 2 passed checks<\/summary>/);
+		assert.deepEqual([...passed.matchAll(/data-check="([a-z_]+)"/g)].map((m) => m[1]), ['env_sets', 'networks']);
+		// Nothing passed: no toggle.
+		assert.equal(view({ result: missing }).includes('<details'), false);
 	});
 
 	test('missing state: admins get buttons and links, others get who to ask', () => {
