@@ -59,6 +59,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerEntryStatus(server, api)
 	registerValueRequests(server, api)
 	registerFileRequests(server, api)
+	registerConnectRequests(server, api)
 	registerReadiness(server, api)
 }
 

@@ -833,6 +833,10 @@ func (m *Mem) registryLocked(rec registryRec) store.Registry {
 func (m *Mem) PutRegistry(_ context.Context, projectID uuid.UUID, host string, in store.RegistryWrite, actor uuid.UUID, at time.Time) (store.Registry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.putRegistryLocked(projectID, host, in, actor, at)
+}
+
+func (m *Mem) putRegistryLocked(projectID uuid.UUID, host string, in store.RegistryWrite, actor uuid.UUID, at time.Time) (store.Registry, error) {
 	if !m.projectAliveLocked(projectID) {
 		return store.Registry{}, store.ErrNotFound
 	}

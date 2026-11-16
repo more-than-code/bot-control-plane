@@ -82,6 +82,7 @@ func TestIntegration(t *testing.T) {
 TRUNCATE TABLE
     app.env_value_requests,
     app.file_requests,
+    app.registry_connect_requests,
     app.image_deploys,
     app.env_values,
     app.env_sets,

@@ -11,6 +11,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/seal"
+	"github.com/more-than-code/bot-control-plane/api/internal/secret"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
@@ -62,7 +63,12 @@ func (s *Server) handleGitHubStart(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "unavailable", errSecretsKey.Error())
 		return
 	}
-	state, verifier, err := s.GitHubStates.Put(p.User.ID, id, s.now())
+	// api-v1 v1.31 item 5: an optional connect request rides in the state.
+	requestID, ok := s.startConnectRequest(w, r, p, id)
+	if !ok {
+		return
+	}
+	state, verifier, err := s.GitHubStates.PutRequest(p.User.ID, id, requestID, s.now())
 	if errors.Is(err, github.ErrFull) {
 		writeCode(w, "unavailable", "unavailable")
 		return
@@ -106,11 +112,12 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "unavailable", errSecretsKey.Error())
 		return
 	}
-	projectID, verifier, err := s.GitHubStates.Take(body.State, p.User.ID, s.now())
+	taken, err := s.GitHubStates.TakeState(body.State, p.User.ID, s.now())
 	if err != nil {
 		writeCode(w, "bad_request", msgGitHubState)
 		return
 	}
+	projectID, verifier := taken.Project, taken.Verifier
 	if err := authz.Authorize(r.Context(), p.User.ID, projectID, authz.CapMembers); err != nil {
 		var denied *authz.Denied
 		if errors.As(err, &denied) {
@@ -148,14 +155,23 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	// A replaced GitHub token is revoked after the write (item 3).
 	oldToken := s.githubTokenOf(r.Context(), projectID, host)
 	actor := p.User.ID
-	reg, err := s.Store.PutRegistry(r.Context(), projectID, host, store.RegistryWrite{
+	write := store.RegistryWrite{
 		Username:    login,
 		Nonce:       nonce,
 		Ciphertext:  ciphertext,
 		KeyVersion:  seal.KeyVersion,
 		Source:      store.RegistrySourceGitHub,
 		ConnectedBy: &actor,
-	}, p.User.ID, s.now())
+	}
+	var reg store.Registry
+	if taken.Request == "" {
+		reg, err = s.Store.PutRegistry(r.Context(), projectID, host, write, p.User.ID, s.now())
+	} else {
+		// api-v1 v1.31 item 6: the login and the request's move to
+		// connected in one transaction. A request that is no longer
+		// pending is left as it is; the connect still applies.
+		reg, err = s.Store.ConnectRegistry(r.Context(), projectID, host, write, p.User.ID, s.now(), secret.Hash(taken.Request))
+	}
 	if err != nil {
 		// Nothing stores the new token: revoke it so it does not linger at GitHub.
 		s.revokeGitHub(r.Context(), token)
@@ -165,17 +181,23 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	if oldToken != "" && oldToken != token {
 		s.revokeGitHub(r.Context(), oldToken)
 	}
-	s.auditOK(r.Context(), p, store.AuditRow{
-		ProjectID: idPtr(projectID),
-		Action:    audit.ActionRegistryGitHubConnected,
-		Detail:    map[string]any{"host": host, "login": login, "via": viaKind(p.Session.Kind)},
-	})
-	writeOK(w, http.StatusOK, map[string]any{
+	detail := map[string]any{"host": host, "login": login, "via": viaKind(p.Session.Kind)}
+	out := map[string]any{
 		"project_id": projectID,
 		"host":       reg.Host,
 		"username":   reg.Username,
 		"source":     reg.Source,
+	}
+	if taken.Request != "" {
+		detail["request"] = auditRequestRef(secret.Hash(taken.Request))
+		out["connect_request_id"] = taken.Request
+	}
+	s.auditOK(r.Context(), p, store.AuditRow{
+		ProjectID: idPtr(projectID),
+		Action:    audit.ActionRegistryGitHubConnected,
+		Detail:    detail,
 	})
+	writeOK(w, http.StatusOK, out)
 }
 
 // githubTokenOf is the stored token of a github-source row for host, or ""

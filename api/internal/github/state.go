@@ -31,7 +31,10 @@ type pending struct {
 	user     uuid.UUID
 	project  uuid.UUID
 	verifier string
-	expires  time.Time
+	// request is the connect request id the state carries (api-v1 v1.31
+	// item 5), or "" for a start from Settings.
+	request string
+	expires time.Time
 	// seq orders states made at the same instant, so "oldest" is exact.
 	seq uint64
 }
@@ -53,6 +56,12 @@ func NewStates() *States {
 // Put makes a new state (32 random bytes, base64url) and a PKCE verifier for
 // user and project.
 func (s *States) Put(user, project uuid.UUID, now time.Time) (state, verifier string, err error) {
+	return s.PutRequest(user, project, "", now)
+}
+
+// PutRequest is Put for a start that names a connect request (api-v1 v1.31
+// item 5): the state also carries request, which Taken returns.
+func (s *States) PutRequest(user, project uuid.UUID, request string, now time.Time) (state, verifier string, err error) {
 	plain, _, err := secret.NewToken()
 	if err != nil {
 		return "", "", err
@@ -70,24 +79,38 @@ func (s *States) Put(user, project uuid.UUID, now time.Time) (state, verifier st
 	}
 	s.dropOldestLocked(user, now)
 	s.seq++
-	s.byID[plain] = pending{user: user, project: project, verifier: verifier, expires: now.Add(StateTTL), seq: s.seq}
+	s.byID[plain] = pending{user: user, project: project, verifier: verifier, request: request, expires: now.Add(StateTTL), seq: s.seq}
 	return plain, verifier, nil
 }
 
 // Take uses state once. A state that is unknown, used, expired, or made for
 // another user is ErrState; it is spent either way.
 func (s *States) Take(state string, user uuid.UUID, now time.Time) (project uuid.UUID, verifier string, err error) {
+	t, err := s.TakeState(state, user, now)
+	return t.Project, t.Verifier, err
+}
+
+// Taken is a used state: its project, PKCE verifier and connect request
+// id ("" when the start named none).
+type Taken struct {
+	Project  uuid.UUID
+	Verifier string
+	Request  string
+}
+
+// TakeState is Take that also returns the state's connect request id.
+func (s *States) TakeState(state string, user uuid.UUID, now time.Time) (Taken, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.byID[state]
 	if !ok {
-		return uuid.Nil, "", ErrState
+		return Taken{}, ErrState
 	}
 	delete(s.byID, state)
 	if !now.Before(p.expires) || p.user != user {
-		return uuid.Nil, "", ErrState
+		return Taken{}, ErrState
 	}
-	return p.project, p.verifier, nil
+	return Taken{Project: p.project, Verifier: p.verifier, Request: p.request}, nil
 }
 
 // Len is the number of held states (tests).

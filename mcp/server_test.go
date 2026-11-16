@@ -169,7 +169,8 @@ func TestTools(t *testing.T) {
 		"list_orgs": true, "list_projects": true, "list_hosts": true, "list_services": true,
 		"query_metrics": true, "list_processes": true, "service_health_history": true,
 		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
-		"check_readiness": true, "image_access": true, "host_policy_snippet": true,
+		"get_registry_connect_request": true,
+		"check_readiness":              true, "image_access": true, "host_policy_snippet": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -260,6 +261,15 @@ func TestTools(t *testing.T) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
 			}
+		case tool.Name == "connect_registry":
+			if readOnly || open {
+				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
+			}
+			for _, phrase := range []string{"No registry token is ever sent through this tool or shown to you.", "get_registry_connect_request", "github.com", "Does not contact"} {
+				if !strings.Contains(tool.Description, phrase) {
+					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
+				}
+			}
 		case live[tool.Name]:
 			if tool.Name == "confirm" {
 				if readOnly {
@@ -334,13 +344,14 @@ func TestTools(t *testing.T) {
 		"create_catalog_entry", "update_catalog_entry", "delete_catalog_entry",
 		"confirm", "entry_logs", "entry_status", "create_env_set", "list_env_sets",
 		"request_env_value", "get_env_value_request", "request_file", "get_file_request",
+		"connect_registry", "get_registry_connect_request",
 		"check_readiness", "image_access", "host_policy_snippet",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	if len(seen) != 32 {
+	if len(seen) != 34 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -1702,6 +1713,16 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 		return http.StatusOK, "ok", "ok", map[string]any{
 			"request_id": valueRequestID, "project_id": projectID, "set": "services", "key": "STRIPE_API_KEY",
 			"state": "pending", "expires_at": "2026-11-15T10:15:00Z", "created_at": "2026-11-15T10:00:00Z",
+		}
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/projects/"+projectID+"/registries/github/requests":
+		return http.StatusCreated, "ok", "ok", map[string]any{
+			"request_id": connectRequestID, "url": "https://console.example/connect/" + connectRequestID, "expires_at": "2026-11-16T10:15:00Z",
+			"token": readinessLeak,
+		}
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/registry-connect-requests/"+connectRequestID:
+		return http.StatusOK, "ok", "ok", map[string]any{
+			"request_id": connectRequestID, "project_id": projectID, "registry": "ghcr.io",
+			"state": "pending", "expires_at": "2026-11-16T10:15:00Z", "created_at": "2026-11-16T10:00:00Z", "token": readinessLeak,
 		}
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/me":
 		return http.StatusOK, "ok", "", map[string]any{

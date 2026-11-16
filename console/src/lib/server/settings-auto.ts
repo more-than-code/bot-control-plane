@@ -22,6 +22,8 @@ import {
 
 /** The project a Connect GitHub returns to, kept for the callback (spec-settings-automatic §3.1). */
 export const GITHUB_RETURN_COOKIE = 'bot_github_return';
+/** The connect request a Connect GitHub started from chat returns to (api-v1 v1.31), kept for the callback. */
+export const GITHUB_CONNECT_COOKIE = 'bot_github_connect';
 const GITHUB_RETURN_MAX_AGE = 600;
 const UNEXPECTED = 'The API returned an unexpected response.';
 
@@ -58,6 +60,8 @@ export async function connectGitHub(event: RequestEvent) {
 	}
 	if (!isGitHubAuthorizeUrl(target)) return fail(502, present(event, { scope: 'settings' as const, message: UNEXPECTED }));
 	event.cookies.set(GITHUB_RETURN_COOKIE, id, githubReturnCookieOptions(event.url));
+	// A Settings start returns to Settings, even after an abandoned start from a connect page.
+	if (event.cookies.get(GITHUB_CONNECT_COOKIE) != null) event.cookies.delete(GITHUB_CONNECT_COOKIE, githubReturnCookieOptions(event.url));
 	redirect(303, target);
 }
 

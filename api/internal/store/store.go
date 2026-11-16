@@ -510,6 +510,7 @@ type Device struct {
 type Store interface {
 	ValueRequestStore
 	FileRequestStore
+	ConnectRequestStore
 
 	// UpsertGoogleUser creates the user on first sign-in together with a
 	// personal org that the user owns (spec-organizations D-8).

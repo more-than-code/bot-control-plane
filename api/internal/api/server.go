@@ -167,6 +167,11 @@ func contractRoutes() []route {
 		// api-v1 v1.29 Connect GitHub: console only.
 		{"POST /v1/projects/{id}/registries/github/start", false, (*Server).handleGitHubStart, delegatedDeny},
 		{"POST /v1/auth/github/callback", false, (*Server).handleGitHubCallback, delegatedDeny},
+		// api-v1 v1.31 connect requests: create decides in its handler; the page and decline are console only.
+		{"POST /v1/projects/{id}/registries/github/requests", false, (*Server).handleConnectRequestCreate, delegatedHandler},
+		{"GET /v1/registry-connect-requests/{request_id}", false, (*Server).handleConnectRequestGet, delegatedAllow},
+		{"GET /v1/registry-connect-requests/{request_id}/page", false, (*Server).handleConnectRequestPage, delegatedDenyRead},
+		{"POST /v1/registry-connect-requests/{request_id}/decline", false, (*Server).handleConnectRequestDecline, delegatedDeny},
 		// api-v1 v1.29 image access, readiness and the host-policy snippet: console or delegated.
 		{"GET /v1/projects/{id}/image-access", false, (*Server).handleImageAccess, delegatedAllow},
 		{"GET /v1/projects/{id}/catalog/{name}/readiness", false, (*Server).handleReadiness, delegatedAllow},

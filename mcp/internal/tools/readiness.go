@@ -80,8 +80,9 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 		Name: "check_readiness",
 		Description: noSecretRule + " Check whether a catalog entry is ready to deploy, before deploy_entry: env sets exist, env keys have values, ${KEY} references resolve, managed files exist, " +
 			"the image registry is reachable with the stored login, and, with host_id, deploy access, the host being online, containers, the host's image policy and shared networks. " +
-			"Each check has a status (ok, missing, warn, unknown) and a fix. Fixes you can do yourself: fill_value with request_env_value, create_env_set with create_env_set, add_file with request_file (the person adds the file in the browser). " +
-			"Fixes for the person: ask the person to connect GitHub or add a registry login in the console (" + settingsHint + "), or ask an org admin to grant deploy access. " +
+			"Each check has a status (ok, missing, warn, unknown) and a fix. Fixes you can do yourself: fill_value with request_env_value, create_env_set with create_env_set, add_file with request_file (the person adds the file in the browser); " +
+			"you can start connect_github with connect_registry, and the person approves on github.com. " +
+			"Fixes for the person: ask the person to add a registry login in the console (" + settingsHint + "), or ask an org admin to grant deploy access. " +
 			"For host_policy_snippet, call host_policy_snippet and show the person the snippet. Advisory only: deploy keeps its own refusals. " +
 			"Needs owner or admin, or the entry's deploy permission on a host the project deploys to. Reads stored API data and may ask the image registry (cached). Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
@@ -324,7 +325,7 @@ func nextStep(fix map[string]any, projectID, entry string) string {
 	case "create_env_set":
 		return fmt.Sprintf("call create_env_set to create env set %s with the key names the entry needs.", str("set"))
 	case "connect_github":
-		return "ask the person to click Connect GitHub in the console (" + settingsHint + ", Registries)."
+		return fmt.Sprintf("call connect_registry with project_id %s and registry ghcr.io; the person opens the link and approves on github.com.", projectID)
 	case "add_registry_login":
 		return fmt.Sprintf("ask the person to add a registry login for %s in the console (%s, Registries).", str("registry"), settingsHint)
 	case "add_file":
