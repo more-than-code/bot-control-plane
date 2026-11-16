@@ -162,8 +162,8 @@ SELECT token_hash, body::text FROM app.catalog_write_confirmations WHERE entry_n
 	if err != nil || entry.Kind != "image" || entry.SpecHash != current.SpecHash {
 		t.Fatalf("create %+v %v", entry, err)
 	}
-	if _, err := d.GetCatalogWriteConfirmation(ctx, hash); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("applied create kept the plan %v", err)
+	if used, err := d.GetCatalogWriteConfirmation(ctx, hash); err != nil || used.UsedAt == nil {
+		t.Fatalf("applied create left the plan unmarked %+v %v", used, err)
 	}
 	twin, err := d.CreateCatalogEntry(ctx, project.ID, dbImageWrite(t, "twin", `{"kind":"service","image":"nginx"}`, owner.ID, at))
 	if err != nil || twin.SpecHash != entry.SpecHash {
@@ -210,8 +210,8 @@ SELECT token_hash, body::text FROM app.catalog_write_confirmations WHERE entry_n
 	if err != nil || old != entry.SpecHash || updated.SpecHash != next.SpecHash {
 		t.Fatalf("update %s %+v %v", old, updated, err)
 	}
-	if _, err := d.GetCatalogWriteConfirmation(ctx, updHash); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("applied update kept the plan %v", err)
+	if used, err := d.GetCatalogWriteConfirmation(ctx, updHash); err != nil || used.UsedAt == nil {
+		t.Fatalf("applied update left the plan unmarked %+v %v", used, err)
 	}
 
 	_, delHash, err := secret.NewToken()
@@ -228,8 +228,8 @@ SELECT token_hash, body::text FROM app.catalog_write_confirmations WHERE entry_n
 	if _, _, err := d.CommitCatalogWrite(ctx, delHash, owner.ID, at, store.CatalogWrite{Name: "web"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.GetCatalogWriteConfirmation(ctx, delHash); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("applied delete kept the plan %v", err)
+	if used, err := d.GetCatalogWriteConfirmation(ctx, delHash); err != nil || used.UsedAt == nil {
+		t.Fatalf("applied delete left the plan unmarked %+v %v", used, err)
 	}
 	if _, err := d.GetCatalogEntry(ctx, project.ID, "web"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted entry %v", err)

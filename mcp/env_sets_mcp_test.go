@@ -64,21 +64,21 @@ func TestEnvSetTools(t *testing.T) {
 		{[]any{map[string]any{"key": "A"}, map[string]any{"key": "A"}}, "bad_request: duplicate key A"},
 		{[]any{map[string]any{"key": "A", "generate": map[string]any{"kind": "hex"}, "is_secret": false}}, "bad_request: a generated value is secret"},
 		{[]any{map[string]any{"key": "A", "generate": map[string]any{"kind": "hex", "length": 20}}}, "bad_request: generate.length is only for kind password"},
+		// api-v1 v1.32 item 2: a value only on an explicitly plain key.
+		{[]any{map[string]any{"key": "A", "value": envValueLeak}}, "bad_request: a value can be given only for a plain key"},
+		{[]any{map[string]any{"key": "A", "value": envValueLeak, "is_secret": true}}, "bad_request: a value can be given only for a plain key"},
+		{[]any{map[string]any{"key": "A", "value": "x", "is_secret": false, "generate": map[string]any{"kind": "hex"}}}, "bad_request: a value can be given only for a plain key"},
+		{[]any{map[string]any{"key": "A", "value": "a\nb", "is_secret": false}}, "bad_request: invalid env value"},
 	} {
 		res := mustCall(t, cs, "create_env_set", map[string]any{
 			"project_id": projectID, "name": "daikou-db", "keys": tc.keys, "idempotency_key": "es-1",
 		})
-		if !res.IsError || !strings.HasPrefix(textOf(t, res), "bad_request") {
+		if !res.IsError || textOf(t, res) != tc.want {
 			t.Fatalf("%v: error=%v %q", tc.keys, res.IsError, textOf(t, res))
 		}
-	}
-	// A value field is refused by the schema before the API is called.
-	res := mustCall(t, cs, "create_env_set", map[string]any{
-		"project_id": projectID, "name": "daikou-db", "idempotency_key": "es-1",
-		"keys": []any{map[string]any{"key": "A", "value": envValueLeak}},
-	})
-	if !res.IsError {
-		t.Fatal("a value field was accepted")
+		if strings.Contains(textOf(t, res), envValueLeak) {
+			t.Fatal("the refusal echoed the value")
+		}
 	}
 	if fake.v1Count() != before {
 		t.Fatal("rejected input called the api")
@@ -88,7 +88,7 @@ func TestEnvSetTools(t *testing.T) {
 		map[string]any{"key": "POSTGRES_PASSWORD", "generate": map[string]any{"kind": "password"}},
 		map[string]any{"key": "SMTP_HOST", "is_secret": false},
 	}
-	res = mustCall(t, cs, "create_env_set", map[string]any{
+	res := mustCall(t, cs, "create_env_set", map[string]any{
 		"project_id": projectID, "name": "daikou-db", "keys": keys, "idempotency_key": "es-1",
 	})
 	assertCatalogCall(t, fake, http.MethodPost, "/v1/projects/"+projectID+"/env-sets", map[string]any{
@@ -148,4 +148,54 @@ func TestNeedsValueRefusalPassesThrough(t *testing.T) {
 			t.Fatalf("%s: error=%v %q", tool, res.IsError, textOf(t, res))
 		}
 	}
+}
+
+// TestCreateEnvSetPlainValue: a plain key's value goes to the API as given
+// (api-v1 v1.32 item 2), and neither the plan nor the confirm result holds
+// it, even when the API (a fake) sends a value back.
+func TestCreateEnvSetPlainValue(t *testing.T) {
+	fake := &fakeAPI{token: userToken}
+	fake.setMode("env-sets")
+	const plan = "create env set daikou-db with DB_PASSWORD (generated password, 32 characters, secret), SMTP_HOST (plain, value given)"
+	fake.setPlan(plan)
+	mcpSrv, _ := newTestServer(t, fake)
+	cs, _ := connectMCP(t, mcpSrv, userToken)
+	keys := []any{
+		map[string]any{"key": "DB_PASSWORD", "generate": map[string]any{"kind": "password"}},
+		map[string]any{"key": "SMTP_HOST", "is_secret": false, "value": envValueLeak + "-${DB_PASSWORD}"},
+	}
+	res := mustCall(t, cs, "create_env_set", map[string]any{
+		"project_id": projectID, "name": "daikou-db", "keys": keys, "idempotency_key": "es-2",
+	})
+	assertCatalogCall(t, fake, http.MethodPost, "/v1/projects/"+projectID+"/env-sets", map[string]any{
+		"name": "daikou-db", "keys": keys, "idempotency_key": "es-2",
+	})
+	assertPlan(t, res, plan)
+	assertNoEnvLeak(t, res)
+	created := mustCall(t, cs, "confirm", map[string]any{"confirmation_id": confirmationID, "idempotency_key": "es-2"})
+	if created.IsError {
+		t.Fatalf("confirm %q", textOf(t, created))
+	}
+	assertNoEnvLeak(t, created)
+}
+
+// TestCreateEnvSetSecretReminderReachesAgent: the API's reminder for a plain
+// value under a secret-looking key name reaches the tool result unchanged.
+func TestCreateEnvSetSecretReminderReachesAgent(t *testing.T) {
+	fake := &fakeAPI{token: userToken}
+	fake.setMode("env-sets")
+	const reminder = "DB_PASSWORD looks like a secret but will be stored as plain text, visible in the console; use a placeholder and request_env_value instead."
+	plan := "create env set daikou-db with DB_PASSWORD (plain, value given). " + reminder
+	fake.setPlan(plan)
+	mcpSrv, _ := newTestServer(t, fake)
+	cs, _ := connectMCP(t, mcpSrv, userToken)
+	res := mustCall(t, cs, "create_env_set", map[string]any{
+		"project_id": projectID, "name": "daikou-db", "idempotency_key": "es-3",
+		"keys": []any{map[string]any{"key": "DB_PASSWORD", "is_secret": false, "value": envValueLeak}},
+	})
+	assertPlan(t, res, plan)
+	if !strings.Contains(textOf(t, res), reminder) {
+		t.Fatalf("text %q", textOf(t, res))
+	}
+	assertNoEnvLeak(t, res)
 }

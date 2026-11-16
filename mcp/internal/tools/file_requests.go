@@ -65,7 +65,7 @@ func registerFileRequests(server *mcp.Server, api *apiclient.Client) {
 		Description: fileRule + " Ask the signed-in person to add one managed file to a project in the Deploybot console. " +
 			"Deploybot makes a one-time link, valid for 15 minutes, that only that person can use; they paste the content or pick a text file " +
 			"from their computer in their own browser, and it is stored (encrypted when secret, the default). You get the link, never the content. " +
-			"The result always has the link as text; show it to the person. A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
+			"The result always has the link as text, alone on its first line; show it to the person. " + severalLinks + " A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
 			"Needs owner or admin on the project. The file must not exist yet; an existing file is replaced in the console. Files are UTF-8 text of at most 64 KiB, at most 64 per project. " +
 			"Asking again for the same name replaces your earlier link, which then stops working. " +
 			"Check the outcome with get_file_request or check_readiness. Does not contact any host.",

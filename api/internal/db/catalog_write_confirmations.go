@@ -68,7 +68,7 @@ func scanCatalogWriteConfirmation(row pgx.Row) (store.CatalogWriteConfirmation, 
 }
 
 // CommitCatalogWrite locks the plan and the catalog row, applies the console
-// write, and deletes the plan in that same transaction. The idempotency
+// write, and marks the plan used in that same transaction. The idempotency
 // record keeps the response. A conflict rolls back, so the plan stays.
 func (d *DB) CommitCatalogWrite(ctx context.Context, hash []byte, userID uuid.UUID, at time.Time, in store.CatalogWrite) (string, store.CatalogEntry, error) {
 	tx, err := d.pool.Begin(ctx)
@@ -146,8 +146,10 @@ FOR UPDATE
 	if err != nil {
 		return "", store.CatalogEntry{}, err
 	}
+	// Marked, not deleted, so a second confirm can say the plan was used
+	// (api-v1 v1.32 item 1). The next plan insert prunes it after expiry.
 	tag, err := tx.Exec(ctx, `
-DELETE FROM app.catalog_write_confirmations
+UPDATE app.catalog_write_confirmations SET used_at = $3
 WHERE token_hash = $1 AND user_id = $2::uuid AND used_at IS NULL AND expires_at > $3
 `, hash, userID.String(), at)
 	if err != nil {

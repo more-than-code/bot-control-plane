@@ -109,37 +109,15 @@ func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var level string
-	var host store.Host
-	if hostID != nil {
-		var err error
-		level, err = s.Store.HostProjectAccess(r.Context(), projectID, *hostID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if level != authz.LevelDeploy {
-			rel, err := authz.HostRelation(r.Context(), p.User.ID, *hostID)
-			if err != nil {
-				s.fail(w, err)
-				return
-			}
-			if !rel.Sees() {
-				writeCode(w, "not_found", "not found")
-				return
-			}
-		}
-		host, err = s.Store.GetHost(r.Context(), *hostID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
+	host, level, ok := s.readinessHost(w, r, p, projectID, hostID)
+	if !ok {
+		return
 	}
 	if !s.readinessAllowed(r, p, projectID, entry, grants, hostID != nil && level == authz.LevelDeploy) {
 		writeCode(w, "forbidden", "forbidden")
 		return
 	}
-	rd := readiness{projectID: projectID, entry: entry, isImage: entry.Kind == "image", sets: map[string][]store.EnvMaterial{}}
+	rd := readiness{projectID: projectID, entry: entry, isImage: entry.Kind == "image"}
 	if rd.isImage {
 		img, err := catalog.ParseStored(entry.ImageRaw)
 		if err != nil {
@@ -151,6 +129,99 @@ func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rd.refs = catalog.EnvRefs{Sets: entry.Spec.EnvSets, Secret: entry.Spec.SecretEnv, Inline: entry.Spec.Env}
 	}
+	s.writeReadiness(w, r, p, rd, host, level)
+}
+
+// handleReadinessSpec is api-v1 v1.32 item 3: the item 7 checks on an image
+// spec that need not be stored yet. Owner or admin, console or delegated;
+// it stores nothing. An invalid spec answers as a catalog create would,
+// except that the env sets, keys and files it names need not exist: those
+// are what the checks report.
+func (s *Server) handleReadinessSpec(w http.ResponseWriter, r *http.Request) {
+	p, projectID, ok := s.catalogProject(w, r)
+	if !ok {
+		return
+	}
+	if err := authz.Authorize(r.Context(), p.User.ID, projectID, authz.CapMembers); err != nil {
+		s.writeAuth(w, err)
+		return
+	}
+	var body struct {
+		Spec   json.RawMessage `json:"spec"`
+		HostID *string         `json:"host_id"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	var hostID *uuid.UUID
+	if body.HostID != nil {
+		id, ok := parseHostID(w, *body.HostID)
+		if !ok {
+			return
+		}
+		hostID = &id
+	}
+	names, err := s.Store.ListEnvKeyNames(r.Context(), projectID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	known, err := s.projectFileNames(r.Context(), projectID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	img, err := catalog.BuildImageDraft(body.Spec, names, known)
+	if err != nil {
+		s.writeField(w, err)
+		return
+	}
+	host, level, ok := s.readinessHost(w, r, p, projectID, hostID)
+	if !ok {
+		return
+	}
+	// A spec has no entry: no name (so no deploy history for host_policy)
+	// and no grants (owner or admin only, checked above).
+	rd := readiness{projectID: projectID, entry: store.CatalogEntry{Kind: "image"}, isImage: true, img: img, refs: img.EnvRefs()}
+	s.writeReadiness(w, r, p, rd, host, level)
+}
+
+// readinessHost loads the optional host and the project's access level on
+// it. A host the project may not deploy to is visible only to a caller who
+// sees it through its org; otherwise it is not_found. host is nil without
+// hostID.
+func (s *Server) readinessHost(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, hostID *uuid.UUID) (*store.Host, string, bool) {
+	if hostID == nil {
+		return nil, "", true
+	}
+	level, err := s.Store.HostProjectAccess(r.Context(), projectID, *hostID)
+	if err != nil {
+		s.fail(w, err)
+		return nil, "", false
+	}
+	if level != authz.LevelDeploy {
+		rel, err := authz.HostRelation(r.Context(), p.User.ID, *hostID)
+		if err != nil {
+			s.fail(w, err)
+			return nil, "", false
+		}
+		if !rel.Sees() {
+			writeCode(w, "not_found", "not found")
+			return nil, "", false
+		}
+	}
+	host, err := s.Store.GetHost(r.Context(), *hostID)
+	if err != nil {
+		s.fail(w, err)
+		return nil, "", false
+	}
+	return &host, level, true
+}
+
+// writeReadiness runs the checks both readiness routes share, in the item 7
+// order, and writes the Readiness object.
+func (s *Server) writeReadiness(w http.ResponseWriter, r *http.Request, p principal, rd readiness, host *store.Host, level string) {
+	rd.sets = map[string][]store.EnvMaterial{}
 	var list readyList
 	if err := s.checkEnv(r.Context(), &rd, &list); err != nil {
 		s.fail(w, err)
@@ -166,8 +237,8 @@ func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if hostID != nil {
-		if err := s.checkHost(r.Context(), rd, host, level, &list); err != nil {
+	if host != nil {
+		if err := s.checkHost(r.Context(), rd, *host, level, &list); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -418,14 +489,18 @@ func (s *Server) checkHost(ctx context.Context, rd readiness, host store.Host, l
 // checkHostPolicy: the host's image allowlist is not sent to the API, so the
 // check is unknown unless the entry's latest deploy to this host was
 // refused policy_denied (read from the audit, where that refusal is kept).
+// A spec that is not stored yet has no deploy history, so it is unknown.
 func (s *Server) checkHostPolicy(ctx context.Context, rd readiness, host store.Host, list *readyList) error {
 	if !rd.isImage {
 		list.add("host_policy", readyUnknown, "the host's policy is checked when the program runs", readyFix{})
 		return nil
 	}
-	denied, err := s.lastDeployPolicyDenied(ctx, rd.projectID, rd.entry.Name, host.ID)
-	if err != nil {
-		return err
+	denied := false
+	if rd.entry.Name != "" {
+		var err error
+		if denied, err = s.lastDeployPolicyDenied(ctx, rd.projectID, rd.entry.Name, host.ID); err != nil {
+			return err
+		}
 	}
 	if !denied {
 		list.add("host_policy", readyUnknown, "the host's image allowlist is checked at deploy", readyFix{})

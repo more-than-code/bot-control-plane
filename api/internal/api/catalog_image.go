@@ -405,7 +405,7 @@ func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principa
 	}
 	if err := s.Store.MarkConfirmationUsed(r.Context(), secretHash(r), p.User.ID, s.now()); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeCode(w, "not_found", "not found")
+			s.catalogConfirmationLost(w, r, p, secretHash(r))
 			return
 		}
 		s.fail(w, err)

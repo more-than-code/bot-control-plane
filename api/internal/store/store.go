@@ -878,7 +878,7 @@ type Store interface {
 	// CreateEnvSetNames creates a set from key names only (api-v1 v1.27 item
 	// 4): generated keys and placeholders (see EnvKeyCreate). An existing set
 	// is ErrConflict. With confirm (a token hash), the env set plan is checked
-	// and deleted in the same transaction: a missing, used, or expired plan,
+	// and marked used in the same transaction: a missing, used, or expired plan,
 	// or another actor's, is ErrNotFound. Any error writes nothing and leaves
 	// the plan unused.
 	CreateEnvSetNames(ctx context.Context, projectID uuid.UUID, name string, keys []EnvKeyCreate, confirm []byte, actor uuid.UUID, at time.Time) (EnvSet, error)

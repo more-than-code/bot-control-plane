@@ -115,6 +115,7 @@ func TestRouteTable(t *testing.T) {
 		"POST /v1/registry-connect-requests/{request_id}/decline",
 		"GET /v1/projects/{id}/image-access",
 		"GET /v1/projects/{id}/catalog/{name}/readiness",
+		"POST /v1/projects/{id}/catalog/readiness",
 		"GET /v1/projects/{id}/catalog/{name}/host-policy-snippet",
 		"GET /v1/projects/{id}/image-tags",
 		"GET /v1/projects/{id}/image-digest",

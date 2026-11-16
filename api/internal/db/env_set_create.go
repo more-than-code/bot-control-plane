@@ -65,7 +65,7 @@ func scanEnvSetConfirmation(row pgx.Row) (store.EnvSetConfirmation, error) {
 }
 
 // CreateEnvSetNames locks the plan (when confirming), creates the set and
-// its values, and deletes the plan in one transaction. A conflict rolls
+// its values, and marks the plan used in one transaction. A conflict rolls
 // back, so the plan stays usable.
 func (d *DB) CreateEnvSetNames(ctx context.Context, projectID uuid.UUID, name string, keys []store.EnvKeyCreate, confirm []byte, actor uuid.UUID, at time.Time) (store.EnvSet, error) {
 	if !catalog.ValidName(name) || !distinctCreateKeys(keys) {
@@ -102,7 +102,9 @@ ON CONFLICT (project_id, name) DO NOTHING
 		}
 	}
 	if confirm != nil {
-		if err := exec(ctx, tx, `DELETE FROM app.env_set_confirmations WHERE token_hash = $1`, confirm); err != nil {
+		// Marked, not deleted, so a second confirm can say the plan was
+		// used (api-v1 v1.32 item 1). The next plan insert prunes it after expiry.
+		if err := exec(ctx, tx, `UPDATE app.env_set_confirmations SET used_at = $2 WHERE token_hash = $1`, confirm, at); err != nil {
 			return store.EnvSet{}, mapErr(err)
 		}
 	}
@@ -133,7 +135,8 @@ func distinctCreateKeys(keys []store.EnvKeyCreate) bool {
 }
 
 // insertEnvCreateValue writes a generated secret (reveal_pending and
-// generated) or a placeholder (an empty value with needs_value).
+// generated), a placeholder (an empty value with needs_value), or a plain
+// key with its value (api-v1 v1.32 item 2).
 func insertEnvCreateValue(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name string, k store.EnvKeyCreate) error {
 	if k.Generated || k.Secret {
 		return mapErr(exec(ctx, tx, `
@@ -141,8 +144,12 @@ INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, 
 VALUES ($1::uuid, $2, $3, true, NULL, $4, $5, $6, $7, $8, $7)
 `, projectID.String(), name, k.Key, k.Nonce, k.Ciphertext, k.KeyVersion, k.Generated, !k.Generated))
 	}
+	value := ""
+	if k.Value != nil {
+		value = *k.Value
+	}
 	return mapErr(exec(ctx, tx, `
 INSERT INTO app.env_values (project_id, set_name, key, is_secret, value, nonce, ciphertext, key_version, reveal_pending, needs_value, generated)
-VALUES ($1::uuid, $2, $3, false, '', NULL, NULL, NULL, false, true, false)
-`, projectID.String(), name, k.Key))
+VALUES ($1::uuid, $2, $3, false, $4, NULL, NULL, NULL, false, $5, false)
+`, projectID.String(), name, k.Key, value, k.Value == nil))
 }

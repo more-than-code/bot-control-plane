@@ -59,7 +59,7 @@ func TestDelegatedCatalogCreateConfirms(t *testing.T) {
 		t.Fatal("replay created a second entry")
 	}
 	status, env = c.w.do(c.tok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("create-web"))
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "this confirmation was already used")
 
 	rows := auditRows(t, c.w, c.sc.project.ID)
 	if auditViaForName(t, rows, audit.ActionCatalogCreate, "web") != audit.ViaMCP {
@@ -281,7 +281,7 @@ func TestDelegatedCatalogDelete(t *testing.T) {
 	status, env = c.w.do(c.tok, http.MethodDelete, catalogItem(c.sc.project.ID, "web"), confirmBody("del-1"))
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	status, env = c.w.do(c.tok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("del-1"))
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "this confirmation was already used")
 	rows := auditRows(t, c.w, c.sc.project.ID)
 	if auditViaForName(t, rows, audit.ActionCatalogDelete, "web") != audit.ViaMCP {
 		t.Fatal("applied delete was not via mcp")
@@ -298,7 +298,7 @@ func TestDelegatedCatalogConfirmBounds(t *testing.T) {
 	expiredID, _, _ := healthPlanOf(t, env)
 	c.w.srv.Now = func() time.Time { return time.Date(2026, 10, 13, 12, 6, 0, 0, time.UTC) }
 	status, env = c.w.do(c.tok, http.MethodPost, "/v1/confirmations/"+expiredID, confirmBody("exp-1"))
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "this confirmation expired; call the tool again for a new one")
 	if catalogNameCount(t, c, "late") != 0 {
 		t.Fatal("expired confirm created an entry")
 	}

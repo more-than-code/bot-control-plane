@@ -218,7 +218,7 @@ func TestTools(t *testing.T) {
 			if readOnly || open {
 				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
 			}
-			for _, phrase := range []string{"Nothing changes until confirm", "user agrees", "console", "No value is sent or returned", "Does not contact"} {
+			for _, phrase := range []string{"Nothing changes until confirm", "user agrees", "console", "No secret value is sent or returned", "Never put a secret here", "${KEY}", "If the plan warns that a key looks like a secret, tell the person before confirming.", "plan and result name keys only", "Does not contact"} {
 				if !strings.Contains(tool.Description, phrase) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
