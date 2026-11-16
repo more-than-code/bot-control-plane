@@ -953,7 +953,7 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
 *Status: approved 2026-11-16 ("Approve design"); implemented on dev 2026-11-16, with the review additions in item 6 and item 7. Not yet released. No agent-protocol change.*
 
 1. **Update an env set (G1, G5):** `PATCH /v1/projects/{id}/env-sets/{set}`, owner or admin, console or `api_delegated`, body `{"set":{KEY:value},"add":[CreateKey],"remove":[KEY],"make_secret":[KEY]}` (at least one non-empty; a key in at most one list).
-   - `set`: existing PLAIN keys only, values under the env value rules; a secret key → `bad_request` `change secret values in the console or with request_env_value`.
+   - `set`: existing PLAIN keys only, values under the env value rules; a secret key → `bad_request` `the key is secret; change its value in the console or with request_env_value`.
    - `add`: new keys, each as a v1.27 item 4 / v1.32 item 2 create key (generated, placeholder or plain value).
    - `remove`: refused with `conflict` `KEY is used by entries a, b; update them first` when any entry of the project resolves the key (its `env_sets` include the set and it has no inline override, a `secret_env` source, or a `${KEY}` reference that resolves to it).
    - `make_secret`: plain → secret, one way (v1.17).
