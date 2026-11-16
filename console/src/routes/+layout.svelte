@@ -9,6 +9,7 @@
 	import FolderKanban from '@lucide/svelte/icons/folder-kanban';
 	import Inbox from '@lucide/svelte/icons/inbox';
 	import LogOut from '@lucide/svelte/icons/log-out';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Toaster } from '$lib/components/ui/sonner';
@@ -129,8 +130,13 @@
 									>
 								{/if}
 								<span class="min-w-0 truncate">{data.user.name || 'Account'}</span>
+								{#if data.whatsNew?.unseen}
+									<span aria-hidden="true" data-unseen-dot class="size-2 shrink-0 rounded-full bg-primary"></span>
+									<span class="sr-only">(new release)</span>
+								{/if}
 							</DropdownMenu.Trigger>
-							<DropdownMenu.Content align="end">
+							<!-- The content would otherwise take the trigger's width (a short name), wrapping and clipping the items. -->
+							<DropdownMenu.Content align="end" class="w-auto min-w-56 max-w-[calc(100vw-2rem)]">
 								<DropdownMenu.Item>
 									{#snippet child({ props })}
 										<a href="/account/apps" {...props}><AppWindow class="size-4" />Connected apps</a>
@@ -141,6 +147,22 @@
 										<a href="/requests" {...props}><Inbox class="size-4" />Open requests</a>
 									{/snippet}
 								</DropdownMenu.Item>
+								{#if data.whatsNew}
+									<DropdownMenu.Item>
+										{#snippet child({ props })}
+											<a href="/whats-new" {...props}
+												><Sparkles class="size-4" /><span class="min-w-0 truncate">What's new</span>
+												<span data-whats-new-meta class="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
+													{#if data.whatsNew?.version}<span class="text-muted-foreground font-mono text-xs">v{data.whatsNew.version}</span>{/if}
+													{#if data.whatsNew?.unseen}
+														<span aria-hidden="true" data-unseen-dot class="size-2 shrink-0 rounded-full bg-primary"></span>
+														<span class="sr-only">(new release)</span>
+													{/if}
+												</span></a
+											>
+										{/snippet}
+									</DropdownMenu.Item>
+								{/if}
 							</DropdownMenu.Content>
 						</DropdownMenu.Root>
 						<!-- Signing out also forgets which catalog entries were open in this tab. -->

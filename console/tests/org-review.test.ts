@@ -372,7 +372,7 @@ describe('rendered visibility (item 30)', () => {
 		const children = createRawSnippet(() => ({ render: () => '<p>child</p>' }));
 		const user = { id: USER.id, name: USER.name, avatarUrl: null };
 		const html = render(RootLayout, {
-			props: { children, data: { user, orgs: [{ id: ORG.id, name: ORG.name }], theme: 'system' as const, timeZone: 'UTC' } }
+			props: { children, data: { user, orgs: [{ id: ORG.id, name: ORG.name }], theme: 'system' as const, timeZone: 'UTC', whatsNew: null } }
 		}).body;
 		assert.match(html.replace(/<!--[\s\S]*?-->/g, ''), /<span class="sr-only">Switch organization:<\/span>\s*<span class="min-w-0 truncate">Home Lab<\/span>/);
 		// The org links are in the menu content, which mounts only when it opens.

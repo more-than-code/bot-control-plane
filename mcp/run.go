@@ -9,6 +9,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	changelog "github.com/more-than-code/bot-control-plane"
+
 	"github.com/more-than-code/bot-control-plane/mcp/internal/apiclient"
 	"github.com/more-than-code/bot-control-plane/mcp/internal/auth"
 	"github.com/more-than-code/bot-control-plane/mcp/internal/tools"
@@ -75,11 +77,13 @@ func newHandler(cfg config, api *apiclient.Client, logger *slog.Logger) (http.Ha
 		return nil, err
 	}
 	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "bot-mcp-server",
-		Version: "0.2.36",
+		Name: "bot-mcp-server",
+		// The version is the newest CHANGELOG.md release (spec-update-awareness §2.3).
+		Version: changelog.Version(),
 	}, &mcp.ServerOptions{
 		Logger:       logger,
 		Capabilities: &mcp.ServerCapabilities{},
+		Instructions: tools.Instructions(),
 	})
 	tools.Register(server, api)
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {

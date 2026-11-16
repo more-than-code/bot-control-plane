@@ -294,7 +294,7 @@ describe('public site pages', () => {
 
 	test('the root layout renders only the child for site routes', () => {
 		const children = createRawSnippet(() => ({ render: () => '<p>child</p>' }));
-		const data = { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC' };
+		const data = { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null };
 		setPageUrl('http://console.example/about');
 		setRouteId('/(site)/about');
 		const site = render(RootLayout, { props: { children, data } }).body;
@@ -482,7 +482,7 @@ describe('public site pages', () => {
 	test('sign-in shows the terms sentence with links, signed out and with an error', () => {
 		const sentence =
 			'By continuing you agree to the Terms of Service and acknowledge the Privacy Policy.';
-		const layout = { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC', next: '/projects' };
+		const layout = { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null, next: '/projects' };
 		const cases = [
 			{ data: layout, form: null },
 			{

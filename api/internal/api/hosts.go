@@ -231,7 +231,7 @@ func (s *Server) handleHostList(w http.ResponseWriter, r *http.Request) {
 		items[i].Status = s.hostStatus(items[i])
 		items[i] = projectsView(items[i], id, viewer.Slug, orgAdmin)
 	}
-	writeList(w, items, next)
+	writeList(w, s.hostViews(items), next)
 }
 
 // isOrgAdmin reports whether the user owns or administers the org.
@@ -272,7 +272,7 @@ func (s *Server) handleHostGet(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeOK(w, http.StatusOK, projectsView(host, viewer, slug, orgView))
+	writeOK(w, http.StatusOK, s.withUpdateHint(projectsView(host, viewer, slug, orgView)))
 }
 
 // hostViewer is the project whose view GET /v1/hosts/{id} shows: the

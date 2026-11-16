@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AgentVersion from '$lib/components/AgentVersion.svelte';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import CommandText from '$lib/components/CommandText.svelte';
@@ -78,7 +79,7 @@
 <dl class="mb-4 grid gap-3 sm:grid-cols-2">
 	<div><dt class="text-muted-foreground text-sm">Status</dt><dd><StatusBadge status={host.status} /></dd></div>
 	<div><dt class="text-muted-foreground text-sm">Last seen</dt><dd><LocalTime iso={host.last_seen_at} /></dd></div>
-	<div><dt class="text-muted-foreground text-sm">Agent</dt><dd class="font-mono">{host.agent_version ?? 'n/a'}</dd></div>
+	<div><dt class="text-muted-foreground text-sm">Agent</dt><dd><AgentVersion {host} /></dd></div>
 	<div><dt class="text-muted-foreground text-sm">System</dt><dd>{host.os}/{host.arch}</dd></div>
 	<div><dt class="text-muted-foreground text-sm">Always on</dt><dd>{host.always_on ? 'yes' : 'no'}</dd></div>
 	{#if policyLine}

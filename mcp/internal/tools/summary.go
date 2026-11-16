@@ -165,7 +165,10 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 			Name        string `json:"name"`
 			Status      string `json:"status"`
 			AccessLevel string `json:"access_level"`
-			Access      *[]struct {
+			// api-v1 v1.34 item 2: the agent update hint.
+			UpdateAvailable    bool   `json:"update_available"`
+			LatestAgentVersion string `json:"latest_agent_version"`
+			Access             *[]struct {
 				ProjectName string `json:"project_name"`
 				Level       string `json:"level"`
 			} `json:"access"`
@@ -200,6 +203,9 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 			line += " (access: " + strings.Join(grants, ", ") + ")"
 		case h.AccessLevel != "":
 			line += " (" + summaryField(h.AccessLevel) + ")"
+		}
+		if h.UpdateAvailable && h.LatestAgentVersion != "" {
+			line += " (agent update available: " + summaryField(h.LatestAgentVersion) + ")"
 		}
 		// api-v1 v1.25 item 6: the shared networks the API showed this caller.
 		if h.Programs != nil && len(h.Programs.SharedNetworks) > 0 {

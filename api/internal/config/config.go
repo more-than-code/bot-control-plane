@@ -4,6 +4,8 @@ package config
 import (
 	"fmt"
 	"strings"
+
+	"github.com/more-than-code/bot-control-plane/api/internal/agentversion"
 )
 
 // Config is the process configuration. Secrets come from the environment
@@ -36,6 +38,9 @@ type Config struct {
 	// App (api-v1 v1.29 item 1). Without both, Connect GitHub is unavailable.
 	GitHubClientID         string
 	GitHubClientSecretFile string
+	// LatestAgentVersion is BOT_API_LATEST_AGENT_VERSION: the newest
+	// bot-agent release (X.Y.Z), or empty for no update hint (api-v1 v1.34).
+	LatestAgentVersion string
 }
 
 const defaultIssuer = "https://accounts.google.com"
@@ -62,6 +67,7 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 		RegistryAllowPrivate:   strings.TrimSpace(getenv("BOT_API_REGISTRY_ALLOW_PRIVATE")) == "1",
 		GitHubClientID:         strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_ID")),
 		GitHubClientSecretFile: strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET_FILE")),
+		LatestAgentVersion:     strings.TrimSpace(getenv("BOT_API_LATEST_AGENT_VERSION")),
 	}
 	if cfg.GoogleIssuer == "" {
 		cfg.GoogleIssuer = defaultIssuer
@@ -98,6 +104,9 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	}
 	if strings.ContainsAny(cfg.AgentWSURL, "' \t\r\n") {
 		return Config{}, fmt.Errorf("BOT_API_AGENT_WS_URL must not contain quotes or whitespace")
+	}
+	if cfg.LatestAgentVersion != "" && !agentversion.Valid(cfg.LatestAgentVersion) {
+		return Config{}, fmt.Errorf("BOT_API_LATEST_AGENT_VERSION must be X.Y.Z or empty")
 	}
 	return cfg, nil
 }

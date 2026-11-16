@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AgentVersion from '$lib/components/AgentVersion.svelte';
 	import type { Snippet } from 'svelte';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import { page } from '$app/state';
@@ -116,7 +117,7 @@
 			</td>
 			<td class="p-2 align-middle"><StatusBadge status={host.status} /></td>
 			<td class="p-2 align-middle"><LocalTime iso={host.last_seen_at} /></td>
-			<td class="p-2 align-middle font-mono">{host.agent_version ?? 'n/a'}</td>
+			<td class="p-2 align-middle"><AgentVersion {host} /></td>
 			{#if canAdmin || canOrgAdmin}
 				<td class="p-2 align-middle">
 					<div class="flex items-center gap-1">
