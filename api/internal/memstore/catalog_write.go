@@ -42,7 +42,7 @@ func (m *Mem) GetCatalogWriteConfirmation(_ context.Context, hash []byte) (store
 }
 
 // CommitCatalogWrite holds the memstore mutex across the re-check, the
-// catalog write, and the delete of the plan. A conflict leaves the plan.
+// catalog write, and the plan mark. A conflict leaves the plan unused.
 func (m *Mem) CommitCatalogWrite(_ context.Context, hash []byte, userID uuid.UUID, at time.Time, in store.CatalogWrite) (string, store.CatalogEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -94,7 +94,9 @@ func (m *Mem) CommitCatalogWrite(_ context.Context, hash []byte, userID uuid.UUI
 	if err != nil {
 		return "", store.CatalogEntry{}, err
 	}
-	delete(m.catalogWriteConfirmations, key)
+	used := at
+	rec.row.UsedAt = &used
+	m.catalogWriteConfirmations[key] = rec
 	return old, entry, nil
 }
 

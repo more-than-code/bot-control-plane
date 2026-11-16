@@ -175,6 +175,8 @@ func contractRoutes() []route {
 		// api-v1 v1.29 image access, readiness and the host-policy snippet: console or delegated.
 		{"GET /v1/projects/{id}/image-access", false, (*Server).handleImageAccess, delegatedAllow},
 		{"GET /v1/projects/{id}/catalog/{name}/readiness", false, (*Server).handleReadiness, delegatedAllow},
+		// api-v1 v1.32 item 3: readiness of a spec before the entry exists.
+		{"POST /v1/projects/{id}/catalog/readiness", false, (*Server).handleReadinessSpec, delegatedAllow},
 		{"GET /v1/projects/{id}/catalog/{name}/host-policy-snippet", false, (*Server).handleHostPolicySnippet, delegatedAllow},
 		{"GET /v1/projects/{id}/image-tags", false, (*Server).handleImageTags, delegatedAllow},
 		{"GET /v1/projects/{id}/image-digest", false, (*Server).handleImageDigest, delegatedAllow},

@@ -54,7 +54,7 @@ func (m *Mem) GetEnvSetConfirmation(_ context.Context, hash []byte) (store.EnvSe
 }
 
 // CreateEnvSetNames holds the mutex across the plan check, the create, and
-// the plan delete, so a conflict leaves the plan unused.
+// the plan mark, so a conflict leaves the plan unused.
 func (m *Mem) CreateEnvSetNames(_ context.Context, projectID uuid.UUID, name string, keys []store.EnvKeyCreate, confirm []byte, actor uuid.UUID, at time.Time) (store.EnvSet, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -85,6 +85,11 @@ func (m *Mem) CreateEnvSetNames(_ context.Context, projectID uuid.UUID, name str
 		}
 		seen[k.Key] = true
 		row := envValueRec{Key: k.Key, IsSecret: k.Secret || k.Generated, NeedsValue: !k.Generated}
+		if !row.IsSecret && k.Value != nil {
+			// A plain key with its value (api-v1 v1.32 item 2).
+			row.Plain = *k.Value
+			row.NeedsValue = false
+		}
 		if row.IsSecret {
 			row.Nonce = cloneBytes(k.Nonce)
 			row.Ciphertext = cloneBytes(k.Ciphertext)
@@ -98,7 +103,10 @@ func (m *Mem) CreateEnvSetNames(_ context.Context, projectID uuid.UUID, name str
 	m.envSets[id] = set
 	m.envValues[id] = values
 	if planKey != "" {
-		delete(m.envSetConfirmations, planKey)
+		rec := m.envSetConfirmations[planKey]
+		used := at
+		rec.row.UsedAt = &used
+		m.envSetConfirmations[planKey] = rec
 	}
 	m.rehashSetLocked(projectID, name, at)
 	return m.envSetViewLocked(projectID, set), nil

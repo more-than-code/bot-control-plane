@@ -106,6 +106,46 @@ func (s *Server) catalogAct(w http.ResponseWriter, r *http.Request, p principal,
 	s.performProgram(w, r, p, projectID, host, entry, action, lines, key, hash)
 }
 
+// confirmationUnusable answers a confirmation row the caller cannot use and
+// reports whether it did (api-v1 v1.32 item 1). Another user's id answers
+// not_found, as a missing one does, so nothing leaks; the caller's own used
+// or expired id says which, and what to do next.
+func confirmationUnusable(w http.ResponseWriter, owner, caller uuid.UUID, usedAt *time.Time, expiresAt, now time.Time) bool {
+	switch {
+	case owner != caller:
+		writeCode(w, "not_found", "not found")
+	case usedAt != nil:
+		writeCode(w, "conflict", "this confirmation was already used")
+	case !expiresAt.After(now):
+		writeCode(w, "conflict", "this confirmation expired; call the tool again for a new one")
+	default:
+		return false
+	}
+	return true
+}
+
+// confirmationLost answers a commit or mark that found the plan no longer
+// usable (the loser of a double-confirm race): it re-reads the row and
+// answers as the pre-check does, so the caller's own used plan is conflict
+// "this confirmation was already used". A missing row, another user's, or
+// a row that still looks usable (the store refused it for another reason)
+// stays not_found.
+func (s *Server) confirmationLost(w http.ResponseWriter, p principal, reload func() (uuid.UUID, *time.Time, time.Time, error)) {
+	owner, usedAt, expiresAt, err := reload()
+	if err == nil && confirmationUnusable(w, owner, p.User.ID, usedAt, expiresAt, s.now()) {
+		return
+	}
+	writeCode(w, "not_found", "not found")
+}
+
+// catalogConfirmationLost is confirmationLost for app.catalog_confirmations.
+func (s *Server) catalogConfirmationLost(w http.ResponseWriter, r *http.Request, p principal, hash []byte) {
+	s.confirmationLost(w, p, func() (uuid.UUID, *time.Time, time.Time, error) {
+		c, err := s.Store.GetConfirmation(r.Context(), hash)
+		return c.UserID, c.UsedAt, c.ExpiresAt, err
+	})
+}
+
 func (s *Server) handleConfirmation(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.require(w, r)
 	if !ok {
@@ -139,8 +179,7 @@ func (s *Server) handleConfirmation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if c.UserID != p.User.ID || c.UsedAt != nil || !c.ExpiresAt.After(now) {
-		writeCode(w, "not_found", "not found")
+	if confirmationUnusable(w, c.UserID, p.User.ID, c.UsedAt, c.ExpiresAt, now) {
 		return
 	}
 	if body.Key != c.IdempotencyKey {
@@ -202,7 +241,7 @@ func (s *Server) handleConfirmation(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.Store.MarkConfirmationUsed(r.Context(), hash, p.User.ID, now); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeCode(w, "not_found", "not found")
+			s.catalogConfirmationLost(w, r, p, hash)
 			return
 		}
 		s.fail(w, err)

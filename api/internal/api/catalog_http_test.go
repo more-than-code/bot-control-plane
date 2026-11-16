@@ -404,7 +404,7 @@ func TestCatalogConfirmationAndIdempotency(t *testing.T) {
 		t.Fatalf("confirm task %#v", log.raw(1))
 	}
 	status, env = w.do(delegated, http.MethodPost, "/v1/confirmations/"+id, confirmBody("del-1"))
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "this confirmation was already used")
 	status, env = postAct(w, delegated, project, "tra", "restart", host, "del-1", nil)
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	if log.count() != 2 {
@@ -492,8 +492,12 @@ func TestCatalogConfirmationEdges(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
 	expiredID, _ := objectPayload(t, env)["confirmation_id"].(string)
 	w.srv.Now = func() time.Time { return time.Date(2026, 10, 13, 12, 6, 0, 0, time.UTC) }
-	status, env = w.do(delegated, http.MethodPost, "/v1/confirmations/"+expiredID, confirmBody("edge-expire"))
+	// api-v1 v1.32 item 1: another user's expired id stays not_found; the
+	// owner's own expired id says so.
+	status, env = w.do(tokenKind(t, w, other.ID, store.KindDelegated), http.MethodPost, "/v1/confirmations/"+expiredID, confirmBody("edge-expire"))
 	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	status, env = w.do(delegated, http.MethodPost, "/v1/confirmations/"+expiredID, confirmBody("edge-expire"))
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "this confirmation expired; call the tool again for a new one")
 	if log.count() != 0 {
 		t.Fatalf("expired dispatched %d", log.count())
 	}

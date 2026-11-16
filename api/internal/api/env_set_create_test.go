@@ -100,7 +100,13 @@ func TestEnvSetCreateValidation(t *testing.T) {
 		many[i] = fmt.Sprintf(`{"key":"K%02d"}`, i)
 	}
 	cases := []struct{ body, code, msg string }{
-		{`{"name":"s","keys":[{"key":"A","value":"x"}]}`, "bad_request", "invalid json"},
+		// api-v1 v1.32 item 2: a value only with is_secret explicitly false and no generate.
+		{`{"name":"s","keys":[{"key":"A","value":"x"}]}`, "bad_request", "a value can be given only for a plain key"},
+		{`{"name":"s","keys":[{"key":"A","value":"x","is_secret":true}]}`, "bad_request", "a value can be given only for a plain key"},
+		{`{"name":"s","keys":[{"key":"A","value":"x","is_secret":false,"generate":{"kind":"hex"}}]}`, "bad_request", "a value can be given only for a plain key"},
+		{`{"name":"s","keys":[{"key":"A","value":"a\nb","is_secret":false}]}`, "bad_request", "invalid env value"},
+		{`{"name":"s","keys":[{"key":"A","value":"` + strings.Repeat("x", 4097) + `","is_secret":false}]}`, "bad_request", "invalid env value"},
+		{`{"name":"s","keys":[{"key":"A","valu":"x"}]}`, "bad_request", "invalid json"},
 		{`{"name":"s","keys":[{"key":"A","generate":{"kind":"hex"},"is_secret":false}]}`, "bad_request", "a generated value is secret"},
 		{`{"name":"s","keys":[]}`, "bad_request", "keys must list 1 to 64 keys"},
 		{`{"name":"s","keys":[` + strings.Join(many, ",") + `]}`, "bad_request", "keys must list 1 to 64 keys"},
@@ -157,9 +163,9 @@ func TestEnvSetCreateDelegated(t *testing.T) {
 	if keys["POSTGRES_PASSWORD"]["reveal_pending"] != true || keys["SMTP_PASSWORD"]["needs_value"] != true || keys["SMTP_HOST"]["is_secret"] != false {
 		t.Fatalf("confirmed keys %v", keys)
 	}
-	// Used: a second confirm is not_found; the issue replays the stored 201.
+	// Used: a second confirm says so; the issue replays the stored 201.
 	status, env, _ = mustCall(t, w, delegated, http.MethodPost, "/v1/confirmations/"+id, confirmBody("create-1"))
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "this confirmation was already used")
 	status, env, _ = mustCall(t, w, delegated, http.MethodPost, envSetsPath(project), createBody)
 	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
 	status, env, _ = mustCall(t, w, delegated, http.MethodPost, envSetsPath(project), strings.Replace(createBody, "create-1", "create-2", 1))
@@ -342,5 +348,111 @@ func TestEnvNeedsValueProgram(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	if log.count() != before+1 {
 		t.Fatal("run after fill sent no task")
+	}
+}
+
+// TestEnvSetCreatePlainValues: a plain key may carry its value (api-v1
+// v1.32 item 2). It is stored as a plain value with needs_value false, and
+// the plan, the audit and the delegated answers name the key only.
+func TestEnvSetCreatePlainValues(t *testing.T) {
+	w, sc, tok, _ := refsWorld(t, allowImages())
+	project := sc.project.ID.String()
+	const dsn = "postgres://app:${DB_PASSWORD}@db:5432/app-plain-zz"
+	body := `{"name":"dd","keys":[{"key":"DB_PASSWORD","generate":{"kind":"password"}},` +
+		`{"key":"DATABASE_URL","is_secret":false,"value":"` + dsn + `"},` +
+		`{"key":"LISTEN","is_secret":false,"value":""},{"key":"SMTP_PASSWORD"}],"idempotency_key":"plain-1"}`
+
+	delegated := tokenKind(t, w, sc.owner, store.KindDelegated)
+	status, env, raw := mustCall(t, w, delegated, http.MethodPost, envSetsPath(project), body)
+	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
+	plan, _ := objectPayload(t, env)["plan"].(string)
+	want := "create env set dd with DB_PASSWORD (generated password, 32 characters, secret), DATABASE_URL (plain, value given), LISTEN (plain, value given), SMTP_PASSWORD (empty; fill it in the console)"
+	if plan != want {
+		t.Fatalf("plan %q", plan)
+	}
+	id, _ := objectPayload(t, env)["confirmation_id"].(string)
+	status, env, confirmed := mustCall(t, w, delegated, http.MethodPost, "/v1/confirmations/"+id, confirmBody("plain-1"))
+	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
+	keys := keysByName(t, env)
+	if keys["DATABASE_URL"]["is_secret"] != false || keys["DATABASE_URL"]["needs_value"] != false || keys["LISTEN"]["needs_value"] != false ||
+		keys["SMTP_PASSWORD"]["needs_value"] != true || keys["DB_PASSWORD"]["reveal_pending"] != true {
+		t.Fatalf("keys %v", keys)
+	}
+	for _, text := range []string{raw, confirmed, auditBlob(t, w, sc.project.ID)} {
+		if strings.Contains(text, "app-plain-zz") {
+			t.Fatalf("plain value outside the set: %s", text)
+		}
+	}
+	// The stored plain value is the given text, and the console reads it.
+	mats, err := w.mem.ListEnvMaterial(t.Context(), sc.project.ID, "dd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range mats {
+		if m.Key == "DATABASE_URL" {
+			found = !m.IsSecret && m.Plain == dsn && !m.NeedsValue
+		}
+	}
+	if !found {
+		t.Fatalf("stored %+v", mats)
+	}
+	status, env, got := mustCall(t, w, tok, http.MethodGet, envSetsPath(project)+"/dd", "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if !strings.Contains(got, "app-plain-zz") {
+		t.Fatal("console read lacks the plain value")
+	}
+	var detail map[string]any
+	for _, row := range auditRows(t, w, sc.project.ID) {
+		if row.Action == audit.ActionEnvSetCreate {
+			detail = detailMap(t, row.Detail)
+		}
+	}
+	plain, _ := detail["plain_values"].([]any)
+	ph, _ := detail["placeholders"].([]any)
+	if len(plain) != 2 || plain[0] != "DATABASE_URL" || plain[1] != "LISTEN" || len(ph) != 1 {
+		t.Fatalf("audit %v", detail)
+	}
+
+	// A console create with a plain value applies at once.
+	status, env, _ = mustCall(t, w, tok, http.MethodPost, envSetsPath(project), `{"name":"web","keys":[{"key":"PORT","is_secret":false,"value":"8080"}]}`)
+	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
+	if k := keysByName(t, env)["PORT"]; k["value"] != "8080" || k["needs_value"] != false {
+		t.Fatalf("console key %v", k)
+	}
+}
+
+// TestEnvSetCreatePlainSecretReminder: a plain value under a key name that
+// looks secret is accepted, and the plan adds one reminder per such key,
+// naming the key and never the value (Joe 2026-11-16: a reminder, not a
+// refusal).
+func TestEnvSetCreatePlainSecretReminder(t *testing.T) {
+	w, sc, _, _ := refsWorld(t, allowImages())
+	project := sc.project.ID.String()
+	delegated := tokenKind(t, w, sc.owner, store.KindDelegated)
+	body := `{"name":"warn","keys":[{"key":"DB_PASSWORD","is_secret":false,"value":"hunter2-plain-zz"},` +
+		`{"key":"HOST","is_secret":false,"value":"db-host-zz"}],"idempotency_key":"warn-1"}`
+	status, env, raw := mustCall(t, w, delegated, http.MethodPost, envSetsPath(project), body)
+	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
+	plan, _ := objectPayload(t, env)["plan"].(string)
+	want := "create env set warn with DB_PASSWORD (plain, value given), HOST (plain, value given). " +
+		"DB_PASSWORD looks like a secret but will be stored as plain text, visible in the console; use a placeholder and request_env_value instead."
+	if plan != want {
+		t.Fatalf("plan %q", plan)
+	}
+	if strings.Contains(plan, "HOST looks like a secret") {
+		t.Fatal("HOST warned")
+	}
+	for _, leak := range []string{"hunter2-plain-zz", "db-host-zz"} {
+		if strings.Contains(raw, leak) || strings.Contains(auditBlob(t, w, sc.project.ID), leak) {
+			t.Fatalf("value %s in the plan or audit", leak)
+		}
+	}
+	// Accepted: the confirm creates both keys as plain.
+	id, _ := objectPayload(t, env)["confirmation_id"].(string)
+	status, env, confirmed := mustCall(t, w, delegated, http.MethodPost, "/v1/confirmations/"+id, confirmBody("warn-1"))
+	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
+	if k := keysByName(t, env)["DB_PASSWORD"]; k["is_secret"] != false || k["needs_value"] != false || strings.Contains(confirmed, "hunter2-plain-zz") {
+		t.Fatalf("created %v", k)
 	}
 }

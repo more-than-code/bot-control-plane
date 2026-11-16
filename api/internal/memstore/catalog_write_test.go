@@ -66,8 +66,8 @@ func TestCatalogWriteCommitCreate(t *testing.T) {
 	if err != nil || entry.Name != "web" || entry.Kind != "image" || entry.SpecHash != in.SpecHash {
 		t.Fatalf("commit %+v %v", entry, err)
 	}
-	if _, err := m.GetCatalogWriteConfirmation(ctx, hash); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("applied create kept the plan %v", err)
+	if used, err := m.GetCatalogWriteConfirmation(ctx, hash); err != nil || used.UsedAt == nil {
+		t.Fatalf("applied create left the plan unmarked %+v %v", used, err)
 	}
 	if _, _, err = m.CommitCatalogWrite(ctx, hash, owner.ID, at, in); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("second commit %v", err)
@@ -121,8 +121,8 @@ func TestCatalogWriteCommitUpdateAndDelete(t *testing.T) {
 	if _, _, err := m.CommitCatalogWrite(ctx, sameHash, owner.ID, at, same); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.GetCatalogWriteConfirmation(ctx, sameHash); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("applied same-hash update kept the plan %v", err)
+	if used, err := m.GetCatalogWriteConfirmation(ctx, sameHash); err != nil || used.UsedAt == nil {
+		t.Fatalf("applied same-hash update left the plan unmarked %+v %v", used, err)
 	}
 
 	next := imageWrite(t, "web", `{"kind":"service","image":"nginx:1.27"}`, owner.ID, at)
@@ -152,8 +152,8 @@ func TestCatalogWriteCommitUpdateAndDelete(t *testing.T) {
 	if err != nil || old != entry.SpecHash || updated.SpecHash != next.SpecHash {
 		t.Fatalf("update %s %+v %v", old, updated, err)
 	}
-	if _, err := m.GetCatalogWriteConfirmation(ctx, updHash); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("applied update kept the plan %v", err)
+	if used, err := m.GetCatalogWriteConfirmation(ctx, updHash); err != nil || used.UsedAt == nil {
+		t.Fatalf("applied update left the plan unmarked %+v %v", used, err)
 	}
 
 	grants, err := m.ListCatalogGrants(ctx, entry.ID)
@@ -169,8 +169,8 @@ func TestCatalogWriteCommitUpdateAndDelete(t *testing.T) {
 	if err != nil || deleted.Name != "web" {
 		t.Fatalf("delete %+v %v", deleted, err)
 	}
-	if _, err := m.GetCatalogWriteConfirmation(ctx, delHash); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("applied delete kept the plan %v", err)
+	if used, err := m.GetCatalogWriteConfirmation(ctx, delHash); err != nil || used.UsedAt == nil {
+		t.Fatalf("applied delete left the plan unmarked %+v %v", used, err)
 	}
 	if _, err := m.GetCatalogEntry(ctx, project.ID, "web"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("entry remains %v", err)

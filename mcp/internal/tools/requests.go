@@ -22,6 +22,10 @@ import (
 
 const maxReasonRunes = 200
 
+// severalLinks is the habit every request tool's description names (spec
+// agent-usability-1 F1): several links in one turn go out together.
+const severalLinks = "When you ask for several values, files or connections in one turn, list all links together with their expiry in one message."
+
 // newProtocol is the first MCP version with input-required results
 // (SEP-2322): the server returns the elicitation and the client retries.
 const newProtocol = "2026-07-28"
@@ -239,8 +243,12 @@ func (k requestKind) result(created createdRequest, subject, state, elicitation 
 	return present(encoded, k.summary(created, subject, state, elicitation))
 }
 
+// summary puts the link alone on the first line, so an agent relaying
+// several links can copy each one as it is.
 func (k requestKind) summary(created createdRequest, subject, state, elicitation string) string {
 	var b strings.Builder
+	b.WriteString(created.URL)
+	b.WriteString("\n")
 	b.WriteString(k.rule)
 	fmt.Fprintf(&b, " %s %s for %s", k.title, created.RequestID, subject)
 	open := state == "" || state == "pending"
@@ -262,18 +270,16 @@ func (k requestKind) summary(created createdRequest, subject, state, elicitation
 	case elicitDeclined:
 		b.WriteString(" The person declined to open the link.")
 		if open {
-			b.WriteString(" The request stays open until it expires, so the link below still works.")
+			b.WriteString(" The request stays open until it expires, so the link above still works.")
 		}
 	case elicitCancelled:
 		b.WriteString(" The person dismissed the link.")
 		if open {
-			b.WriteString(" The request stays open until it expires, so the link below still works.")
+			b.WriteString(" The request stays open until it expires, so the link above still works.")
 		}
 	default:
 		b.WriteString(" Show the person this link and ask them to open it in their browser, signed in to Deploybot as themselves.")
 	}
-	b.WriteString("\nLink: ")
-	b.WriteString(created.URL)
 	fmt.Fprintf(&b, "\nCheck the outcome with %s.", k.checkTool)
 	return b.String()
 }

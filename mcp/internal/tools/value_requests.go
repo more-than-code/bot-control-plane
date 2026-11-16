@@ -63,7 +63,7 @@ func registerValueRequests(server *mcp.Server, api *apiclient.Client) {
 		Description: valueRule + " Ask the signed-in person to enter one env value in the Deploybot console. " +
 			"Deploybot makes a one-time link, valid for 15 minutes, that only that person can use; they type or paste the value " +
 			"(or let Deploybot generate one) in their own browser, and it is stored encrypted as a secret. You get the link, never the value. " +
-			"The result always has the link as text; show it to the person. A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
+			"The result always has the link as text, alone on its first line; show it to the person. " + severalLinks + " A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
 			"Needs owner or admin on the project. The key must be new to the set or a placeholder without a value; a key that already has a value is changed in the console. " +
 			"Asking again for the same key replaces your earlier link, which then stops working. " +
 			"Check the outcome with get_env_value_request. Does not contact any host.",

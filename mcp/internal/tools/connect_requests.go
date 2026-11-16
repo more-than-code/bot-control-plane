@@ -61,7 +61,7 @@ func registerConnectRequests(server *mcp.Server, api *apiclient.Client) {
 		Description: connectRule + " Ask the signed-in person to connect GitHub for a project, so Deploybot can pull private ghcr.io images. " +
 			"Deploybot makes a one-time link, valid for 15 minutes, that only that person can use; they open it in their own browser, " +
 			"continue to github.com and approve read:packages there. The login is stored encrypted for the project and replaces any ghcr.io login it has. " +
-			"The result always has the link as text; show it to the person. A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
+			"The result always has the link as text, alone on its first line; show it to the person. " + severalLinks + " A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
 			"Needs owner or admin on the project, and Connect GitHub configured on the server. Asking again for the same project replaces your earlier link, which then stops working. " +
 			"Check the outcome with get_registry_connect_request. Does not contact any host.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, OpenWorldHint: &closedWorld},
@@ -187,8 +187,11 @@ func connectResult(created createdRequest, state, elicitation string) *mcp.CallT
 	return present(encoded, connectSummary(created, state, elicitation))
 }
 
+// connectSummary puts the link alone on the first line, as requestKind.summary.
 func connectSummary(created createdRequest, state, elicitation string) string {
 	var b strings.Builder
+	b.WriteString(created.URL)
+	b.WriteString("\n")
 	b.WriteString(connectRule)
 	fmt.Fprintf(&b, " Connect request %s for ghcr.io", created.RequestID)
 	open := state == "" || state == "pending"
@@ -210,18 +213,16 @@ func connectSummary(created createdRequest, state, elicitation string) string {
 	case elicitDeclined:
 		b.WriteString(" The person declined to open the link.")
 		if open {
-			b.WriteString(" The request stays open until it expires, so the link below still works.")
+			b.WriteString(" The request stays open until it expires, so the link above still works.")
 		}
 	case elicitCancelled:
 		b.WriteString(" The person dismissed the link.")
 		if open {
-			b.WriteString(" The request stays open until it expires, so the link below still works.")
+			b.WriteString(" The request stays open until it expires, so the link above still works.")
 		}
 	default:
 		b.WriteString(" Show the person this link and ask them to open it in their browser, signed in to Deploybot as themselves, and approve on github.com.")
 	}
-	b.WriteString("\nLink: ")
-	b.WriteString(created.URL)
 	b.WriteString("\nCheck the outcome with get_registry_connect_request.")
 	return b.String()
 }

@@ -21,16 +21,41 @@ import (
 // noSecretRule starts the three tool descriptions.
 const noSecretRule = "No env value, secret preview or registry token is ever returned by this tool."
 
-const checkReadinessSchema = `{
+const checkReadinessBaseSchema = `{
   "type": "object",
   "additionalProperties": false,
-  "required": ["project_id", "entry"],
+  "required": ["project_id"],
   "properties": {
     "project_id": {"type": "string", "format": "uuid"},
-    "entry": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"},
+    "entry": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$", "description": "A stored catalog entry. Pass exactly one of entry or spec."},
     "host_id": {"type": "string", "format": "uuid", "description": "Optional. With it, the host checks run too: deploy access, online, containers, image policy and shared networks."}
   }
 }`
+
+// checkReadinessSchema is the base schema plus spec, the same ImageSpec
+// schema create_catalog_entry takes (api-v1 v1.32 item 3).
+var checkReadinessSchema = readinessSchemaWithSpec()
+
+func readinessSchemaWithSpec() string {
+	var write, base map[string]any
+	if err := json.Unmarshal([]byte(catalogWriteSchema), &write); err != nil {
+		panic(err)
+	}
+	if err := json.Unmarshal([]byte(checkReadinessBaseSchema), &base); err != nil {
+		panic(err)
+	}
+	spec, _ := write["properties"].(map[string]any)["spec"].(map[string]any)
+	if spec == nil {
+		panic("catalogWriteSchema has no spec")
+	}
+	spec["description"] = "An image entry spec, as create_catalog_entry takes, checked before the entry exists. Pass exactly one of entry or spec."
+	base["properties"].(map[string]any)["spec"] = spec
+	out, err := json.Marshal(base)
+	if err != nil {
+		panic(err)
+	}
+	return string(out)
+}
 
 const imageAccessSchema = `{
   "type": "object",
@@ -78,7 +103,7 @@ const settingsHint = "project Settings"
 func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name: "check_readiness",
-		Description: noSecretRule + " Check whether a catalog entry is ready to deploy, before deploy_entry: env sets exist, env keys have values, ${KEY} references resolve, managed files exist, " +
+		Description: noSecretRule + " Check whether a catalog entry is ready to deploy, before deploy_entry, or whether an image spec would be, before create_catalog_entry: pass exactly one of entry (a stored entry) or spec (the ImageSpec create_catalog_entry takes; nothing is stored, and env sets, keys and files it names may still be missing). Checks: env sets exist, env keys have values, ${KEY} references resolve, managed files exist, " +
 			"the image registry is reachable with the stored login, and, with host_id, deploy access, the host being online, containers, the host's image policy and shared networks. " +
 			"Each check has a status (ok, missing, warn, unknown) and a fix. Fixes you can do yourself: fill_value with request_env_value, create_env_set with create_env_set, add_file with request_file (the person adds the file in the browser); " +
 			"you can start connect_github with connect_registry, and the person approves on github.com. " +
@@ -89,9 +114,10 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 		InputSchema: json.RawMessage(checkReadinessSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
 		var in struct {
-			ProjectID string `json:"project_id"`
-			Entry     string `json:"entry"`
-			HostID    string `json:"host_id"`
+			ProjectID string          `json:"project_id"`
+			Entry     string          `json:"entry"`
+			Spec      json.RawMessage `json:"spec"`
+			HostID    string          `json:"host_id"`
 		}
 		if err := decodeArgs(raw, &in); err != nil {
 			return badRequest(err)
@@ -99,21 +125,41 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 		if err := requireUUID("project_id", in.ProjectID); err != nil {
 			return badRequest(err)
 		}
-		if err := requireEntryName(in.Entry); err != nil {
-			return badRequest(err)
+		if (in.Entry == "") == (len(in.Spec) == 0) {
+			return badRequest(errors.New("pass exactly one of entry or spec"))
 		}
-		q := url.Values{}
 		if in.HostID != "" {
 			if err := requireUUID("host_id", in.HostID); err != nil {
 				return badRequest(err)
 			}
-			q.Set("host_id", in.HostID)
 		}
-		payload, fail := get(ctx, api, idPath("v1", "projects", in.ProjectID, "catalog", in.Entry, "readiness"), q)
+		var payload json.RawMessage
+		var fail *mcp.CallToolResult
+		label := in.Entry
+		if in.Entry != "" {
+			if err := requireEntryName(in.Entry); err != nil {
+				return badRequest(err)
+			}
+			q := url.Values{}
+			if in.HostID != "" {
+				q.Set("host_id", in.HostID)
+			}
+			payload, fail = get(ctx, api, idPath("v1", "projects", in.ProjectID, "catalog", in.Entry, "readiness"), q)
+		} else {
+			if err := validateImageSpec(in.Spec); err != nil {
+				return badRequest(err)
+			}
+			body := struct {
+				Spec   json.RawMessage `json:"spec"`
+				HostID string          `json:"host_id,omitempty"`
+			}{in.Spec, in.HostID}
+			payload, fail = post(ctx, api, idPath("v1", "projects", in.ProjectID, "catalog", "readiness"), body)
+			label = "This spec"
+		}
 		if fail != nil {
 			return fail
 		}
-		out, summary, err := projectReadiness(payload, in.ProjectID, in.Entry)
+		out, summary, err := projectReadiness(payload, in.ProjectID, label)
 		if err != nil {
 			return toolError("error", err.Error())
 		}

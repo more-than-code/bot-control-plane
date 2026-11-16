@@ -220,7 +220,7 @@ func TestDelegatedHealthConfirmApplies(t *testing.T) {
 	}
 
 	status, env = w.do(tok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("apply-1"))
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "this confirmation was already used")
 
 	status, env = w.do(tok, http.MethodPut, healthPath(swag.ID), `{"checks":[],"idempotency_key":"apply-empty"}`)
 	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
@@ -252,7 +252,7 @@ func TestDelegatedHealthConfirmExpired(t *testing.T) {
 	id, _, _ := healthPlanOf(t, env)
 	w.srv.Now = func() time.Time { return time.Date(2026, 10, 13, 12, 6, 0, 0, time.UTC) }
 	status, env = w.do(tok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("exp-1"))
-	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "this confirmation expired; call the tool again for a new one")
 	if len(storedChecks(t, w, sc.svc.ID)) != 0 {
 		t.Fatal("expired confirm replaced checks")
 	}

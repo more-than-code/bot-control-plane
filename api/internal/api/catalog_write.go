@@ -276,8 +276,7 @@ func (s *Server) confirmCatalogWrite(w http.ResponseWriter, r *http.Request, p p
 		return
 	}
 	now := s.now()
-	if c.UserID != p.User.ID || c.UsedAt != nil || !c.ExpiresAt.After(now) {
-		writeCode(w, "not_found", "not found")
+	if confirmationUnusable(w, c.UserID, p.User.ID, c.UsedAt, c.ExpiresAt, now) {
 		return
 	}
 	if key != c.IdempotencyKey {
@@ -314,7 +313,10 @@ func (s *Server) confirmCatalogWrite(w http.ResponseWriter, r *http.Request, p p
 		case errors.Is(err, store.ErrConflict):
 			writeCode(w, "conflict", "conflict")
 		case errors.Is(err, store.ErrNotFound):
-			writeCode(w, "not_found", "not found")
+			s.confirmationLost(w, p, func() (uuid.UUID, *time.Time, time.Time, error) {
+				c, err := s.Store.GetCatalogWriteConfirmation(r.Context(), hash)
+				return c.UserID, c.UsedAt, c.ExpiresAt, err
+			})
 		default:
 			s.fail(w, err)
 		}

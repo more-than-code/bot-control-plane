@@ -146,13 +146,17 @@ type EnvMaterial struct {
 }
 
 // EnvKeyCreate is one key of CreateEnvSetNames (api-v1 v1.27 item 4). It
-// never carries a typed value. A Generated key is a sealed API-generated
-// secret. Any other key is a placeholder: an empty value with needs_value,
+// never carries a typed secret value; a plain key may carry Value (v1.32
+// item 2). A Generated key is a sealed API-generated secret. Any other key
+// without Value is a placeholder: an empty value with needs_value,
 // secret when Secret is true (Nonce and Ciphertext then seal "").
 type EnvKeyCreate struct {
-	Key        string
-	Secret     bool
-	Generated  bool
+	Key       string
+	Secret    bool
+	Generated bool
+	// Value is a plain key's value (api-v1 v1.32 item 2). It is set only
+	// when Secret and Generated are false; nil leaves a placeholder.
+	Value      *string
 	Nonce      []byte
 	Ciphertext []byte
 	KeyVersion int
@@ -160,8 +164,8 @@ type EnvKeyCreate struct {
 
 // EnvSetConfirmation is a single-use delegated env set create (api-v1 v1.27
 // item 4), stored by token hash in app.env_set_confirmations. Body is the
-// normalized request keys (names, generate objects, is_secret) and never
-// holds a value. RequestHash binds the request without the idempotency key.
+// normalized request keys (names, generate objects, is_secret, and a plain
+// key's value, api-v1 v1.32 item 2); it never holds a secret value. RequestHash binds the request without the idempotency key.
 type EnvSetConfirmation struct {
 	UserID         uuid.UUID
 	ProjectID      uuid.UUID

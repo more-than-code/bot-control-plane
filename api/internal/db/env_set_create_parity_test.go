@@ -92,6 +92,32 @@ func TestParityEnvSetCreate(t *testing.T) {
 			}
 		}
 
+		// A plain key with its value (api-v1 v1.32 item 2): stored plain,
+		// with needs_value false; an empty value is a value too.
+		dsn, empty := "postgres://app:${DB_PASSWORD}@db/app", ""
+		if _, err := p.st.CreateEnvSetNames(p.ctx, pr.ID, "valued", []store.EnvKeyCreate{
+			{Key: "DSN", Value: &dsn}, {Key: "EMPTY", Value: &empty}, {Key: "PH"},
+		}, nil, owner.ID, p.at); err != nil {
+			p.t.Fatal(err)
+		}
+		mats, err = p.st.ListEnvMaterial(p.ctx, pr.ID, "valued")
+		if err != nil {
+			p.t.Fatal(err)
+		}
+		byKey := map[string]store.EnvMaterial{}
+		for _, m := range mats {
+			byKey[m.Key] = m
+		}
+		if m := byKey["DSN"]; m.IsSecret || m.NeedsValue || m.Plain != dsn || m.Ciphertext != nil {
+			p.t.Fatalf("DSN %+v", m)
+		}
+		if m := byKey["EMPTY"]; m.IsSecret || m.NeedsValue || m.Plain != "" {
+			p.t.Fatalf("EMPTY %+v", m)
+		}
+		if m := byKey["PH"]; m.IsSecret || !m.NeedsValue {
+			p.t.Fatalf("PH %+v", m)
+		}
+
 		// The plan table.
 		_, hash, err := secret.NewToken()
 		if err != nil {
@@ -143,9 +169,9 @@ func TestParityEnvSetCreate(t *testing.T) {
 		if err := create("planned", owner, p.at); err != nil {
 			p.t.Fatal(err)
 		}
-		// Single use: the plan is gone.
-		if _, err := p.st.GetEnvSetConfirmation(p.ctx, hash); !errors.Is(err, store.ErrNotFound) {
-			p.t.Fatalf("plan after use %v", err)
+		// Single use: the plan is marked used (api-v1 v1.32 item 1).
+		if used, err := p.st.GetEnvSetConfirmation(p.ctx, hash); err != nil || used.UsedAt == nil {
+			p.t.Fatalf("plan after use %+v %v", used, err)
 		}
 		if err := p.st.DeleteEnvSet(p.ctx, pr.ID, "planned"); err != nil {
 			p.t.Fatal(err)

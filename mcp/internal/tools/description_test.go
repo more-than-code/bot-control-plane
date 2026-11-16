@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -87,6 +88,37 @@ func TestOrgToolDescriptions(t *testing.T) {
 			if strings.Contains(name, word) && name != "list_orgs" && name != "image_access" {
 				t.Errorf("tool %s looks like an org, membership, token or access tool", name)
 			}
+		}
+	}
+}
+
+// Spec agent-usability-1 F1: each request tool's result has the link alone
+// on its first line, and each description names the several-links habit.
+func TestRequestToolsLinkFirst(t *testing.T) {
+	desc := listToolDescriptions(t)
+	for _, name := range []string{"request_env_value", "request_file", "connect_registry"} {
+		if !strings.Contains(desc[name], severalLinks) || !strings.Contains(desc[name], "alone on its first line") {
+			t.Errorf("%s description lacks the several-links habit: %q", name, desc[name])
+		}
+	}
+	for _, c := range []struct {
+		tool  string
+		args  map[string]any
+		reply func(*http.Request) (int, string)
+		url   string
+	}{
+		{"request_env_value", vrArgs, createdReply, vrURL},
+		{"request_file", frArgs, fileCreatedReply, frURL},
+		{"connect_registry", crArgs, crReply("pending"), crURL},
+	} {
+		cs, _ := vrSession(t, nil, c.reply)
+		res, text, _ := callVR(t, cs, c.tool, c.args)
+		if res.IsError {
+			t.Fatalf("%s error %s", c.tool, text)
+		}
+		first, rest, _ := strings.Cut(text, "\n")
+		if first != c.url || strings.Contains(rest, c.url) {
+			t.Errorf("%s text does not lead with the link alone: %q", c.tool, text)
 		}
 	}
 }

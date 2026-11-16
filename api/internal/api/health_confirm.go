@@ -75,8 +75,8 @@ func (s *Server) issueHealthConfirmation(w http.ResponseWriter, r *http.Request,
 // confirmServiceHealth runs when the id is not a catalog confirmation.
 // Permission and share checks run again. The current-set compare, the
 // mark, and the replace commit together. A changed check set is conflict
-// and leaves the token unused. Unknown, used, expired, and foreign ids
-// are not_found.
+// and leaves the token unused. Unknown and foreign ids are not_found; the
+// caller's own used or expired id is conflict (api-v1 v1.32 item 1).
 func (s *Server) confirmServiceHealth(w http.ResponseWriter, r *http.Request, p principal, hash []byte, key string) {
 	c, err := s.Store.GetServiceConfirmation(r.Context(), hash)
 	if err != nil {
@@ -89,8 +89,7 @@ func (s *Server) confirmServiceHealth(w http.ResponseWriter, r *http.Request, p 
 		return
 	}
 	now := s.now()
-	if c.UserID != p.User.ID || c.UsedAt != nil || !c.ExpiresAt.After(now) {
-		writeCode(w, "not_found", "not found")
+	if confirmationUnusable(w, c.UserID, p.User.ID, c.UsedAt, c.ExpiresAt, now) {
 		return
 	}
 	if key != c.IdempotencyKey {
@@ -116,7 +115,10 @@ func (s *Server) confirmServiceHealth(w http.ResponseWriter, r *http.Request, p 
 		case errors.Is(err, store.ErrConflict):
 			writeCode(w, "conflict", "conflict")
 		case errors.Is(err, store.ErrNotFound):
-			writeCode(w, "not_found", "not found")
+			s.confirmationLost(w, p, func() (uuid.UUID, *time.Time, time.Time, error) {
+				c, err := s.Store.GetServiceConfirmation(r.Context(), hash)
+				return c.UserID, c.UsedAt, c.ExpiresAt, err
+			})
 		default:
 			s.fail(w, err)
 		}
