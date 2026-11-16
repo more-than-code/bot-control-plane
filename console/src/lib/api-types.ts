@@ -369,6 +369,8 @@ export type EnvSet = {
 	keys: EnvSetKey[];
 	updated_at: string;
 	updated_by: string;
+	/** Entries naming the set (api-v1 v1.33 item 4), sorted. Absent when the API did not send it (older than v1.33). */
+	used_by?: string[];
 };
 
 /** A registry row. The token is never part of this object. */

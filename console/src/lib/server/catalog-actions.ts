@@ -154,7 +154,8 @@ async function loadMembers(event: RequestEvent, id: string): Promise<Member[] | 
 
 type ProgramBody = { ok: true; body: Record<string, unknown> } | { ok: false; message: string };
 
-function programBody(draft: CatalogDraft, hosts: Host[], includeName: boolean): ProgramBody {
+/** `entryName` is the entry being edited: its own private set refs (`@<entry>.KEY`, api-v1 v1.33 item 6) are kept. */
+function programBody(draft: CatalogDraft, hosts: Host[], includeName: boolean, entryName: string | null = null): ProgramBody {
 	const command = cleanCommand(draft.command);
 	if (!command) return { ok: false, message: 'Enter one command line (1–4096 bytes, one line).' };
 	const dir = cleanDir(draft.dir);
@@ -169,7 +170,7 @@ function programBody(draft: CatalogDraft, hosts: Host[], includeName: boolean): 
 	if (!restart) return { ok: false, message: 'Choose a restart policy.' };
 	const env = cleanEnv(draft.env);
 	if (!env.ok) return { ok: false, message: env.message };
-	const sources = cleanEnvSources(draft.envSets, draft.secrets);
+	const sources = cleanEnvSources(draft.envSets, draft.secrets, undefined, entryName);
 	if (!sources.ok) return { ok: false, message: sources.message };
 	const body: Record<string, unknown> = { kind: 'program', command, shell: draft.shell, dir, run_as: runAs, restart };
 	if (includeName) {
@@ -275,7 +276,7 @@ async function saveEntry(event: RequestEvent, mode: 'create' | 'edit') {
 	if (built.message) return editorResult(event, 400, mode, name, built.draft, null, null, built.message);
 	const hosts = await loadHosts(event, id);
 	if (!hosts) return editorResult(event, 503, mode, name, built.draft, null, null, 'Hosts could not be loaded, so the run-as account was not checked.');
-	const body = programBody(built.draft, hosts, mode === 'create');
+	const body = programBody(built.draft, hosts, mode === 'create', name);
 	if (!body.ok) return editorResult(event, 400, mode, name, built.draft, null, null, body.message);
 	const path = mode === 'create' ? `/v1/projects/${id}/catalog` : `/v1/projects/${id}/catalog/${name}`;
 	try {

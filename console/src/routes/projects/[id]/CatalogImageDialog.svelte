@@ -20,6 +20,7 @@
 	import type { KnownSet } from '$lib/image-spec';
 	import type { ImageEditorState } from '$lib/project-action';
 	import CatalogImageForm from './CatalogImageForm.svelte';
+	import PrivateKeys from './PrivateKeys.svelte';
 	import ReadinessList from './ReadinessList.svelte';
 
 	let {
@@ -258,7 +259,8 @@
 		{#if mode === 'edit' && entry}
 			<!-- The entry checks (no host): what this entry still needs before a deploy (api-v1 v1.29). -->
 			<div bind:this={readinessBand} class="max-h-[35dvh] shrink-0 overflow-y-auto border-b px-4 pb-3">
-				<ReadinessList entry={entry.name} collapsed={readinessCollapsed} />
+				<ReadinessList entry={entry.name} collapsed={readinessCollapsed} privateKeysId="private-keys-{entry.name}" />
+				<PrivateKeys entry={entry.name} collapsed={readinessCollapsed} />
 			</div>
 		{/if}
 		<CatalogImageForm {mode} {entry} {hosts} {hostsIncomplete} {projectSlug} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {tagsAction} {digestAction} {editor} onSettled={settle}>

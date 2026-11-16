@@ -1274,7 +1274,9 @@ function parseSecretEnv(value: unknown): Record<string, string> | null {
 		if (dot <= 0) return null;
 		const set = raw.slice(0, dot);
 		const name = raw.slice(dot + 1);
-		if (!isSetName(set) || !ENV_KEY.test(name)) return null;
+		// A private set `@<entry>` (api-v1 v1.33 item 6) is the entry's own; the forms check it is this entry.
+		const privateSet = set.startsWith('@') && CATALOG_NAME.test(set.slice(1));
+		if ((!privateSet && !isSetName(set)) || !ENV_KEY.test(name)) return null;
 		secret[key] = raw;
 	}
 	return secret;
@@ -1660,7 +1662,22 @@ export function parseEnvSet(value: unknown): EnvSet | null {
 		seen.add(parsed.key);
 		keys.push(parsed);
 	}
-	return { name, keys, updated_at, updated_by };
+	const set: EnvSet = { name, keys, updated_at, updated_by };
+	const usedBy = parseUsedBy(value.used_by);
+	if (usedBy) set.used_by = usedBy;
+	return set;
+}
+
+/** `used_by` (api-v1 v1.33 item 4): entry names. Missing, or anything but a list of entry names, is null (unknown). */
+function parseUsedBy(value: unknown): string[] | null {
+	if (!Array.isArray(value) || value.length > 500) return null;
+	if (!value.every((item) => typeof item === 'string' && CATALOG_NAME.test(item))) return null;
+	return [...new Set(value as string[])].sort();
+}
+
+/** An entry-private set (`@<entry>`, api-v1 v1.33 item 6). Lists hide them; the console never shows one as a shared set. */
+export function isPrivateSetName(value: unknown): boolean {
+	return typeof value === 'string' && value.startsWith('@');
 }
 
 export function parseEnvSetList(payload: unknown): { items: EnvSet[]; omitted: number } | null {
@@ -1671,6 +1688,8 @@ export function parseEnvSetList(payload: unknown): { items: EnvSet[]; omitted: n
 	const items: EnvSet[] = [];
 	const seen = new Set<string>();
 	for (const item of capped) {
+		// The API hides private sets unless asked (`?include=private`); skip one anyway, without counting it as omitted.
+		if (isRecord(item) && isPrivateSetName(item.name)) continue;
 		const row = parseEnvSet(item);
 		if (!row || seen.has(row.name)) omitted += 1;
 		else {

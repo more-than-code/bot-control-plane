@@ -11,7 +11,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import ValueSourceFields from '$lib/components/ValueSourceFields.svelte';
 	import type { GenerateKind } from '$lib/env-generate';
-	import { FILL_TEXT, type FillSource } from '$lib/fill-request';
+	import { FILL_TEXT, fillSubject, type FillSource } from '$lib/fill-request';
 	import EnvRevealDialog from '../../projects/[id]/EnvRevealDialog.svelte';
 	import { PASSWORD_MANAGER_IGNORE, secretInput, supportsTextMask } from '$lib/secret-input';
 
@@ -32,6 +32,10 @@
 	let revealDone = $state(false);
 
 	const request = $derived(data.request);
+	// A private set (`@<entry>`, api-v1 v1.33 item 6) is named by its entry.
+	const subject = $derived(request ? fillSubject(request.set, request.entry) : null);
+	// A rotation (api-v1 v1.33 item 3): the key already has a secret value that this save replaces.
+	const replacing = $derived(request?.replace === true && data.view === 'form');
 	const saved = $derived(form != null && 'saved' in form && form.saved === true);
 	const generated = $derived(saved && form != null && 'revealPending' in form && form.revealPending === true);
 	const declined = $derived(form != null && 'declined' in form && form.declined === true);
@@ -69,7 +73,10 @@
 	<title>Enter a value · Deploybot</title>
 </svelte:head>
 
-<PageHeader title="Enter a value" subtitle="An AI agent asked for an env value. Only you can fill it." />
+<PageHeader
+	title={replacing && request ? `Replace the value of ${request.key}` : 'Enter a value'}
+	subtitle={replacing ? 'An AI agent asked you to replace a secret value. Only you can do it.' : 'An AI agent asked for an env value. Only you can fill it.'}
+/>
 <div id="fill-result" tabindex="-1" class="grid gap-2 outline-none">
 	{#if message}
 		<Notice kind="error">{message}</Notice>
@@ -88,8 +95,8 @@
 	<dl class="mt-4 grid max-w-xl grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
 		<dt class="text-muted-foreground">Project</dt>
 		<dd class="break-words">{request.project_name}</dd>
-		<dt class="text-muted-foreground">Env set</dt>
-		<dd class="font-mono break-all">{request.set}</dd>
+		<dt class="text-muted-foreground">{subject?.label}</dt>
+		<dd class="font-mono break-all" data-fill-subject>{subject?.name}</dd>
 		<dt class="text-muted-foreground">Key</dt>
 		<dd class="font-mono break-all">{request.key}</dd>
 		<dt class="text-muted-foreground">Expires</dt>
@@ -107,6 +114,9 @@
 {#if showForm && request}
 	<form method="POST" action="?/save" class="mt-6 grid max-w-xl gap-4" use:enhance>
 		<p class="text-muted-foreground text-sm">{FILL_TEXT.safety}</p>
+		{#if replacing}
+			<p class="text-sm font-medium" data-replace-note>{FILL_TEXT.replaceNote}</p>
+		{/if}
 		<Input type="hidden" name="source" value={source} />
 		<ValueSourceFields
 			idOf={(part) => `fill-${part}`}
@@ -146,7 +156,7 @@
 			</div>
 		{/if}
 		<div class="flex flex-wrap gap-2">
-			<Button type="submit">Save</Button>
+			<Button type="submit">{replacing ? 'Replace value' : 'Save'}</Button>
 			<!-- Submits the empty decline form below, so a typed value is never posted with a decline. -->
 			<Button type="submit" variant="outline" form="fill-decline">Decline</Button>
 		</div>

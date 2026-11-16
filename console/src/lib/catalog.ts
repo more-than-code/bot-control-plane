@@ -257,6 +257,93 @@ export function openSharedNetworks(
 	return out;
 }
 
+/** One row of the project Settings Networks card (spec-agent-usability-1 H2). Read-only. */
+export type ProjectNetworkRow = { host: string; name: string; subnet: string; entries: string[] };
+
+/**
+ * Each network open to this project on one of its hosts, with this project's image entries whose `spec.networks`
+ * include it (names, A–Z). Ordered by host, then network name. From the loaded hosts and catalog only.
+ */
+export function projectNetworkRows(
+	hosts: readonly Pick<Host, 'name' | 'access_level' | 'programs'>[],
+	slug: string | null,
+	catalog: readonly CatalogEntry[]
+): ProjectNetworkRow[] {
+	const rows: ProjectNetworkRow[] = [];
+	for (const item of openSharedNetworks(hosts, slug)) {
+		for (const network of [...item.networks].sort((a, b) => a.name.localeCompare(b.name))) {
+			const entries = catalog
+				.filter((entry) => entry.kind === 'image' && (entry.spec.networks ?? []).includes(network.name))
+				.map((entry) => entry.name)
+				.sort();
+			rows.push({ host: item.host, name: network.name, subnet: network.subnet, entries });
+		}
+	}
+	return rows.sort((a, b) => a.host.localeCompare(b.host) || a.name.localeCompare(b.name));
+}
+
+/** One choice of the container form's Shared networks multi-select (spec-agent-usability-1 H1). */
+export type NetworkChoice = {
+	name: string;
+	/** Where it is open to this project: `host (subnet)`. Empty for a saved name no read host opens. */
+	where: string[];
+	/** False for a name already in the entry that no read host opens to this project: it still shows, marked. */
+	open: boolean;
+};
+
+/**
+ * The Shared networks choices: every network open to this project on its hosts (by name, A–Z), then any `selected`
+ * name none of them opens, in its saved order, so a saved value is never dropped from view.
+ */
+export function networkChoices(
+	open: ReadonlyArray<{ host: string; networks: ReadonlyArray<{ name: string; subnet: string }> }>,
+	selected: readonly string[]
+): NetworkChoice[] {
+	const byName = new Map<string, string[]>();
+	for (const item of open) {
+		for (const network of item.networks) {
+			const where = byName.get(network.name) ?? [];
+			where.push(`${item.host} (${network.subnet})`);
+			byName.set(network.name, where);
+		}
+	}
+	const choices: NetworkChoice[] = [...byName.keys()].sort().map((name) => ({ name, where: byName.get(name) ?? [], open: true }));
+	for (const name of selected) {
+		if (!byName.has(name) && !choices.some((choice) => choice.name === name)) choices.push({ name, where: [], open: false });
+	}
+	return choices;
+}
+
+/** The networks field text with `name` turned on or off; order kept, a new name last. */
+export function toggleNetwork(text: string, name: string, on: boolean): string {
+	const names = text
+		.split(',')
+		.map((item) => item.trim())
+		.filter((item) => item !== '');
+	const next = on ? (names.includes(name) ? names : [...names, name]) : names.filter((item) => item !== name);
+	return next.join(', ');
+}
+
+/** The networks limit as a visible, announced line once it is reached. */
+export function networksLimitText(max: number): string {
+	return `Limit of ${max} reached. Clear one to choose another.`;
+}
+
+/**
+ * Add by name (when not every host could be read, a network may be open on one that was not): the v1.25 name rule
+ * and the limit of `max`. A name already chosen is kept once.
+ */
+export function addNetworkByName(text: string, raw: string, max: number): { ok: true; text: string } | { ok: false; message: string } {
+	const name = raw.trim();
+	if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(name)) {
+		return { ok: false, message: 'A shared network name starts with a lowercase letter or digit and uses up to 32 lowercase letters, digits, and hyphens.' };
+	}
+	const names = text.split(',').map((item) => item.trim()).filter((item) => item !== '');
+	if (names.includes(name)) return { ok: true, text: names.join(', ') };
+	if (names.length >= max) return { ok: false, message: networksLimitText(max) };
+	return { ok: true, text: toggleNetwork(text, name, true) };
+}
+
 /**
  * A note, not a block (agent-protocol v1.14): an agent without `env_hash` reports a value-only env change to
  * a service as unchanged, so the container keeps its old env unless the deploy is forced. Null for a job

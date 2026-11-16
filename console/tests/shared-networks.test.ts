@@ -366,7 +366,9 @@ describe('shared networks (api-v1 v1.25)', () => {
 		}).body;
 		assert.match(html, /name="networks"[^>]*value="dd"|value="dd"[^>]*name="networks"/);
 		assert.equal(html.includes('Other entries on the same shared network reach this one by its container name, defect-drainer-serve.'), true);
-		assert.equal(html.includes('Open on pi3: dd (10.200.10.0/24)'), true);
+		// H1: a checkbox per open network, with where it is open.
+		assert.equal(html.includes('Open on pi3 (10.200.10.0/24)'), true);
+		assert.match(html, /data-network-choice="dd"/);
 		assert.equal(html.includes('--network deploybot-shared-dd'), true);
 		const blank = render(CatalogImageForm, {
 			props: { mode: 'create', entry: null, saveAction: '?/catalogCreate', sets: [], setsStatus: 'ready', editor: null }
@@ -510,22 +512,23 @@ describe('shared networks (api-v1 v1.25)', () => {
 
 	test('the form: help and format, a neutral placeholder, the describedby chain, and the empty and truncated cases', () => {
 		const html = imageForm({ hosts: [host(policy({ shared_networks: [] }))], projectSlug: 'defect-drainer' });
-		assert.equal(html.includes('Names of shared networks, separated by commas (up to 4).'), true);
+		assert.equal(html.includes('Choose up to 4 shared networks.'), true);
 		assert.equal(html.replaceAll('&#39;', "'").includes("A host's administrator opens a network to a project in runner.toml."), true);
 		assert.equal(html.includes('No host opens a shared network to this project.'), true);
 		assert.equal(html.includes('Not every host could be read'), false);
-		const input = /<input[^>]*name="networks"[^>]*>/.exec(html)?.[0] ?? '';
-		assert.match(input, /placeholder="shared-net"/);
-		assert.match(input, /aria-describedby="[^"]*-networks-hint"/);
+		// H1: the field is a group of checkboxes, described by the help; the names post in a hidden field.
+		const group = /<div[^>]*role="group"[^>]*aria-labelledby="[^"]*-networks-label"[^>]*>/.exec(html)?.[0] ?? '';
+		assert.match(group, /aria-describedby="[^"]*-networks-hint"/);
+		assert.match(/<input[^>]*name="networks"[^>]*>/.exec(html)?.[0] ?? '', /type="hidden"/);
 
 		const errored = imageForm({ hosts: [], editor: { mode: 'edit', name: 'serve', draft: { ...blankImageDraft(), image: 'nginx', networks: 'DD' }, field: 'networks', message: 'bad' } });
-		const errorInput = /<input[^>]*name="networks"[^>]*>/.exec(errored)?.[0] ?? '';
-		assert.match(errorInput, /aria-describedby="[^"]*-networks-hint [^"]*-error"/);
+		const errorGroup = /<div[^>]*role="group"[^>]*aria-labelledby="[^"]*-networks-label"[^>]*>/.exec(errored)?.[0] ?? '';
+		assert.match(errorGroup, /aria-describedby="[^"]*-networks-hint [^"]*-error"/);
 
 		const truncated = imageForm({ hosts: [host(policy({ shared_networks: [] }))], hostsIncomplete: true });
 		assert.equal(truncated.includes('No host opens a shared network to this project.'), false);
 		assert.equal(truncated.includes('None of the hosts read opens a shared network to this project.'), true);
-		assert.equal(truncated.includes('Not every host could be read, so another host may open more networks.'), true);
+		assert.equal(truncated.includes('The choices come only from the hosts that were read. Not every host could be read, so another host may open more networks; add one by name.'), true);
 	});
 
 	test('the form loads an empty field for an entry whose networks are null or absent', () => {

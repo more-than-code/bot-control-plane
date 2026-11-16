@@ -12,10 +12,11 @@
 	import ProjectFileForm from './ProjectFileForm.svelte';
 	import RegistryForm from './RegistryForm.svelte';
 	import GitHubConnect from './GitHubConnect.svelte';
+	import NetworksCard from './NetworksCard.svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { envSetUsers, fileUsers, GITHUB_NOTES, GITHUB_REGISTRY, registryUsers, usedByText, type GitHubNoteCode } from '$lib/settings-auto';
 	import { ENV_SET_STATUS_ID } from './env-set-panel';
-	import type { CatalogEntry, EnvSet, Project, ProjectFile, Registry } from '$lib/api-types';
+	import type { CatalogEntry, EnvSet, Host, Project, ProjectFile, Registry } from '$lib/api-types';
 	import { formatBytes } from '$lib/format';
 	import { actionUrlFrom } from '$lib/url';
 	import { Button } from '$lib/components/ui/button';
@@ -41,7 +42,9 @@
 		githubNote = null,
 		githubRefused = false,
 		catalog = [],
-		catalogKnown = true
+		catalogKnown = true,
+		hosts = [],
+		hostsIncomplete = false
 	}: {
 		project: Project;
 		canOwner: boolean;
@@ -67,6 +70,10 @@
 		catalog?: CatalogEntry[];
 		/** False when the catalog failed to load, was truncated or left entries out: the notes say usage is unknown. */
 		catalogKnown?: boolean;
+		/** The project's hosts, for the Networks card (spec-agent-usability-1 H2). */
+		hosts?: Host[];
+		/** The host list was truncated or could not be read. */
+		hostsIncomplete?: boolean;
 	} = $props();
 
 	const githubRow = $derived(registries.find((row) => row.host === GITHUB_REGISTRY && row.source === 'github') ?? null);
@@ -83,6 +90,8 @@
 	let viewOpen = $state(untrack(() => viewedFile != null));
 	// Secret files are never shown: only a plain row in the list can be viewed.
 	const viewedRow = $derived(viewing != null && viewedFile?.name === viewing ? (files.find((file) => file.name === viewing && !file.is_secret) ?? null) : null);
+	// Entry-private sets (`@<entry>`, api-v1 v1.33 item 6) belong to their entry's drawer, not this card.
+	const sharedSets = $derived(envSets.filter((set) => !set.name.startsWith('@')));
 	// The Env sets card's status line ("Saved env set {name}."), set by the Add env set dialog.
 	let envSetNote = $state('');
 </script>
@@ -155,10 +164,10 @@
 		<Card.Content class="grid gap-4">
 			<!-- Always present (sr-only while empty), so the live region exists before text arrives. -->
 			<p id={ENV_SET_STATUS_ID} role="status" tabindex="-1" class={envSetNote ? 'text-sm break-all rounded-md focus-visible:ring-3 focus-visible:ring-ring' : 'sr-only'}>{envSetNote}</p>
-			{#if envSets.length === 0}
+			{#if sharedSets.length === 0}
 				<p class="text-muted-foreground text-sm">No env sets.</p>
 			{/if}
-			{#each envSets as set (set.name)}
+			{#each sharedSets as set (set.name)}
 				<div class="grid min-w-0 gap-1">
 				<EnvSetTable
 					{set}
@@ -171,7 +180,7 @@
 					mergeError={settingsField === 'merge' && settingsName === set.name ? message : null}
 					onAction={() => (envSetNote = '')}
 				/>
-				<p class="text-muted-foreground min-w-0 text-xs break-words" data-used-by="env-set">{usedByText(envSetUsers(catalog, set.name), catalogKnown)}</p>
+				<p class="text-muted-foreground min-w-0 text-xs break-words" data-used-by="env-set">{set.used_by ? usedByText(set.used_by) : usedByText(envSetUsers(catalog, set.name), catalogKnown)}</p>
 				</div>
 			{/each}
 		</Card.Content>
@@ -349,4 +358,5 @@
 			{/each}
 		</Card.Content>
 	</Card.Root>
+	<NetworksCard {hosts} {hostsIncomplete} projectSlug={project.slug} {catalog} snippetAction={actionUrlFrom(page.url, 'networkSnippet')} />
 {/if}

@@ -15,7 +15,7 @@
 	import Textarea from '$lib/components/Textarea.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { Host, ImageEntry } from '$lib/api-types';
-	import { openSharedNetworks } from '$lib/catalog';
+	import { addNetworkByName, networkChoices, networksLimitText, openSharedNetworks, toggleNetwork } from '$lib/catalog';
 	import {
 		DEFAULT_LOG_FILES,
 		DEFAULT_LOG_SIZE_MB,
@@ -213,6 +213,23 @@
 		return `${projectSlug ?? '<project>'}-${name === '' ? '<entry>' : name}`;
 	});
 	const openNetworks = $derived(openSharedNetworks(hosts, projectSlug ?? null));
+	// H1: a multi-select of the networks open to this project; a saved name none opens still shows, marked.
+	const chosenNetworks = $derived(sharedNetworkNames(draft.networks));
+	const networkOptions = $derived(networkChoices(openNetworks, chosenNetworks));
+	const networksFull = $derived(chosenNetworks.length >= SHARED_NETWORKS_MAX);
+	// With hosts left unread a network may be open on one of them: it can be added by name (same rule and limit).
+	let networkByName = $state('');
+	let networkByNameError = $state<string | null>(null);
+	function addNetwork() {
+		const added = addNetworkByName(draft.networks, networkByName, SHARED_NETWORKS_MAX);
+		if (!added.ok) {
+			networkByNameError = added.message;
+			return;
+		}
+		draft.networks = added.text;
+		networkByName = '';
+		networkByNameError = null;
+	}
 	function networksDescribedBy(): string {
 		return [`${fieldId}-networks-hint`, describedBy('networks')].filter((id) => id != null).join(' ');
 	}
@@ -363,7 +380,7 @@
 	use:enhance={({ cancel }) => {
 		const known = sets.length > 0 ? sets : undefined;
 		const knownFiles = filesStatus === 'ready' ? files.map((file) => file.name) : undefined;
-		const check = imageSpecFromDraft(draft, known, mode === 'create', knownFiles);
+		const check = imageSpecFromDraft(draft, known, mode === 'create', knownFiles, mode === 'edit' && entry ? entry.name : null);
 		if (!check.ok) {
 			clientField = check.field;
 			clientMessage = check.message;
@@ -560,6 +577,7 @@
 		</div>
 		<EnvSourceFields
 			{fieldId}
+			entryName={mode === 'edit' && entry ? entry.name : null}
 			bind:envSets={draft.envSets}
 			bind:secrets={draft.secrets}
 			{sets}
@@ -890,32 +908,67 @@
 			<Input id="{fieldId}-memory" name="memory_mb" bind:value={draft.memoryMb} inputmode="numeric" maxlength={5} placeholder="Suggested {SUGGESTED_MEMORY_MB}" aria-invalid={invalid('memory_mb')} aria-describedby={describedBy('memory_mb')} />
 		</Label>
 		{@render fieldNotice('memory_mb')}
-		<Label class="grid gap-1.5" for="{fieldId}-networks">
-			Shared networks
-			<Input
-				id="{fieldId}-networks"
-				name="networks"
-				bind:value={draft.networks}
-				maxlength={200}
-				autocomplete="off"
-				spellcheck="false"
-				placeholder="shared-net"
-				aria-invalid={invalid('networks')}
-				aria-describedby={networksDescribedBy()}
-			/>
-		</Label>
-		<div id="{fieldId}-networks-hint" class="text-muted-foreground grid gap-1 text-sm">
-			<p class="break-words">Names of shared networks, separated by commas (up to {SHARED_NETWORKS_MAX}). A host's administrator opens a network to a project in runner.toml.</p>
-			<p class="break-words">Other entries on the same shared network reach this one by its container name, {containerName}.</p>
-			{#each openNetworks as item (item.host)}
-				<p class="break-words">
-					Open on {item.host}: {item.networks.map((network) => `${network.name} (${network.subnet})`).join(', ')}
-				</p>
-			{:else}
-				<p class="break-words">{hostsIncomplete ? 'None of the hosts read opens a shared network to this project.' : 'No host opens a shared network to this project.'}</p>
+		<div class="grid gap-1.5" role="group" aria-labelledby="{fieldId}-networks-label" aria-describedby={networksDescribedBy()}>
+			<p id="{fieldId}-networks-label" class="text-sm font-medium">Shared networks</p>
+			<!-- The chosen names, posted as the comma-separated field the server reads. -->
+			<Input type="hidden" name="networks" value={draft.networks} />
+			{#each networkOptions as choice (choice.name)}
+				{@const checked = chosenNetworks.includes(choice.name)}
+				{@const off = !checked && networksFull}
+				<Label class="flex min-w-0 items-start gap-2 font-normal {off ? 'text-muted-foreground opacity-60' : ''}" data-network-choice={choice.name}>
+					<Checkbox
+						id="{fieldId}-network-{choice.name}"
+						{checked}
+						disabled={off}
+						aria-invalid={invalid('networks')}
+						onCheckedChange={(value) => (draft.networks = toggleNetwork(draft.networks, choice.name, value === true))}
+					/>
+					<span class="grid min-w-0 gap-0.5">
+						<span class="font-mono break-all">{choice.name}</span>
+						<span class="text-muted-foreground text-xs break-words">{choice.open ? `Open on ${choice.where.join(', ')}` : 'Not open on any host'}</span>
+					</span>
+				</Label>
 			{/each}
+			<!-- Always present, so the limit line is announced when it appears. -->
+			<p class="text-muted-foreground text-sm" aria-live="polite" data-networks-limit>{networksFull ? networksLimitText(SHARED_NETWORKS_MAX) : ''}</p>
 			{#if hostsIncomplete}
-				<p class="break-words">Not every host could be read, so another host may open more networks.</p>
+				<div class="grid gap-1.5">
+					<Label for="{fieldId}-network-by-name">Add by name</Label>
+					<div class="flex min-w-0 flex-wrap items-center gap-2">
+						<Input
+							id="{fieldId}-network-by-name"
+							class="w-48"
+							bind:value={networkByName}
+							maxlength={32}
+							autocomplete="off"
+							spellcheck="false"
+							placeholder="shared-net"
+							aria-invalid={networkByNameError ? true : undefined}
+							aria-describedby={networkByNameError ? `${fieldId}-network-by-name-error` : undefined}
+							oninput={() => (networkByNameError = null)}
+							onkeydown={(event) => {
+								if (event.key === 'Enter') {
+									event.preventDefault();
+									addNetwork();
+								}
+							}}
+						/>
+						<Button type="button" variant="outline" size="sm" onclick={addNetwork}>Add</Button>
+					</div>
+					{#if networkByNameError}
+						<p id="{fieldId}-network-by-name-error" class="text-destructive text-sm break-words">{networkByNameError}</p>
+					{/if}
+				</div>
+			{/if}
+		</div>
+		<div id="{fieldId}-networks-hint" class="text-muted-foreground grid gap-1 text-sm">
+			<p class="break-words">Choose up to {SHARED_NETWORKS_MAX} shared networks. A host's administrator opens a network to a project in runner.toml.</p>
+			<p class="break-words">Other entries on the same shared network reach this one by its container name, {containerName}.</p>
+			{#if openNetworks.length === 0}
+				<p class="break-words">{hostsIncomplete ? 'None of the hosts read opens a shared network to this project.' : 'No host opens a shared network to this project.'}</p>
+			{/if}
+			{#if hostsIncomplete}
+				<p class="break-words">The choices come only from the hosts that were read. Not every host could be read, so another host may open more networks; add one by name.</p>
 			{/if}
 		</div>
 		{@render fieldNotice('networks')}

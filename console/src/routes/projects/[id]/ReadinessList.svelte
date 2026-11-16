@@ -15,7 +15,9 @@
 		hostId = null,
 		hostName = null,
 		refreshKey = null,
-		collapsed = false
+		collapsed = false,
+		privateKeysId = null,
+		onOpenEntry
 	}: {
 		entry: string;
 		hostId?: string | null;
@@ -24,6 +26,10 @@
 		refreshKey?: unknown;
 		/** Passed to ReadinessView: fold the panel once the form beside it scrolls. */
 		collapsed?: boolean;
+		/** Passed to ReadinessView: where a private-set fix points in the entry's Edit drawer. */
+		privateKeysId?: string | null;
+		/** Passed to ReadinessView: opens the entry's Edit drawer for a private-set fix. */
+		onOpenEntry?: () => void;
 	} = $props();
 
 	const readinessAction = $derived(actionUrlFrom(page.url, 'catalogReadiness'));
@@ -78,4 +84,6 @@
 	{snippetAction}
 	onRefresh={load}
 	{collapsed}
+	{privateKeysId}
+	{onOpenEntry}
 />

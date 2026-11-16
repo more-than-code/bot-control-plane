@@ -16,6 +16,8 @@ export const GITHUB_REGISTRY = 'ghcr.io';
 
 const REGISTRY_HOST = /^[a-z0-9]([a-z0-9.-]{0,252})(:[0-9]{1,5})?$/;
 const SET_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
+/** An entry-private set (api-v1 v1.33 item 6): `@` and the entry's name. */
+const PRIVATE_SET_NAME = /^@[a-z0-9][a-z0-9-]{0,47}$/;
 const ENV_KEY = /^[A-Z_][A-Z0-9_]{0,63}$/;
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -68,7 +70,7 @@ export function accessLine(result: ImageAccessResult): { text: string; connect: 
 	}
 }
 
-export const READY_CHECKS = ['env_sets', 'env_values', 'env_refs', 'files', 'registry', 'host_access', 'host_online', 'host_images', 'host_policy', 'networks'] as const;
+export const READY_CHECKS = ['env_sets', 'env_values', 'env_refs', 'files', 'registry', 'host_access', 'host_online', 'host_images', 'host_policy', 'networks', 'env_pairs'] as const;
 export type ReadyCheckName = (typeof READY_CHECKS)[number];
 export const READY_STATUSES = ['ok', 'missing', 'warn', 'unknown'] as const;
 export type ReadyStatus = (typeof READY_STATUSES)[number];
@@ -83,7 +85,7 @@ function parseFix(value: unknown): ReadinessFix {
 	const v = record(value);
 	if (!v || !oneOf(FIX_ACTIONS, v.action)) return { action: 'none' };
 	const fix: ReadinessFix = { action: v.action };
-	if (typeof v.set === 'string' && SET_NAME.test(v.set)) fix.set = v.set;
+	if (typeof v.set === 'string' && (SET_NAME.test(v.set) || PRIVATE_SET_NAME.test(v.set))) fix.set = v.set;
 	if (typeof v.key === 'string' && ENV_KEY.test(v.key)) fix.key = v.key;
 	if (typeof v.name === 'string' && FILE_NAME.test(v.name)) fix.name = v.name;
 	if (typeof v.registry === 'string' && REGISTRY_HOST.test(v.registry)) fix.registry = v.registry;
@@ -114,7 +116,9 @@ const CHECK_LABELS: Record<ReadyCheckName, string> = {
 	host_online: 'Host online',
 	host_images: 'Containers',
 	host_policy: 'Host policy',
-	networks: 'Shared networks'
+	networks: 'Shared networks',
+	/** api-v1 v1.33 item 5: a client ID and its secret come from different places. Advisory (`warn`). */
+	env_pairs: 'Env pairs'
 };
 
 export function checkLabel(name: ReadyCheckName): string {
@@ -142,8 +146,18 @@ export function readinessSummary(r: Readiness): string {
 	return `${missing} item${missing === 1 ? '' : 's'} missing. You can still deploy; the deploy may be refused.`;
 }
 
+/**
+ * The entry whose private set (`@<entry>`, api-v1 v1.33 item 6) a value fix is about, or null. Its keys are listed in
+ * that entry's Edit drawer ("Secrets for this entry"), not in Settings → Env sets, which hides private sets.
+ */
+export function privateFixEntry(fix: ReadinessFix): string | null {
+	if (fix.action !== 'fill_value' && fix.action !== 'create_env_set') return null;
+	return fix.set != null && PRIVATE_SET_NAME.test(fix.set) ? fix.set.slice(1) : null;
+}
+
 /** The label of a fix's button or link, or null for none. */
 export function fixLabel(fix: ReadinessFix): string | null {
+	if (privateFixEntry(fix) != null) return 'Open entry secrets';
 	switch (fix.action) {
 		case 'connect_github':
 			return 'Connect GitHub';
@@ -169,6 +183,9 @@ export function fixLabel(fix: ReadinessFix): string | null {
  * Connect GitHub and Allow on host are not links (a form post and a dialog), so they return null.
  */
 export function fixHref(fix: ReadinessFix, projectPath: string): string | null {
+	// A private set's keys live with its entry: the catalog filtered to it (the drawer itself opens by a button).
+	const owner = privateFixEntry(fix);
+	if (owner != null) return `${projectPath}?tab=catalog&catalog.q=${encodeURIComponent(owner)}`;
 	switch (fix.action) {
 		case 'fill_value':
 		case 'create_env_set':
@@ -199,6 +216,53 @@ export function parseHostPolicySnippet(value: unknown): HostPolicySnippet | null
 		command: `sudo ./install.sh install --runner --project ${slug} --image '${pattern}'`,
 		note: typeof v.note === 'string' ? v.note.slice(0, 1000) : ''
 	};
+}
+
+/** Shared network name rule (api-v1 v1.25 item 1). */
+const NETWORK_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const IPV4_CIDR = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
+
+/**
+ * The shared-network snippet request (api-v1 v1.33 item 7): a network name and an IPv4 subnet in CIDR form. A shape
+ * check only; the API decides what a host accepts. Null when valid, else the message to show.
+ */
+export function networkSnippetProblem(network: string, subnet: string): string | null {
+	if (!NETWORK_NAME.test(network)) return 'A shared network name starts with a lowercase letter or digit and uses up to 32 lowercase letters, digits, and hyphens.';
+	const match = IPV4_CIDR.exec(subnet);
+	if (!match || !match.slice(1, 5).every((octet) => Number(octet) <= 255) || Number(match[5]) > 32) return 'Enter the subnet as an IPv4 range, such as 10.200.10.0/24.';
+	return null;
+}
+
+/** A shown snippet with what was asked, so its heading never names a host chosen afterwards. */
+export type NetworkSnippetResult = { hostName: string; network: string; subnet: string; snippet: string };
+
+/** The fields a snippet or a message answers; a change to any of them makes the shown answer stale. */
+export type NetworkSnippetAsk = { hostId: string; network: string; subnet: string };
+
+export function sameSnippetAsk(a: NetworkSnippetAsk | null, b: NetworkSnippetAsk): boolean {
+	return a != null && a.hostId === b.hostId && a.network.trim() === b.network.trim() && a.subnet.trim() === b.subnet.trim();
+}
+
+export function networkSnippetHeading(result: NetworkSnippetResult): string {
+	return `Add to /etc/bot-agent/runner.toml on ${result.hostName} (network ${result.network}, ${result.subnet}), keeping what is there, then restart bot-agent:`;
+}
+
+/** The snippet route's `not_found`: the project has no deploy access to the host (api-v1 v1.33 item 7). */
+export const NETWORK_SNIPPET_NO_ACCESS = "This project can't deploy to that host.";
+
+/** Hosts the snippet may be asked for: this project deploys containers there (`access_level` `deploy`). */
+export function networkSnippetHosts<H extends { id: string; name: string; access_level?: string | null }>(
+	hosts: readonly H[],
+	runsContainers: (host: H) => boolean
+): Array<{ id: string; name: string }> {
+	return hosts.filter((host) => host.access_level === 'deploy' && runsContainers(host)).map((host) => ({ id: host.id, name: host.name }));
+}
+
+/** The snippet answer: its runner.toml lines as text, or null when it is not `{"snippet": string}`. */
+export function parseNetworkSnippet(value: unknown): string | null {
+	const v = record(value);
+	if (!v || typeof v.snippet !== 'string' || v.snippet.trim() === '' || v.snippet.length > 4000) return null;
+	return v.snippet;
 }
 
 /** GitHub's authorize endpoint is the only place Connect GitHub may send the browser. */

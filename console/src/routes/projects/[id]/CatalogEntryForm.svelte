@@ -284,7 +284,7 @@
 			{/each}
 			<Button type="button" variant="outline" disabled={envRows.length >= 64} onclick={addEnv}>Add variable</Button>
 		</div>
-		<EnvSourceFields {fieldId} bind:envSets bind:secrets {sets} {setsStatus} {setsMessage} {retrySets} {overrides} />
+		<EnvSourceFields {fieldId} entryName={mode === 'edit' && entry ? entry.name : null} bind:envSets bind:secrets {sets} {setsStatus} {setsMessage} {retrySets} {overrides} />
 		<p class="text-muted-foreground text-sm">{PROGRAM_SECRET_HELP}</p>
 		<p class="text-muted-foreground text-sm">{PROGRAM_SECRET_KEYS_HELP}</p>
 		{#if preview}
