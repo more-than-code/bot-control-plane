@@ -314,7 +314,7 @@ describe('env-set inline edit and Add variable dialog', () => {
 		const rest = table.slice(table.indexOf('{:else}', table.indexOf('{#if editingRow}')), table.indexOf('</Table.Row>\n\t\t\t{/each}'));
 		assert.equal(rest.match(/<Table\.Cell\b/g)?.length, 3);
 		// The input no longer forces 12rem on a phone.
-		assert.equal(source('EnvValueEditor.svelte').match(/class="min-w-40 sm:min-w-48"/g)?.length, 2);
+		assert.equal(source('EnvValueEditor.svelte').match(/class="min-w-40 sm:min-w-48( \{secretField\.maskClass\})?"/g)?.length, 2);
 	});
 
 	test('a key wraps only after an underscore, and a long part is capped instead of widening the table', () => {

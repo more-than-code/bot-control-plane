@@ -13,12 +13,20 @@
 	import type { GenerateKind } from '$lib/env-generate';
 	import { FILL_TEXT, type FillSource } from '$lib/fill-request';
 	import EnvRevealDialog from '../../projects/[id]/EnvRevealDialog.svelte';
+	import { PASSWORD_MANAGER_IGNORE, secretInput, supportsTextMask } from '$lib/secret-input';
+
+	// A masked secret is a CSS-masked text input where the browser can, so no "save password?" prompt ($lib/secret-input).
+	let canMask = $state(false);
+	$effect(() => {
+		canMask = supportsTextMask();
+	});
 
 	let { data, form } = $props();
 
 	let source = $state<FillSource>('value');
 	let kind = $state<GenerateKind>('password');
 	let shown = $state(false);
+	const valueInput = $derived(secretInput(!shown, canMask));
 	// The key whose generated value the show-once dialog shows, or null.
 	let revealKey = $state<string | null>(null);
 	let revealDone = $state(false);
@@ -117,11 +125,12 @@
 					<Input
 						id="fill-value"
 						name="value"
-						type={shown ? 'text' : 'password'}
-						autocomplete="new-password"
+						type={valueInput.type}
+						autocomplete={valueInput.autocomplete}
 						spellcheck="false"
 						required
-						class="min-w-0 flex-1 font-mono"
+						class="min-w-0 flex-1 font-mono {valueInput.maskClass}"
+						{...PASSWORD_MANAGER_IGNORE}
 					/>
 					<Button
 						type="button"

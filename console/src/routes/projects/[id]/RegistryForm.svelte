@@ -6,6 +6,14 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import { PASSWORD_MANAGER_IGNORE, secretInput, supportsTextMask } from '$lib/secret-input';
+
+	// A masked secret is a CSS-masked text input where the browser can, so no "save password?" prompt ($lib/secret-input).
+	let canMask = $state(false);
+	$effect(() => {
+		canMask = supportsTextMask();
+	});
+	const tokenField = $derived(secretInput(true, canMask));
 
 	let {
 		action,
@@ -55,11 +63,14 @@
 		<Input
 			id="registry-token"
 			name="token"
-			type="password"
+			type={tokenField.type}
+			class={tokenField.maskClass}
 			bind:value={token}
 			required
 			maxlength={4096}
-			autocomplete="off"
+			autocomplete={tokenField.autocomplete}
+			spellcheck="false"
+			{...PASSWORD_MANAGER_IGNORE}
 			aria-invalid={error ? true : undefined}
 			aria-describedby={error ? 'registry-token-error' : undefined}
 		/>

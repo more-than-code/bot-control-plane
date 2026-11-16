@@ -259,7 +259,8 @@ test('toggling Secret in the Add variable dialog keeps the typed value', () => {
 	const source = readRoute('EnvAddVariablesDialog.svelte');
 	assert.equal(source.match(/id=\{id\('add-value'\)\}/g)?.length, 1);
 	// Hidden whenever Secret shows as ticked, including when the key is a secret placeholder (api-v1 v1.27 item 4).
-	assert.match(source, /type=\{secretShown \? 'password' : 'text'\}/);
+	assert.match(source, /const valueField = \$derived\(secretInput\(secretShown, canMask\)\);/);
+	assert.match(source, /type=\{valueField\.type\}/);
 	assert.match(source, /bind:value=\{view\.draft\.value\}/);
 	assert.match(source, /draft: setAddSecret\(view\.draft, value === true\)/);
 });

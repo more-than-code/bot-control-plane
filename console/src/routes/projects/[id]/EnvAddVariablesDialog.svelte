@@ -37,6 +37,13 @@
 		type AddTab
 	} from './env-add-variable';
 	import { envDomId, failureMessage } from './env-set-panel';
+	import { PASSWORD_MANAGER_IGNORE, secretInput, supportsTextMask } from '$lib/secret-input';
+
+	// A masked secret is a CSS-masked text input where the browser can, so no "save password?" prompt ($lib/secret-input).
+	let canMask = $state(false);
+	$effect(() => {
+		canMask = supportsTextMask();
+	});
 
 	let {
 		setName,
@@ -85,6 +92,7 @@
 	const generating = $derived(view.draft.source === 'generate');
 	const placeholder = $derived(placeholderRule(view.draft.key, secretPlaceholders, plainPlaceholders));
 	const secretShown = $derived(placeholder.secret ?? addIsSecret(view.draft));
+	const valueField = $derived(secretInput(secretShown, canMask));
 	// Every key already in the set, placeholders included: the paste suggestion names new keys only.
 	const allKeys = $derived([...existingKeys, ...secretPlaceholders, ...plainPlaceholders]);
 	/** Typing a key: the name suggestion, and back to Type a value when the key is a plain placeholder. */
@@ -246,11 +254,13 @@
 								<Input
 									id={id('add-value')}
 									name="value"
-									type={secretShown ? 'password' : 'text'}
+									type={valueField.type}
+									class={valueField.maskClass}
 									bind:value={view.draft.value}
 									oninput={() => (view = { ...view, draft: addValueTyped(view.draft) })}
-									autocomplete={secretShown ? 'new-password' : 'off'}
+									autocomplete={valueField.autocomplete}
 									spellcheck="false"
+									{...PASSWORD_MANAGER_IGNORE}
 									aria-describedby={[view.draft.error ? id('add-error') : null, valueWarnings.length > 0 ? id('add-warnings') : null].filter(Boolean).join(' ') || undefined}
 								/>
 							</Label>

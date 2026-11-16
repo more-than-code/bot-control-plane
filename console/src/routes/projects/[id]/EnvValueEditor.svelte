@@ -3,6 +3,14 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { editValueField } from './env-set-panel';
+	import { PASSWORD_MANAGER_IGNORE, secretInput, supportsTextMask } from '$lib/secret-input';
+
+	// A masked secret is a CSS-masked text input where the browser can, so no "save password?" prompt ($lib/secret-input).
+	let canMask = $state(false);
+	$effect(() => {
+		canMask = supportsTextMask();
+	});
+	const secretField = $derived(secretInput(true, canMask));
 
 	// The inline value input of a row in edit state. It belongs to the row's form in the row's edit cell.
 	// Escape is handled by the row, so it cancels from anywhere in it.
@@ -36,14 +44,15 @@
 			id={inputId}
 			form={formId}
 			name="value"
-			type="password"
-			class="min-w-40 sm:min-w-48"
+			type={secretField.type}
+			class="min-w-40 sm:min-w-48 {secretField.maskClass}"
 			{placeholder}
 			aria-label="New value for {item.key}"
 			aria-invalid={error ? true : undefined}
 			aria-describedby={error ? errorId : undefined}
-			autocomplete="new-password"
+			autocomplete={secretField.autocomplete}
 			spellcheck="false"
+			{...PASSWORD_MANAGER_IGNORE}
 			oninput={onInput}
 		/>
 	{:else}
