@@ -169,7 +169,14 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 				ProjectName string `json:"project_name"`
 				Level       string `json:"level"`
 			} `json:"access"`
+			Edge *struct {
+				Enabled bool   `json:"enabled"`
+				Status  string `json:"status"`
+			} `json:"edge"`
 			Programs *struct {
+				Edge *struct {
+					Enabled bool `json:"enabled"`
+				} `json:"edge"`
 				SharedNetworks []struct {
 					Name   string `json:"name"`
 					Subnet string `json:"subnet"`
@@ -208,6 +215,13 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 				nets = append(nets, summaryField(n.Name)+" "+summaryField(n.Subnet))
 			}
 			line += " (shared networks: " + strings.Join(nets, ", ") + ")"
+		}
+		// api-v1 v1.35: the host's Deploybot edge (routes go live only where it is on).
+		switch {
+		case h.Edge != nil && h.Edge.Enabled:
+			line += " (edge on, " + summaryField(h.Edge.Status) + ")"
+		case h.Programs != nil && h.Programs.Edge != nil && h.Programs.Edge.Enabled:
+			line += " (edge off)"
 		}
 		parts = append(parts, line)
 	}

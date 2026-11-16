@@ -18,6 +18,10 @@ type CallError struct {
 	Code    string
 	Msg     string
 	Payload json.RawMessage
+	// Agent is the agent's own error_code (a task_reject or a failed
+	// result), "" for a timeout or an unavailable host. The edge maps it
+	// to a sentence (api-v1 v1.35).
+	Agent string
 }
 
 func (e *CallError) Error() string {
@@ -51,6 +55,34 @@ func (h *Hub) Image(ctx context.Context, host store.Host, kind string, spec map[
 		timeoutSec = taskTimeoutSec
 	}
 	return h.live(ctx, host, kind, nil, spec, timeoutSec)
+}
+
+// EdgeTimeoutSec is the edge task budget: the first apply may pull the
+// Caddy image (agent-protocol v1.15 item 4).
+const EdgeTimeoutSec = 180
+
+// Edge asks a live host to run edge_apply, edge_stop or edge_status
+// (agent-protocol v1.15 item 4). service is null.
+func (h *Hub) Edge(ctx context.Context, host store.Host, kind string, spec map[string]any) (LiveResult, error) {
+	return h.live(ctx, host, kind, nil, spec, EdgeTimeoutSec)
+}
+
+// SetEdgeHook sets the function that re-applies a host's edge config. It is
+// called in its own goroutine after each hello (hello true) and services
+// report (hello false).
+func (h *Hub) SetEdgeHook(fn func(hostID uuid.UUID, hello bool)) {
+	h.mu.Lock()
+	h.edgeHook = fn
+	h.mu.Unlock()
+}
+
+func (h *Hub) notifyEdge(hostID uuid.UUID, hello bool) {
+	h.mu.Lock()
+	fn := h.edgeHook
+	h.mu.Unlock()
+	if fn != nil {
+		go fn(hostID, hello)
+	}
 }
 
 // Probe asks a live host to run probe_health for svc.
@@ -195,8 +227,14 @@ func (h *Hub) onTaskReject(ac *agentConn, f frame) {
 		h.log.Warn("bad task_id")
 		return
 	}
-	code, msg := rejectCode(jsonString(f.ErrorCode))
-	h.deliver(id, taskOut{err: &CallError{Code: code, Msg: msg}})
+	agent := jsonString(f.ErrorCode)
+	code, msg := rejectCode(agent)
+	ce := &CallError{Code: code, Msg: msg, Agent: agent}
+	if len(f.Payload) > 0 {
+		// Only the edge reads it (its refusal detail).
+		ce.Payload = taskPayload(f.Payload)
+	}
+	h.deliver(id, taskOut{err: ce})
 	_ = ac
 }
 
@@ -212,6 +250,12 @@ func rejectCode(code string) (string, string) {
 		return "unavailable", "host unavailable"
 	case "policy_denied":
 		return "forbidden", PolicyDenied
+	case "edge_disabled":
+		return "forbidden", EdgeDisabled
+	case "port_in_use":
+		return "conflict", EdgePortInUse
+	case "invalid_config":
+		return "bad_request", EdgeInvalidConfig
 	default:
 		return "error", "internal error"
 	}
@@ -221,11 +265,24 @@ func rejectCode(code string) (string, string) {
 // 3). The agent's own reason is never part of it.
 const PolicyDenied = "the host refused this under its policy (runner.toml)"
 
+// Edge refusals (agent-protocol v1.15 item 4). A failed result keeps the
+// agent payload (the holder's name, Caddy's first error line).
+const (
+	EdgeDisabled      = "the host's runner.toml does not allow the edge"
+	EdgePortInUse     = "port 80 or 443 is in use on the host"
+	EdgeInvalidConfig = "the edge refused the config"
+)
+
 func failedTask(code string, payload json.RawMessage) *CallError {
 	if code == "policy_denied" {
-		return &CallError{Code: "forbidden", Msg: PolicyDenied}
+		return &CallError{Code: "forbidden", Msg: PolicyDenied, Agent: code}
 	}
-	return &CallError{Code: "error", Msg: code, Payload: payload}
+	switch code {
+	case "edge_disabled", "port_in_use", "invalid_config":
+		c, msg := rejectCode(code)
+		return &CallError{Code: c, Msg: msg, Payload: payload, Agent: code}
+	}
+	return &CallError{Code: "error", Msg: code, Payload: payload, Agent: code}
 }
 
 func taskPayload(raw json.RawMessage) json.RawMessage {

@@ -91,6 +91,8 @@ type Mem struct {
 	fileRequests map[string]store.FileRequest
 	// connectRequests is keyed by hashKey(id hash); see connect_requests.go.
 	connectRequests map[string]store.ConnectRequest
+	// edge is domains, routes and host edges (api-v1 v1.35); see edge.go.
+	edge *edgeData
 }
 
 type sessionRec struct {

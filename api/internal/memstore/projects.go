@@ -190,6 +190,7 @@ func (m *Mem) deleteProjectLocked(id uuid.UUID, at time.Time) {
 		}
 	}
 	m.deleteInvitesLocked(id)
+	m.dropProjectEdgeLocked(id)
 	m.deleteCatalogLocked(id)
 	m.deleteSecretsLocked(id)
 }

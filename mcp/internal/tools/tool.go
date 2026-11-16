@@ -64,6 +64,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerConnectRequests(server, api)
 	registerReadiness(server, api)
 	registerSharedNetworkSnippet(server, api)
+	registerRoutes(server, api)
 }
 
 func addTool(server *mcp.Server, tool *mcp.Tool, h func(context.Context, json.RawMessage) *mcp.CallToolResult) {
@@ -228,6 +229,10 @@ func actedOrPending(status int, payload json.RawMessage) *mcp.CallToolResult {
 	case http.StatusOK:
 		if isNullJSON(payload) {
 			return catalogWriteResult(payload, "deleted")
+		}
+		// api-v1 v1.35 item 3: a routes plan.
+		if res, ok := routesConfirmed(payload); ok {
+			return res
 		}
 		// api-v1 v1.33 items 1 and 2: an env set update or delete plan.
 		if name, ok := envSetDeletedPayload(payload); ok {

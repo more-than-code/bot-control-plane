@@ -55,6 +55,8 @@ Automatic project settings (api-v1 v1.29, spec `docs/spec-settings-automatic.md`
 
 Connect GitHub from chat (api-v1 v1.31). `connect_registry` (`project_id`, `registry` = `ghcr.io`, `reason?`) asks the signed-in person to connect GitHub for the project on the console page `/connect/<id>`, where they continue to github.com and approve `read:packages`; `get_registry_connect_request` (`request_id`) reads `pending`, `connected`, `declined` or `expired`; for the last two it adds that `check_readiness` shows whether ghcr.io got connected anyway (a person who finishes on GitHub after the request ended still connects). Both start "No registry token is ever sent through this tool or shown to you." and allowlist their results, so no token (or anything else the API might add) reaches the agent. As `request_env_value`, the link is always in the text; a 2026-07-28 client that declares `elicitation.url` also gets a URL input request, and its retry reads the state without a second create. `check_readiness` now names `connect_registry` as the next step for a `connect_github` fix.
 
+Routes (api-v1 v1.35). `set_routes` (`project_id`, `entry`, `routes`, `idempotency_key`) replaces an entry's public routes (`hostname`, `path_prefix?`, `port`, `client_ip_from?` `cloudflare`, `no_store_paths?`) and returns the API plan, which names every address that goes live or stops; nothing changes until `confirm`, whose result lists the entry's routes and their state. `list_routes` (`project_id`, `entry?`) reads them. Domains and the host edge switch are console only. `list_hosts` says whether each host's edge is on, and `check_readiness` knows the `routes` check.
+
 ## Deploybot
 
 ```bash

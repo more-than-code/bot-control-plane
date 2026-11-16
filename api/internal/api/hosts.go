@@ -230,6 +230,10 @@ func (s *Server) handleHostList(w http.ResponseWriter, r *http.Request) {
 	for i := range items {
 		items[i].Status = s.hostStatus(items[i])
 		items[i] = projectsView(items[i], id, viewer.Slug, orgAdmin)
+		if items[i], err = s.withEdge(r.Context(), items[i]); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 	writeList(w, items, next)
 }
@@ -272,7 +276,12 @@ func (s *Server) handleHostGet(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeOK(w, http.StatusOK, projectsView(host, viewer, slug, orgView))
+	host, err = s.withEdge(r.Context(), projectsView(host, viewer, slug, orgView))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, host)
 }
 
 // hostViewer is the project whose view GET /v1/hosts/{id} shows: the

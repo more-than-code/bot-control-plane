@@ -51,6 +51,8 @@ type Hub struct {
 	unauth  int
 	// autoWarned is the hourly-cap warn state per (entry, host), one line an hour.
 	autoWarned map[string]*warnCount
+	// edgeHook re-applies a host's edge config (api-v1 v1.35); nil when unset.
+	edgeHook func(hostID uuid.UUID, hello bool)
 }
 
 type waiter struct {

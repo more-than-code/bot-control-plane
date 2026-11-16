@@ -59,6 +59,10 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 
 // createProject creates the project in orgID with the caller as owner.
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request, p principal, orgID uuid.UUID, name string) {
+	if store.Slug(name) == reservedProjectSlug {
+		writeCode(w, "bad_request", msgReservedProject)
+		return
+	}
 	project, err := s.Store.CreateProject(r.Context(), orgID, p.User.ID, name, store.Slug(name), s.now())
 	if err != nil {
 		s.fail(w, err)
@@ -220,6 +224,8 @@ func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auditOK(r.Context(), p, store.AuditRow{OrgID: idPtr(project.OrgID), ProjectID: idPtr(id), Action: audit.ActionProjectDelete})
+	// api-v1 v1.35: the project's routes stop on the org's edges.
+	s.kickOrgEdges(r.Context(), project.OrgID)
 	writeOK(w, http.StatusOK, nil)
 }
 

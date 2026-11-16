@@ -79,7 +79,8 @@ VALUES ($1::uuid, $2::uuid, $3, 'declared', 'process', '{}', $4, $4, CAST($5 AS 
 }
 
 func assertOrgPrivileges(t *testing.T, d *DB, ctx context.Context) {
-	assertTablePrivs(t, d, ctx, "orgs", true, true, true, true, []string{"id", "name", "slug", "created_by", "created_at", "deleted_at"})
+	// acme_email is 0023 (api-v1 v1.35 item 5).
+	assertTablePrivs(t, d, ctx, "orgs", true, true, true, true, []string{"id", "name", "slug", "created_by", "created_at", "deleted_at", "acme_email"})
 	assertTablePrivs(t, d, ctx, "org_members", true, true, true, true, []string{"org_id", "user_id", "role", "added_by", "added_at"})
 	assertTablePrivs(t, d, ctx, "host_access", true, true, true, true, []string{"host_id", "project_id", "level", "granted_by", "granted_at"})
 	for _, col := range []string{"projects.org_id", "hosts.org_id", "join_tokens.org_id", "join_tokens.grant_project_id", "join_tokens.grant_level"} {

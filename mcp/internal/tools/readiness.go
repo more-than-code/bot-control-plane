@@ -81,7 +81,7 @@ const hostPolicySnippetSchema = `{
 var (
 	readyCheckNames = map[string]bool{
 		"env_sets": true, "env_values": true, "env_refs": true, "env_pairs": true, "files": true, "registry": true,
-		"host_access": true, "host_online": true, "host_images": true, "host_policy": true, "networks": true,
+		"host_access": true, "host_online": true, "host_images": true, "host_policy": true, "networks": true, "routes": true,
 	}
 	readyStatuses = map[string]bool{"ok": true, "missing": true, "warn": true, "unknown": true}
 	imageAccesses = map[string]bool{
@@ -104,7 +104,7 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name: "check_readiness",
 		Description: noSecretRule + " Check whether a catalog entry is ready to deploy, before deploy_entry, or whether an image spec would be, before create_catalog_entry: pass exactly one of entry (a stored entry) or spec (the ImageSpec create_catalog_entry takes; nothing is stored, and env sets, keys and files it names may still be missing). Checks: env sets exist, env keys have values, ${KEY} references resolve, managed files exist, " +
-			"the image registry is reachable with the stored login, and, with host_id, deploy access, the host being online, containers, the host's image policy and shared networks. " +
+			"the image registry is reachable with the stored login, and, with host_id, deploy access, the host being online, containers, the host's image policy and shared networks, and for an entry with routes (set_routes), the routes check: a verified domain, a published port and the edge on the entry's host (an org admin turns the edge on in the console). " +
 			"Each check has a status (ok, missing, warn, unknown) and a fix. Fixes you can do yourself: fill_value with request_env_value, create_env_set with create_env_set, add_file with request_file (the person adds the file in the browser); " +
 			"you can start connect_github with connect_registry, and the person approves on github.com. " +
 			"Fixes for the person: ask the person to add a registry login in the console (" + settingsHint + "), or ask an org admin to grant deploy access. " +

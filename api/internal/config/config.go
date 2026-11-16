@@ -36,9 +36,16 @@ type Config struct {
 	// App (api-v1 v1.29 item 1). Without both, Connect GitHub is unavailable.
 	GitHubClientID         string
 	GitHubClientSecretFile string
+	// EdgeTLSIssuer is BOT_API_EDGE_TLS_ISSUER: "" (ACME) or "internal"
+	// (Caddy's internal CA, for dev and test hosts that the internet cannot
+	// reach on 80 and 443; api-v1 v1.35 acceptance 3).
+	EdgeTLSIssuer string
 }
 
 const defaultIssuer = "https://accounts.google.com"
+
+// EdgeIssuerInternal is the one non-empty BOT_API_EDGE_TLS_ISSUER value.
+const EdgeIssuerInternal = "internal"
 
 // FromEnv reads configuration. migrateOnly skips the fields a normal
 // server needs and requires only BOT_API_MIGRATE_DATABASE_URL.
@@ -62,6 +69,7 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 		RegistryAllowPrivate:   strings.TrimSpace(getenv("BOT_API_REGISTRY_ALLOW_PRIVATE")) == "1",
 		GitHubClientID:         strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_ID")),
 		GitHubClientSecretFile: strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET_FILE")),
+		EdgeTLSIssuer:          strings.TrimSpace(getenv("BOT_API_EDGE_TLS_ISSUER")),
 	}
 	if cfg.GoogleIssuer == "" {
 		cfg.GoogleIssuer = defaultIssuer
@@ -98,6 +106,9 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	}
 	if strings.ContainsAny(cfg.AgentWSURL, "' \t\r\n") {
 		return Config{}, fmt.Errorf("BOT_API_AGENT_WS_URL must not contain quotes or whitespace")
+	}
+	if cfg.EdgeTLSIssuer != "" && cfg.EdgeTLSIssuer != EdgeIssuerInternal {
+		return Config{}, fmt.Errorf("BOT_API_EDGE_TLS_ISSUER must be empty or internal")
 	}
 	return cfg, nil
 }

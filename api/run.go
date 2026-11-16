@@ -134,6 +134,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		Now:           now,
 		Secrets:       secrets,
 		Registry:      registry.NewService(registry.Options{AllowPrivate: cfg.RegistryAllowPrivate}),
+		EdgeTLSIssuer: cfg.EdgeTLSIssuer,
 	}
 	if gh != nil {
 		srv.GitHub = gh
@@ -141,6 +142,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		log.Info("connect github ready")
 	} else if cfg.GitHubClientID != "" || cfg.GitHubClientSecretFile != "" {
 		log.Warn("connect github is off: it needs BOT_API_GITHUB_CLIENT_ID, BOT_API_GITHUB_CLIENT_SECRET_FILE and BOT_API_CONSOLE_ORIGIN")
+	}
+	if cfg.EdgeTLSIssuer == config.EdgeIssuerInternal {
+		log.Warn("host edges use Caddy's internal CA, not ACME (BOT_API_EDGE_TLS_ISSUER=internal, dev and test hosts only)")
 	}
 	if cfg.RegistryAllowPrivate {
 		log.Warn("registry lookups may reach private addresses and other ports (BOT_API_REGISTRY_ALLOW_PRIVATE=1, dev only)")
@@ -152,6 +156,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go housekeep(ctx, pool, srv.Auth, now)
+	// api-v1 v1.35: hello and services reports re-apply host edges, and
+	// verified domains are re-checked daily.
+	hub.SetEdgeHook(srv.EdgeHook)
+	go srv.RunDomainChecks(ctx)
 	return d.serve(cfg.Listen, root, hub.CloseAll)
 }
 
