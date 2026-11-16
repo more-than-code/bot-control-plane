@@ -14,9 +14,6 @@ import (
 // Value requests (api-v1 v1.28). The table has no value column; a fill
 // writes the value into app.env_values in the same transaction.
 
-// valueRequestKeep is how long a row stays after it expires.
-const valueRequestKeep = 7 * 24 * time.Hour
-
 func (d *DB) CreateValueRequest(ctx context.Context, hash []byte, in store.ValueRequest) error {
 	if !catalog.ValidName(in.Set) {
 		return store.ErrInvalid
@@ -29,10 +26,8 @@ func (d *DB) CreateValueRequest(ctx context.Context, hash []byte, in store.Value
 		return mapErr(err)
 	}
 	defer tx.Rollback(ctx)
-	// One user's creates run one at a time, so the open count cannot be
-	// passed by concurrent calls. An advisory lock needs no table privilege.
-	if err := exec(ctx, tx, `SELECT pg_advisory_xact_lock(hashtextextended('env_value_requests:' || $1, 0))`, in.UserID.String()); err != nil {
-		return mapErr(err)
+	if err := valueRequestTable.lockCreates(ctx, tx, in.UserID); err != nil {
+		return err
 	}
 	if err := requireLiveProject(ctx, tx, in.ProjectID); err != nil {
 		return err
@@ -41,38 +36,14 @@ func (d *DB) CreateValueRequest(ctx context.Context, hash []byte, in store.Value
 	if err := lockEnvSet(ctx, tx, in.ProjectID, in.Set); err != nil {
 		return err
 	}
-	// Rows are kept 7 days after they expire, then removed (api-v1 v1.28
-	// item 7). This runs after the set lock, the order fill takes, and skips
-	// rows another transaction holds, so it never waits on a fill.
-	if err := exec(ctx, tx, `
-DELETE FROM app.env_value_requests WHERE id_hash IN (
-    SELECT id_hash FROM app.env_value_requests WHERE expires_at < $1
-    FOR UPDATE SKIP LOCKED
-)`, in.CreatedAt.Add(-valueRequestKeep)); err != nil {
-		return mapErr(err)
-	}
 	if _, err := keyOpenRow(ctx, tx, in.ProjectID, in.Set, in.Key); err != nil {
 		return err
 	}
-	// At most one open request per user and key (api-v1 v1.28 rev 3): the
-	// one this replaces expires now, so it is not counted below. A refusal
-	// rolls this back too.
-	if err := exec(ctx, tx, `
-UPDATE app.env_value_requests SET expires_at = $5
-WHERE user_id = $1::uuid AND project_id = $2::uuid AND set_name = $3 AND key = $4
-  AND state = 'pending' AND expires_at > $5
-`, in.UserID.String(), in.ProjectID.String(), in.Set, in.Key, in.CreatedAt); err != nil {
-		return mapErr(err)
-	}
-	var open int
-	if err := tx.QueryRow(ctx, `
-SELECT count(*) FROM app.env_value_requests
-WHERE user_id = $1::uuid AND state = 'pending' AND expires_at > $2
-`, in.UserID.String(), in.CreatedAt).Scan(&open); err != nil {
-		return mapErr(err)
-	}
-	if open >= store.MaxOpenValueRequests {
-		return store.ErrTooManyRequests
+	// After the set lock (the order fill takes): the 7-day cleanup (api-v1
+	// v1.28 item 7), the replace of this user's open request for the key
+	// (rev 3), and the open limit.
+	if err := valueRequestTable.openSlot(ctx, tx, in.RequestMeta, store.ErrTooManyRequests, in.Set, in.Key); err != nil {
+		return err
 	}
 	if err := exec(ctx, tx, `
 INSERT INTO app.env_value_requests (id_hash, user_id, project_id, set_name, key, reason, state, created_at, expires_at)
@@ -184,14 +155,10 @@ FOR UPDATE OF r
 	if req.UserID != userID {
 		return store.ValueRequest{}, store.ErrNotFound
 	}
-	switch req.StateAt(at) {
-	case store.ValueRequestPending:
-		return req, nil
-	case store.ValueRequestExpired:
-		return store.ValueRequest{}, store.ErrRequestExpired
-	default:
-		return store.ValueRequest{}, store.ErrRequestUsed
+	if err := req.OpenErr(at); err != nil {
+		return store.ValueRequest{}, err
 	}
+	return req, nil
 }
 
 func scanValueRequest(row pgx.Row) (store.ValueRequest, error) {

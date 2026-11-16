@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
@@ -58,6 +59,18 @@ WHERE project_id = $1::uuid AND name = $2
 	return item, nil
 }
 
+// ProjectFileExists reports whether the project has the file, reading no content.
+func (d *DB) ProjectFileExists(ctx context.Context, projectID uuid.UUID, name string) (bool, error) {
+	if err := d.requireProject(ctx, projectID); err != nil {
+		return false, err
+	}
+	var exists bool
+	err := d.pool.QueryRow(ctx, `
+SELECT EXISTS (SELECT 1 FROM app.project_files WHERE project_id = $1::uuid AND name = $2)
+`, projectID.String(), name).Scan(&exists)
+	return exists, mapErr(err)
+}
+
 func (d *DB) PutProjectFile(ctx context.Context, projectID uuid.UUID, name string, in store.FileWrite, actor uuid.UUID, at time.Time) (store.ProjectFile, error) {
 	if !dbFileWriteOK(name, in) {
 		return store.ProjectFile{}, store.ErrInvalid
@@ -76,6 +89,20 @@ FOR UPDATE
 	if err != nil {
 		return store.ProjectFile{}, mapErr(err)
 	}
+	if err := writeProjectFileTx(ctx, tx, projectID, name, in, actor, at, false); err != nil {
+		return store.ProjectFile{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.ProjectFile{}, mapErr(err)
+	}
+	return d.GetProjectFile(ctx, projectID, name)
+}
+
+// writeProjectFileTx creates or replaces one file inside tx. The caller holds
+// the project row lock, so the count and the existence check cannot race a
+// concurrent put or delete. createOnly refuses an existing name with
+// store.ErrFileExists (a file request fill, api-v1 v1.30 item 5).
+func writeProjectFileTx(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name string, in store.FileWrite, actor uuid.UUID, at time.Time, createOnly bool) error {
 	var n int
 	var exists bool
 	if err := tx.QueryRow(ctx, `
@@ -83,10 +110,13 @@ SELECT count(*), COALESCE(bool_or(name = $2), false)
 FROM app.project_files
 WHERE project_id = $1::uuid
 `, projectID.String(), name).Scan(&n, &exists); err != nil {
-		return store.ProjectFile{}, mapErr(err)
+		return mapErr(err)
+	}
+	if exists && createOnly {
+		return store.ErrFileExists
 	}
 	if !exists && n >= store.MaxProjectFiles {
-		return store.ProjectFile{}, store.ErrTooManyFiles
+		return store.ErrTooManyFiles
 	}
 	var plain any
 	var nonce, cipher []byte
@@ -114,12 +144,9 @@ ON CONFLICT (project_id, name) DO UPDATE SET
     updated_by = EXCLUDED.updated_by,
     updated_at = EXCLUDED.updated_at
 `, projectID.String(), name, in.IsSecret, plain, nonce, cipher, ver, in.SHA256, in.Size, actor.String(), at); err != nil {
-		return store.ProjectFile{}, mapErr(err)
+		return mapErr(err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return store.ProjectFile{}, mapErr(err)
-	}
-	return d.GetProjectFile(ctx, projectID, name)
+	return nil
 }
 
 func (d *DB) DeleteProjectFile(ctx context.Context, projectID uuid.UUID, name string) error {

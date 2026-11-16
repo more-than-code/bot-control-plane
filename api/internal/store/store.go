@@ -509,6 +509,7 @@ type Device struct {
 // Store is the full phase-1 persistence surface.
 type Store interface {
 	ValueRequestStore
+	FileRequestStore
 
 	// UpsertGoogleUser creates the user on first sign-in together with a
 	// personal org that the user owns (spec-organizations D-8).
@@ -902,6 +903,9 @@ type Store interface {
 	ListProjectFiles(ctx context.Context, projectID uuid.UUID) ([]ProjectFile, error)
 	// GetProjectFile returns metadata. Plain is set only for a plain file.
 	GetProjectFile(ctx context.Context, projectID uuid.UUID, name string) (ProjectFile, error)
+	// ProjectFileExists reports whether the project has the file, reading no
+	// content. A missing or deleted project is ErrNotFound.
+	ProjectFileExists(ctx context.Context, projectID uuid.UUID, name string) (bool, error)
 	// PutProjectFile creates or replaces one file. A new name past MaxProjectFiles
 	// is ErrTooManyFiles. Replacing an existing name is allowed at the limit.
 	PutProjectFile(ctx context.Context, projectID uuid.UUID, name string, in FileWrite, actor uuid.UUID, at time.Time) (ProjectFile, error)

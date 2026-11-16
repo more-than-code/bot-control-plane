@@ -4,15 +4,11 @@
  * else: it is never in page data, `form`, a URL, or a log.
  */
 import { GENERATE_KINDS, isGenerateKind, PASSWORD_LENGTH, type GenerateKind } from '$lib/env-generate';
+import { boundedText, isRequestId, isRequestState, requestView, UUID, type RequestState, type RequestView } from '$lib/request-shape';
 
-/** The 43-character base64url id the API mints. */
-const REQUEST_ID = /^[A-Za-z0-9_-]{43}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SET_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
 const ENV_KEY = /^[A-Z_][A-Z0-9_]{0,63}$/;
-const STATES = ['pending', 'filled', 'declined', 'expired'] as const;
-
-export type FillState = (typeof STATES)[number];
+export type FillState = RequestState;
 
 export type FillRequest = {
 	request_id: string;
@@ -27,7 +23,7 @@ export type FillRequest = {
 };
 
 /** What the page shows: the form, or one problem with no form. `error` is a load failure: its message only. */
-export type FillView = 'form' | 'used' | 'expired' | 'missing' | 'invalid' | 'error';
+export type FillView = RequestView;
 
 export const FILL_TEXT = {
 	used: 'This request was already used. You can close this tab.',
@@ -41,14 +37,9 @@ export const FILL_TEXT = {
 	safety: "The value goes straight to Deploybot and is stored encrypted. The agent never sees it."
 } as const;
 
-export function isValueRequestId(value: unknown): value is string {
-	return typeof value === 'string' && REQUEST_ID.test(value);
-}
+export const isValueRequestId = isRequestId;
 
-function text(record: Record<string, unknown>, key: string, max: number): string | null {
-	const value = record[key];
-	return typeof value === 'string' && value.length <= max ? value : null;
-}
+const text = boundedText;
 
 /** `GET /v1/value-requests/{id}/fill`. Anything unexpected is null (fail closed). */
 export function parseFillRequest(payload: unknown, id: string): FillRequest | null {
@@ -63,16 +54,12 @@ export function parseFillRequest(payload: unknown, id: string): FillRequest | nu
 	const reason = text(record, 'reason', 1000);
 	if (record.request_id !== id || !project_id || !UUID.test(project_id) || project_name == null) return null;
 	if (!set || !SET_NAME.test(set) || !key || !ENV_KEY.test(key) || !expires_at || reason == null) return null;
-	if (!state || !(STATES as readonly string[]).includes(state)) return null;
-	return { request_id: id, project_id, project_name, set, key, state: state as FillState, expires_at, reason };
+	if (!isRequestState(state)) return null;
+	return { request_id: id, project_id, project_name, set, key, state, expires_at, reason };
 }
 
 /** The view for a loaded request. */
-export function fillView(state: FillState): FillView {
-	if (state === 'pending') return 'form';
-	if (state === 'expired') return 'expired';
-	return 'used';
-}
+export const fillView = requestView;
 
 export type FillSource = 'value' | 'generate';
 

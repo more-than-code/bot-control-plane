@@ -2,15 +2,10 @@ package api
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
-	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
@@ -23,13 +18,6 @@ import (
 // Value requests (api-v1 v1.28): an agent asks for an env value, and the
 // user who asked fills it on the console page /fill/<id>. No route here
 // returns a value, and no audit row or log line holds one or the reason.
-
-const maxValueRequestReason = 200
-
-const msgReason = "reason must be at most 200 characters of plain text"
-
-// valueRequestID is the 43-character base64url id secret.NewToken mints.
-var valueRequestID = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 // valueRequestView is the ValueRequest object (item 1).
 type valueRequestView struct {
@@ -52,28 +40,6 @@ func viewValueRequest(id string, req store.ValueRequest, at time.Time) valueRequ
 		ExpiresAt: req.ExpiresAt.UTC(),
 		CreatedAt: req.CreatedAt.UTC(),
 	}
-}
-
-// reasonOK is item 2 check 3: at most 200 characters, no control characters.
-func reasonOK(reason string) bool {
-	if !utf8.ValidString(reason) || utf8.RuneCountInString(reason) > maxValueRequestReason {
-		return false
-	}
-	for _, r := range reason {
-		// Control, format (bidi overrides, zero-width) and line or
-		// paragraph separators: the note must read as it is stored.
-		if unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp) {
-			return false
-		}
-	}
-	return true
-}
-
-// auditRequestRef names a request in audit rows: the first 8 hex characters
-// of the SHA-256 of its id (api-v1 v1.28 rev 3), never part of the id, which
-// is the token in a live link. hash is that SHA-256.
-func auditRequestRef(hash []byte) string {
-	return hex.EncodeToString(hash[:4])
 }
 
 func keyHasValueMsg(key string) string {
@@ -134,7 +100,7 @@ func (s *Server) handleValueRequestCreate(w http.ResponseWriter, r *http.Request
 		writeCode(w, "unavailable", errSecretsKey.Error())
 		return
 	}
-	prefix, ok := fillURLPrefix(s.ConsoleOrigin)
+	prefix, ok := consolePagePrefix(s.ConsoleOrigin, "/fill/")
 	if !ok {
 		s.logger().Error("console origin is not configured")
 		writeCode(w, "error", "internal error")
@@ -147,10 +113,11 @@ func (s *Server) handleValueRequestCreate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	now := s.now()
-	expires := now.Add(store.ValueRequestTTL)
+	expires := now.Add(store.RequestTTL)
 	err = s.Store.CreateValueRequest(r.Context(), hash, store.ValueRequest{
-		UserID: p.User.ID, ProjectID: id, Set: name, Key: body.Key, Reason: reason,
-		CreatedAt: now, ExpiresAt: expires,
+		RequestMeta: store.RequestMeta{UserID: p.User.ID, ProjectID: id, Reason: reason, CreatedAt: now, ExpiresAt: expires},
+		Set:         name,
+		Key:         body.Key,
 	})
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -178,55 +145,23 @@ func (s *Server) handleValueRequestCreate(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// fillURLPrefix is <BOT_API_CONSOLE_ORIGIN>/fill/ with a trailing slash on
-// the origin removed. ok is false when the origin is not configured.
-func fillURLPrefix(origin string) (string, bool) {
-	origin = strings.TrimRight(origin, "/")
-	if origin == "" {
-		return "", false
-	}
-	return origin + "/fill/", true
-}
-
 // handleValueRequestGet is item 3: the requester's view, console or delegated.
 func (s *Server) handleValueRequestGet(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.require(w, r)
+	own, ok := loadOwnRequest(s, w, r, s.Store.GetValueRequest, authz.CapRead, false)
 	if !ok {
 		return
 	}
-	id, hash, ok := requestIDHash(w, r)
-	if !ok {
-		return
-	}
-	req, ok := s.ownValueRequest(w, r, p, hash)
-	if !ok {
-		return
-	}
-	// The creator must still reach the project, in any role.
-	if !s.requestAccess(w, authz.Authorize(r.Context(), p.User.ID, req.ProjectID, authz.CapSession)) {
-		return
-	}
-	writeOK(w, http.StatusOK, viewValueRequest(id, req, s.now()))
+	writeOK(w, http.StatusOK, viewValueRequest(own.id, own.req, s.now()))
 }
 
 // handleValueRequestFillPage is item 4: the data of the console fill page.
 // The route refuses delegated sessions before this runs.
 func (s *Server) handleValueRequestFillPage(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.require(w, r)
-	if !ok || !requireConsole(w, p) {
-		return
-	}
-	id, hash, ok := requestIDHash(w, r)
+	own, ok := loadOwnRequest(s, w, r, s.Store.GetValueRequest, authz.CapMembers, true)
 	if !ok {
 		return
 	}
-	req, ok := s.ownValueRequest(w, r, p, hash)
-	if !ok {
-		return
-	}
-	if !s.requestAccess(w, authz.Authorize(r.Context(), p.User.ID, req.ProjectID, authz.CapMembers)) {
-		return
-	}
+	id, req := own.id, own.req
 	proj, err := s.Store.GetProject(r.Context(), req.ProjectID)
 	if err != nil {
 		s.writeErr(w, err, false)
@@ -242,23 +177,13 @@ func (s *Server) handleValueRequestFillPage(w http.ResponseWriter, r *http.Reque
 
 // handleValueRequestFill is item 5. The route refuses delegated sessions.
 func (s *Server) handleValueRequestFill(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.require(w, r)
-	if !ok || !requireConsole(w, p) {
-		return
-	}
-	_, hash, ok := requestIDHash(w, r)
-	if !ok {
-		return
-	}
-	req, ok := s.ownValueRequest(w, r, p, hash)
-	if !ok {
-		return
-	}
 	// The creator must still be owner or admin of the project.
-	if !s.requestAccess(w, authz.Authorize(r.Context(), p.User.ID, req.ProjectID, authz.CapMembers)) {
+	own, ok := loadOwnRequest(s, w, r, s.Store.GetValueRequest, authz.CapMembers, true)
+	if !ok {
 		return
 	}
-	if !s.requestOpen(w, req) || !s.keyStillOpen(w, r, req) {
+	p, hash, req := own.p, own.hash, own.req
+	if !s.requestOpen(w, req.RequestMeta) || !s.keyStillOpen(w, r, req) {
 		return
 	}
 	var body struct {
@@ -297,7 +222,7 @@ func (s *Server) handleValueRequestFill(w http.ResponseWriter, r *http.Request) 
 		KeyVersion: sealed.KeyVersion,
 		Generated:  body.Generate != nil,
 	})
-	if !s.requestWriteErr(w, req, err) {
+	if !s.requestWriteErr(w, err, keyHasValueMsg(req.Key)) {
 		return
 	}
 	detail := map[string]any{"set": req.Set, "key": req.Key, "via": "value_request", "request": auditRequestRef(hash)}
@@ -310,7 +235,7 @@ func (s *Server) handleValueRequestFill(w http.ResponseWriter, r *http.Request) 
 		Action:    audit.ActionEnvSetKeyPut,
 		Detail:    detail,
 	})
-	out := map[string]any{"state": store.ValueRequestFilled}
+	out := map[string]any{"state": store.RequestFilled}
 	if stored.RevealPending {
 		out["reveal_pending"] = true
 	}
@@ -319,27 +244,17 @@ func (s *Server) handleValueRequestFill(w http.ResponseWriter, r *http.Request) 
 
 // handleValueRequestDecline is item 6. The route refuses delegated sessions.
 func (s *Server) handleValueRequestDecline(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.require(w, r)
-	if !ok || !requireConsole(w, p) {
-		return
-	}
-	_, hash, ok := requestIDHash(w, r)
-	if !ok {
-		return
-	}
-	req, ok := s.ownValueRequest(w, r, p, hash)
-	if !ok {
-		return
-	}
 	// The creator must still be owner or admin of the project.
-	if !s.requestAccess(w, authz.Authorize(r.Context(), p.User.ID, req.ProjectID, authz.CapMembers)) {
+	own, ok := loadOwnRequest(s, w, r, s.Store.GetValueRequest, authz.CapMembers, true)
+	if !ok {
 		return
 	}
-	if !s.requestOpen(w, req) {
+	p, hash, req := own.p, own.hash, own.req
+	if !s.requestOpen(w, req.RequestMeta) {
 		return
 	}
 	err := s.Store.DeclineValueRequest(r.Context(), hash, p.User.ID, s.now())
-	if !s.requestWriteErr(w, req, err) {
+	if !s.requestWriteErr(w, err, keyHasValueMsg(req.Key)) {
 		return
 	}
 	s.auditOK(context.WithoutCancel(r.Context()), p, store.AuditRow{
@@ -347,62 +262,7 @@ func (s *Server) handleValueRequestDecline(w http.ResponseWriter, r *http.Reques
 		Action:    audit.ActionEnvSetValueRequestDeclined,
 		Detail:    map[string]any{"set": req.Set, "key": req.Key, "request": auditRequestRef(hash)},
 	})
-	writeOK(w, http.StatusOK, map[string]any{"state": store.ValueRequestDeclined})
-}
-
-// requestIDHash reads {request_id}. A malformed id is not_found, as an
-// unknown one is.
-func requestIDHash(w http.ResponseWriter, r *http.Request) (string, []byte, bool) {
-	id := r.PathValue("request_id")
-	if !valueRequestID.MatchString(id) {
-		writeCode(w, "not_found", "not found")
-		return "", nil, false
-	}
-	return id, secret.Hash(id), true
-}
-
-// ownValueRequest loads a request of the caller. Anything else is
-// not_found, so a stranger learns nothing about the id.
-func (s *Server) ownValueRequest(w http.ResponseWriter, r *http.Request, p principal, hash []byte) (store.ValueRequest, bool) {
-	req, err := s.Store.GetValueRequest(r.Context(), hash)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && req.UserID != p.User.ID) {
-		writeCode(w, "not_found", "not found")
-		return store.ValueRequest{}, false
-	}
-	if err != nil {
-		s.writeErr(w, err, false)
-		return store.ValueRequest{}, false
-	}
-	return req, true
-}
-
-// requestAccess answers a failed project check of a request's creator. A
-// creator who no longer holds the role gets not_found, as a stranger does.
-func (s *Server) requestAccess(w http.ResponseWriter, err error) bool {
-	if err == nil {
-		return true
-	}
-	var denied *authz.Denied
-	if errors.As(err, &denied) {
-		writeCode(w, "not_found", "not found")
-		return false
-	}
-	s.fail(w, err)
-	return false
-}
-
-// requestOpen answers a request that can no longer be filled or declined.
-// The store checks the state again under its row lock.
-func (s *Server) requestOpen(w http.ResponseWriter, req store.ValueRequest) bool {
-	switch req.StateAt(s.now()) {
-	case store.ValueRequestPending:
-		return true
-	case store.ValueRequestExpired:
-		writeCode(w, "conflict", store.ErrRequestExpired.Error())
-	default:
-		writeCode(w, "conflict", store.ErrRequestUsed.Error())
-	}
-	return false
+	writeOK(w, http.StatusOK, map[string]any{"state": store.RequestDeclined})
 }
 
 // keyStillOpen answers a key that got a value since the request was made
@@ -425,21 +285,4 @@ func (s *Server) keyStillOpen(w http.ResponseWriter, r *http.Request, req store.
 		}
 	}
 	return true
-}
-
-// requestWriteErr maps a fill or decline store error. ok is true for nil.
-func (s *Server) requestWriteErr(w http.ResponseWriter, req store.ValueRequest, err error) bool {
-	switch {
-	case err == nil:
-		return true
-	case errors.Is(err, store.ErrRequestUsed), errors.Is(err, store.ErrRequestExpired):
-		writeCode(w, "conflict", err.Error())
-	case errors.Is(err, store.ErrKeyExists):
-		writeCode(w, "conflict", keyHasValueMsg(req.Key))
-	case errors.Is(err, store.ErrNotFound):
-		writeCode(w, "not_found", "not found")
-	default:
-		s.writeErr(w, err, false)
-	}
-	return false
 }

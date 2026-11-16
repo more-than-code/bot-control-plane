@@ -44,7 +44,7 @@ func TestReadinessTools(t *testing.T) {
 		"not ready: 5 check(s) missing",
 		"env SMTP_PASSWORD in set mail has no value yet; set it in the console",
 		"call request_env_value with project_id " + projectID + ", set mail and key SMTP_PASSWORD",
-		"ask the person to add file conf.txt in the console",
+		"call request_file with project_id " + projectID + " and name conf.txt; the person adds the file in the browser.",
 		"ask the person to click Connect GitHub in the console",
 		"ask an org owner or admin to grant this project deploy access",
 		"call host_policy_snippet",

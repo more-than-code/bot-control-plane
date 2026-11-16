@@ -168,7 +168,7 @@ func TestTools(t *testing.T) {
 	closed := map[string]bool{
 		"list_orgs": true, "list_projects": true, "list_hosts": true, "list_services": true,
 		"query_metrics": true, "list_processes": true, "service_health_history": true,
-		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true,
+		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
 		"check_readiness": true, "image_access": true, "host_policy_snippet": true,
 	}
 	live := map[string]bool{
@@ -251,6 +251,15 @@ func TestTools(t *testing.T) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
 			}
+		case tool.Name == "request_file":
+			if readOnly || open {
+				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
+			}
+			for _, phrase := range []string{"File contents are never sent through this tool or shown to you.", "get_file_request", "Does not contact"} {
+				if !strings.Contains(tool.Description, phrase) {
+					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
+				}
+			}
 		case live[tool.Name]:
 			if tool.Name == "confirm" {
 				if readOnly {
@@ -324,14 +333,14 @@ func TestTools(t *testing.T) {
 		"deploy_entry", "rollback_entry", "set_health_checks",
 		"create_catalog_entry", "update_catalog_entry", "delete_catalog_entry",
 		"confirm", "entry_logs", "entry_status", "create_env_set", "list_env_sets",
-		"request_env_value", "get_env_value_request",
+		"request_env_value", "get_env_value_request", "request_file", "get_file_request",
 		"check_readiness", "image_access", "host_policy_snippet",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	if len(seen) != 30 {
+	if len(seen) != 32 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -1679,6 +1688,15 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/projects/"+projectID+"/env-sets/services/value-requests":
 		return http.StatusCreated, "ok", "ok", map[string]any{
 			"request_id": valueRequestID, "url": "https://console.example/fill/" + valueRequestID, "expires_at": "2026-11-15T10:15:00Z",
+		}
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/projects/"+projectID+"/file-requests":
+		return http.StatusCreated, "ok", "ok", map[string]any{
+			"request_id": fileRequestID, "url": "https://console.example/fill-file/" + fileRequestID, "expires_at": "2026-11-16T10:15:00Z",
+		}
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/file-requests/"+fileRequestID:
+		return http.StatusOK, "ok", "ok", map[string]any{
+			"request_id": fileRequestID, "project_id": projectID, "name": "nginx.conf", "secret": true,
+			"state": "pending", "expires_at": "2026-11-16T10:15:00Z", "created_at": "2026-11-16T10:00:00Z",
 		}
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/value-requests/"+valueRequestID:
 		return http.StatusOK, "ok", "ok", map[string]any{

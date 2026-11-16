@@ -90,28 +90,10 @@ func (s *Server) handleFilePut(w http.ResponseWriter, r *http.Request) {
 	if body.Secret != nil {
 		secret = *body.Secret
 	}
-	sum := sha256.Sum256([]byte(body.Content))
-	in := store.FileWrite{
-		IsSecret: secret,
-		SHA256:   hex.EncodeToString(sum[:]),
-		Size:     len(body.Content),
-	}
-	if secret {
-		if s.Secrets == nil {
-			s.logger().Error("secrets key not configured")
-			writeCode(w, "unavailable", errSecretsKey.Error())
-			return
-		}
-		nonce, ciphertext, err := s.Secrets.Seal(seal.FileAAD(id.String(), name), []byte(body.Content))
-		if err != nil {
-			s.secretWriteErr(w, err)
-			return
-		}
-		in.Nonce = nonce
-		in.Ciphertext = ciphertext
-		in.KeyVersion = seal.KeyVersion
-	} else {
-		in.Plain = body.Content
+	in, err := s.fileWrite(id, name, body.Content, secret)
+	if err != nil {
+		s.secretWriteErr(w, err)
+		return
 	}
 	item, err := s.Store.PutProjectFile(r.Context(), id, name, in, p.User.ID, s.now())
 	if err != nil {
@@ -129,6 +111,34 @@ func (s *Server) handleFilePut(w http.ResponseWriter, r *http.Request) {
 		Detail:    map[string]any{"name": name, "is_secret": secret, "size": in.Size},
 	})
 	writeOK(w, http.StatusOK, item)
+}
+
+// fileWrite is the stored form of valid file content (v1.9 item 2): sealed
+// with the env-set key and the AAD project_id|file|name when secret, plain
+// text otherwise. A secret file without a secrets key is errSecretsKey.
+// The console PUT and a file request fill both store through it.
+func (s *Server) fileWrite(projectID uuid.UUID, name, content string, secret bool) (store.FileWrite, error) {
+	sum := sha256.Sum256([]byte(content))
+	in := store.FileWrite{
+		IsSecret: secret,
+		SHA256:   hex.EncodeToString(sum[:]),
+		Size:     len(content),
+	}
+	if !secret {
+		in.Plain = content
+		return in, nil
+	}
+	if s.Secrets == nil {
+		return store.FileWrite{}, errSecretsKey
+	}
+	nonce, ciphertext, err := s.Secrets.Seal(seal.FileAAD(projectID.String(), name), []byte(content))
+	if err != nil {
+		return store.FileWrite{}, err
+	}
+	in.Nonce = nonce
+	in.Ciphertext = ciphertext
+	in.KeyVersion = seal.KeyVersion
+	return in, nil
 }
 
 func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
