@@ -1133,13 +1133,19 @@ func (d *DB) PutRegistry(ctx context.Context, projectID uuid.UUID, host string, 
 	if !catalog.ValidRegistryHost(host) {
 		return store.Registry{}, store.ErrInvalid
 	}
+	return putRegistryRow(ctx, d.pool, projectID, host, in, actor, at)
+}
+
+// putRegistryRow is the PutRegistry upsert on q (the pool, or the
+// transaction of ConnectRegistry).
+func putRegistryRow(ctx context.Context, q queryer, projectID uuid.UUID, host string, in store.RegistryWrite, actor uuid.UUID, at time.Time) (store.Registry, error) {
 	in = in.Norm()
 	var connected *string
 	if in.ConnectedBy != nil {
 		v := in.ConnectedBy.String()
 		connected = &v
 	}
-	row := d.pool.QueryRow(ctx, `
+	row := q.QueryRow(ctx, `
 WITH up AS (
 INSERT INTO app.registries (project_id, host, username, nonce, ciphertext, key_version, updated_at, updated_by, source, connected_by)
 VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10::uuid)

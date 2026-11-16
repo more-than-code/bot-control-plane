@@ -1,0 +1,232 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const (
+	crID    = "Zyxwvutsrqponmlkjihgfedcba9876543210_-ABCDE"
+	crURL   = "https://console.example/connect/" + crID
+	crToken = "gho_PLANTEDtokenVALUE0000"
+)
+
+var crArgs = map[string]any{"project_id": vrProject, "registry": "ghcr.io", "reason": "Private image"}
+
+// crReply is the fake API: create, then the read. Both carry a planted
+// token-shaped field that must never reach the agent.
+func crReply(state string) func(r *http.Request) (int, string) {
+	return func(r *http.Request) (int, string) {
+		if r.Method == http.MethodPost {
+			return http.StatusCreated, `{"code":"ok","msg":"ok","payload":{"request_id":"` + crID + `","url":"` + crURL + `","expires_at":"2026-11-16T10:15:00Z","token":"` + crToken + `"}}`
+		}
+		return http.StatusOK, `{"code":"ok","msg":"ok","payload":{"request_id":"` + crID + `","project_id":"` + vrProject + `","registry":"ghcr.io","state":"` + state + `","expires_at":"2026-11-16T10:15:00Z","created_at":"2026-11-16T10:00:00Z","token":"` + crToken + `","reason":"r"}}`
+	}
+}
+
+func assertNoToken(t *testing.T, text string, out map[string]any) {
+	t.Helper()
+	raw, _ := json.Marshal(out)
+	if strings.Contains(text, crToken) || strings.Contains(string(raw), crToken) {
+		t.Fatalf("token passed on: %s %s", text, raw)
+	}
+}
+
+// TestConnectRegistryLink: a client without elicitation.url gets the link as text.
+func TestConnectRegistryLink(t *testing.T) {
+	cs, seen := vrSession(t, nil, crReply("pending"))
+	res, text, out := callVR(t, cs, "connect_registry", crArgs)
+	if res.IsError {
+		t.Fatalf("error %s", text)
+	}
+	calls := seen()
+	if len(calls) != 1 || calls[0].Method != http.MethodPost || calls[0].Path != "/v1/projects/"+vrProject+"/registries/github/requests" || calls[0].Body != `{"reason":"Private image"}` {
+		t.Fatalf("calls %#v", calls)
+	}
+	for _, want := range []string{connectRule, crURL, "Show the person this link", "github.com", "get_registry_connect_request"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text lacks %q: %s", want, text)
+		}
+	}
+	if out["elicitation"] != elicitNotSupported || out["url"] != crURL || out["request_id"] != crID || len(out) != 4 {
+		t.Fatalf("structured %v", out)
+	}
+	assertNoToken(t, text, out)
+	// Without a reason the body is an empty object.
+	cs, seen = vrSession(t, nil, crReply("pending"))
+	callVR(t, cs, "connect_registry", map[string]any{"project_id": vrProject, "registry": "ghcr.io"})
+	if calls := seen(); calls[0].Body != `{}` {
+		t.Fatalf("body %s", calls[0].Body)
+	}
+}
+
+// TestConnectRegistryOldProtocol: a 2025-11-25 client gets text only.
+func TestConnectRegistryOldProtocol(t *testing.T) {
+	var got *mcp.ElicitParams
+	cs, seen := vrSessionAt(t, "2025-11-25", urlClient("accept", &got), crReply("pending"))
+	_, text, out := callVR(t, cs, "connect_registry", crArgs)
+	if got != nil || out["elicitation"] != elicitNotSupported || !strings.Contains(text, crURL) || len(seen()) != 1 {
+		t.Fatalf("elicited %v %v %s", got, out["elicitation"], text)
+	}
+}
+
+// TestConnectRegistryInputRequest: a 2026-07-28 client that declares
+// elicitation.url gets a URL input request; its retry reads the state and
+// creates nothing.
+func TestConnectRegistryInputRequest(t *testing.T) {
+	for action, want := range map[string]string{"accept": elicitAccepted, "decline": elicitDeclined, "cancel": elicitCancelled} {
+		t.Run(action, func(t *testing.T) {
+			var got *mcp.ElicitParams
+			cs, seen := vrSessionAt(t, newProtocol, urlClient(action, &got), crReply("pending"))
+			res, text, out := callVR(t, cs, "connect_registry", crArgs)
+			if res.IsError {
+				t.Fatalf("error %s", text)
+			}
+			if got == nil || got.Mode != "url" || got.URL != crURL || got.ElicitationID != crID || !strings.Contains(got.Message, "never sees the token") {
+				t.Fatalf("elicit params %#v", got)
+			}
+			calls := seen()
+			if len(calls) != 2 || calls[0].Method != http.MethodPost || calls[1].Method != http.MethodGet || calls[1].Path != "/v1/registry-connect-requests/"+crID {
+				t.Fatalf("calls %#v", calls)
+			}
+			if out["elicitation"] != want || out["state"] != "pending" || out["url"] != crURL {
+				t.Fatalf("structured %v", out)
+			}
+			if !strings.Contains(text, crURL) || !strings.Contains(text, "is pending; it can be used until 2026-11-16T10:15:00Z") {
+				t.Fatalf("text %s", text)
+			}
+			assertNoToken(t, text, out)
+		})
+	}
+}
+
+// TestConnectRegistryBadState: a forged state never reaches the API; a
+// state of another project is refused after the read.
+func TestConnectRegistryBadState(t *testing.T) {
+	cs, seen := vrSession(t, nil, crReply("pending"))
+	for _, state := range []string{"not-base64!", encodeRequestState(createdRequest{RequestID: crID, URL: "https://console.example/fill/" + crID})} {
+		res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "connect_registry", Arguments: crArgs, RequestState: state})
+		if err != nil || !res.IsError {
+			t.Fatalf("state %q accepted %v", state, err)
+		}
+	}
+	if len(seen()) != 0 {
+		t.Fatal("a forged state reached the API")
+	}
+	other := map[string]any{"project_id": "22222222-2222-4222-8222-222222222222", "registry": "ghcr.io"}
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "connect_registry", Arguments: other, RequestState: encodeRequestState(createdRequest{RequestID: crID, URL: crURL})})
+	if err != nil || !res.IsError {
+		t.Fatalf("other project %v %v", res, err)
+	}
+	for _, c := range seen() {
+		if c.Method == http.MethodPost {
+			t.Fatal("a retry created a request")
+		}
+	}
+}
+
+func TestConnectRegistryValidation(t *testing.T) {
+	cs, seen := vrSession(t, nil, crReply("pending"))
+	for name, args := range map[string]map[string]any{
+		"project":  {"project_id": "nope", "registry": "ghcr.io"},
+		"registry": {"project_id": vrProject, "registry": "docker.io"},
+		"missing":  {"project_id": vrProject},
+		"reason":   {"project_id": vrProject, "registry": "ghcr.io", "reason": strings.Repeat("a", 201)},
+		"bidi":     {"project_id": vrProject, "registry": "ghcr.io", "reason": "x‮y"},
+		"token":    {"project_id": vrProject, "registry": "ghcr.io", "token": "gho_x"},
+	} {
+		res, text, _ := callVR(t, cs, "connect_registry", args)
+		if !res.IsError || !strings.HasPrefix(text, "bad_request") {
+			t.Fatalf("%s: %v %s", name, res.IsError, text)
+		}
+	}
+	if len(seen()) != 0 {
+		t.Fatal("a bad call reached the API")
+	}
+}
+
+// TestConnectRegistryBadURL: a url that is not the console connect page is not shown.
+func TestConnectRegistryBadURL(t *testing.T) {
+	for _, bad := range []string{"javascript:alert(1)", "https://console.example/fill/" + crID, "https://console.example/connect/" + crID + "?x=1", "https://u:p@console.example/connect/" + crID} {
+		cs, _ := vrSession(t, nil, func(*http.Request) (int, string) {
+			return http.StatusCreated, `{"code":"ok","msg":"ok","payload":{"request_id":"` + crID + `","url":"` + bad + `","expires_at":"x"}}`
+		})
+		res, text, _ := callVR(t, cs, "connect_registry", crArgs)
+		if !res.IsError || strings.Contains(text, bad) {
+			t.Fatalf("%s: %s", bad, text)
+		}
+	}
+}
+
+func TestConnectRegistryAPIError(t *testing.T) {
+	cs, _ := vrSession(t, nil, func(*http.Request) (int, string) {
+		return http.StatusServiceUnavailable, `{"code":"unavailable","msg":"GitHub is not configured","payload":null}`
+	})
+	res, text, _ := callVR(t, cs, "connect_registry", crArgs)
+	if !res.IsError || text != "unavailable: GitHub is not configured" {
+		t.Fatalf("%v %s", res.IsError, text)
+	}
+}
+
+func TestGetRegistryConnectRequest(t *testing.T) {
+	if connectEndedHint != "If the person finished on GitHub anyway, check_readiness shows whether ghcr.io is now connected." {
+		t.Fatal("hint text")
+	}
+	for state, want := range map[string]string{
+		"pending":   "ghcr.io: pending. The person has not connected GitHub yet.",
+		"connected": "ghcr.io: connected. The project pulls ghcr.io images with the GitHub login; you will not see the token.",
+		"declined":  "ghcr.io: declined by the person.\n" + connectEndedHint,
+		"expired":   "ghcr.io: expired without a connection. Ask again with connect_registry if it is still needed.\n" + connectEndedHint,
+	} {
+		cs, seen := vrSession(t, nil, crReply(state))
+		res, text, out := callVR(t, cs, "get_registry_connect_request", map[string]any{"request_id": crID})
+		if res.IsError || text != want {
+			t.Fatalf("%s: %v %s", state, res.IsError, text)
+		}
+		if calls := seen(); len(calls) != 1 || calls[0].Path != "/v1/registry-connect-requests/"+crID {
+			t.Fatalf("calls %#v", calls)
+		}
+		if out["state"] != state || out["registry"] != "ghcr.io" || len(out) != 6 {
+			t.Fatalf("structured %v", out)
+		}
+		if _, ok := out["reason"]; ok {
+			t.Fatal("reason passed on")
+		}
+		assertNoToken(t, text, out)
+	}
+	cs, _ := vrSession(t, nil, crReply("pending"))
+	res, text, _ := callVR(t, cs, "get_registry_connect_request", map[string]any{"request_id": "../x"})
+	if !res.IsError || !strings.HasPrefix(text, "bad_request") {
+		t.Fatalf("bad id %s", text)
+	}
+	cs, _ = vrSession(t, nil, func(*http.Request) (int, string) {
+		return http.StatusOK, `{"code":"ok","msg":"ok","payload":{"request_id":"` + crID + `","project_id":"` + vrProject + `","registry":"docker.io","state":"pending"}}`
+	})
+	if res, _, _ := callVR(t, cs, "get_registry_connect_request", map[string]any{"request_id": crID}); !res.IsError {
+		t.Fatal("a wrong registry was accepted")
+	}
+}
+
+// TestConnectSummaryPerState: the retry text reads right for every state.
+func TestConnectSummaryPerState(t *testing.T) {
+	created := createdRequest{RequestID: crID, URL: crURL, ExpiresAt: "2026-11-16T10:15:00Z"}
+	for state, want := range map[string]string{
+		"pending":   "is pending; it can be used until 2026-11-16T10:15:00Z.",
+		"connected": "is connected",
+		"declined":  "was declined by the person.",
+		"expired":   "has expired without a connection.",
+	} {
+		text := connectSummary(created, state, elicitDeclined)
+		if !strings.Contains(text, want) || !strings.Contains(text, crURL) {
+			t.Errorf("%s: %s", state, text)
+		}
+		if (state == "pending") != strings.Contains(text, "stays open until it expires") {
+			t.Errorf("%s: open sentence %s", state, text)
+		}
+	}
+}

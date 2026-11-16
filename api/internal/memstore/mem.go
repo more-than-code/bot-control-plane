@@ -89,6 +89,8 @@ type Mem struct {
 	valueRequests map[string]store.ValueRequest
 	// fileRequests is keyed by hashKey(id hash); see file_requests.go.
 	fileRequests map[string]store.FileRequest
+	// connectRequests is keyed by hashKey(id hash); see connect_requests.go.
+	connectRequests map[string]store.ConnectRequest
 }
 
 type sessionRec struct {
