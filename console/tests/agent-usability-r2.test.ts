@@ -21,7 +21,8 @@ import {
 	parseNetworkSnippet,
 	parseReadiness,
 	privateFixEntry,
-	sameSnippetAsk
+	sameSnippetAsk,
+	snippetHostLabel
 } from '../src/lib/settings-auto.ts';
 import { parseEnvSet, parseEnvSetList, parseImageSpec } from '../src/lib/server/shape.ts';
 import { actions as fillActions, load as fillLoad } from '../src/routes/fill/[id]/+page.server.ts';
@@ -779,6 +780,22 @@ describe('private-key reveal (api-v1 v1.33) and snippet access', () => {
 		assert.equal(NETWORK_SNIPPET_NO_ACCESS, "This project can't deploy to that host.");
 		globalThis.fetch = originalFetch;
 		restoreEnv();
+	});
+});
+
+describe('Ask for a network: the Host select shows a name', () => {
+	test('the trigger text is the chosen host\'s name, never its id', () => {
+		const hosts = [
+			{ id: 'f18530f2-19b3-4000-8000-000000000001', name: 'pi3-2' },
+			{ id: '00000000-0000-4000-8000-0000000000a2', name: 'pi4' }
+		];
+		assert.equal(snippetHostLabel(hosts, 'f18530f2-19b3-4000-8000-000000000001'), 'pi3-2');
+		assert.equal(snippetHostLabel(hosts, ''), 'Choose a host');
+		assert.equal(snippetHostLabel(hosts, 'gone'), 'Choose a host');
+		// The dialog content renders only while open, so the trigger markup is checked in the source.
+		const source = readFileSync(new URL('../src/routes/projects/[id]/NetworkSnippetDialog.svelte', import.meta.url), 'utf8');
+		assert.match(source, /<Select\.Trigger id="network-snippet-host" class="w-full">\{snippetHostLabel\(hosts, hostId\)\}<\/Select\.Trigger>/);
+		assert.equal(source.includes('<Select.Value'), false);
 	});
 });
 
