@@ -50,6 +50,22 @@ type HostPrograms struct {
 	// EnvHash is hello.programs.env_hash (api-v1 v1.27 item 8, agent-protocol
 	// v1.14 item 1); absent = false.
 	EnvHash bool `json:"env_hash"`
+	// Edge is hello.programs.edge (api-v1 v1.35 item 2, agent-protocol v1.15
+	// item 2). Nil when the agent did not send it (agents < 0.2.11): the
+	// edge is then not available.
+	Edge *HostEdgePolicy `json:"edge,omitempty"`
+}
+
+// HostEdgePolicy is the runner.toml edge switch and the Caddy image digest
+// the agent release pins.
+type HostEdgePolicy struct {
+	Enabled bool   `json:"enabled"`
+	Image   string `json:"image"`
+}
+
+// EdgeAvailable reports whether the host's policy allows the edge.
+func (p *HostPrograms) EdgeAvailable() bool {
+	return p != nil && p.Edge != nil && p.Edge.Enabled
 }
 
 // SharedNetwork is one runner.toml shared network (agent-protocol v1.13).

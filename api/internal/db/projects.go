@@ -228,6 +228,14 @@ WHERE id = $1::uuid AND deleted_at IS NULL
 	if err := exec(ctx, tx, `DELETE FROM app.host_access WHERE project_id = $1::uuid`, id.String()); err != nil {
 		return mapErr(err)
 	}
+	// api-v1 v1.35: the project's routes and domain assignments go, so
+	// their hostnames are free for another project (review 5).
+	if err := exec(ctx, tx, `DELETE FROM app.routes WHERE project_id = $1::uuid`, id.String()); err != nil {
+		return mapErr(err)
+	}
+	if err := exec(ctx, tx, `DELETE FROM app.domain_assignments WHERE project_id = $1::uuid`, id.String()); err != nil {
+		return mapErr(err)
+	}
 	if err := exec(ctx, tx, `
 UPDATE app.join_tokens
 SET revoked_at = $2

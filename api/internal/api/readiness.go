@@ -296,6 +296,10 @@ func (s *Server) writeReadiness(w http.ResponseWriter, r *http.Request, p princi
 			return
 		}
 	}
+	if err := s.checkRoutes(r.Context(), rd, host, &list); err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeOK(w, http.StatusOK, map[string]any{"ready": list.ready(), "checks": list.checks})
 }
 

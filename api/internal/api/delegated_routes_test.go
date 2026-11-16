@@ -62,6 +62,11 @@ var delegatedDenyPatterns = []string{
 	"POST /v1/projects/{id}/registries/github/start",
 	"POST /v1/auth/github/callback",
 	"POST /v1/registry-connect-requests/{request_id}/decline",
+	"POST /v1/orgs/{id}/domains",
+	"POST /v1/orgs/{id}/domains/{domain_id}/verify",
+	"PUT /v1/orgs/{id}/domains/{domain_id}/assignments",
+	"DELETE /v1/orgs/{id}/domains/{domain_id}",
+	"PUT /v1/hosts/{id}/edge",
 }
 
 var delegatedAllowPatterns = []string{
@@ -104,6 +109,19 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 	org := "/v1/orgs/" + sc.project.OrgID.String()
+	domain, err := w.mem.CreateOrgDomain(ctx, sc.project.OrgID, "example.com", strings.Repeat("t", 43), owner.ID, w.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	domainSnap := func(t *testing.T) string {
+		t.Helper()
+		items, err := w.mem.ListOrgDomains(ctx, sc.project.OrgID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(items)
+		return string(b)
+	}
 	orgSnap := func(t *testing.T) string {
 		t.Helper()
 		return orgState(t, w, owner.ID, sc.project.OrgID) + "|" + joinState(t, w, sc.project.ID) + "|" + projectNames(t, w, owner.ID)
@@ -239,6 +257,18 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 			"", func(t *testing.T) string {
 				return envSnap(t, w, sc.project.ID, "svc")
 			}},
+		{"POST /v1/orgs/{id}/domains", http.MethodPost, org + "/domains", `{"name":"new.example.com"}`, domainSnap},
+		{"POST /v1/orgs/{id}/domains/{domain_id}/verify", http.MethodPost, org + "/domains/" + domain.ID.String() + "/verify", "", domainSnap},
+		{"PUT /v1/orgs/{id}/domains/{domain_id}/assignments", http.MethodPut, org + "/domains/" + domain.ID.String() + "/assignments",
+			`{"assignments":[{"project_id":"` + project + `","pattern":"@"}]}`, domainSnap},
+		{"DELETE /v1/orgs/{id}/domains/{domain_id}", http.MethodDelete, org + "/domains/" + domain.ID.String(), `{"idempotency_key":"del-1"}`, domainSnap},
+		{"PUT /v1/hosts/{id}/edge", http.MethodPut, "/v1/hosts/" + host + "/edge", `{"enabled":true}`, func(t *testing.T) string {
+			e, err := w.mem.GetHostEdge(ctx, sc.host.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return fmt.Sprintf("%v %s", e.Enabled, e.Status)
+		}},
 	}
 	if len(cases) != len(delegatedDenyPatterns) {
 		t.Fatalf("cases %d, deny list %d", len(cases), len(delegatedDenyPatterns))

@@ -47,6 +47,14 @@ type Server struct {
 	// LatestAgentVersion is BOT_API_LATEST_AGENT_VERSION (X.Y.Z, checked at
 	// start), or empty for no update hint (api-v1 v1.34).
 	LatestAgentVersion string
+	// Resolver looks up domain TXT records (api-v1 v1.35 item 1). Nil uses
+	// net.DefaultResolver.
+	Resolver TXTResolver
+	// EdgeTLSIssuer is BOT_API_EDGE_TLS_ISSUER: "" (ACME) or "internal"
+	// (Caddy's internal CA; dev and test hosts only).
+	EdgeTLSIssuer string
+	// edge serializes and tracks background edge syncs (api-v1 v1.35).
+	edge edgeSync
 	// imageBudget, when non-zero, replaces the image task timeout.
 	// Production leaves it at 0. Tests set it so a timeout does not wait
 	// out the real deploy budget.
@@ -117,6 +125,12 @@ func contractRoutes() []route {
 		{"GET /v1/orgs/{id}/join-tokens", false, (*Server).handleOrgJoinList, delegatedDenyRead},
 		{"DELETE /v1/orgs/{id}/join-tokens/{token_id}", false, (*Server).handleOrgJoinRevoke, delegatedDeny},
 		{"GET /v1/orgs/{id}/audit", false, (*Server).handleOrgAudit, delegatedDenyRead},
+		// api-v1 v1.35 item 1: org domains, console only.
+		{"GET /v1/orgs/{id}/domains", false, (*Server).handleDomainList, delegatedDenyRead},
+		{"POST /v1/orgs/{id}/domains", false, (*Server).handleDomainCreate, delegatedDeny},
+		{"POST /v1/orgs/{id}/domains/{domain_id}/verify", false, (*Server).handleDomainVerify, delegatedDeny},
+		{"PUT /v1/orgs/{id}/domains/{domain_id}/assignments", false, (*Server).handleDomainAssign, delegatedDeny},
+		{"DELETE /v1/orgs/{id}/domains/{domain_id}", false, (*Server).handleDomainDelete, delegatedDeny},
 		{"POST /v1/projects", false, (*Server).handleProjectCreate, delegatedDeny},
 		{"GET /v1/projects", false, (*Server).handleProjectList, delegatedAllow},
 		{"GET /v1/projects/{id}", false, (*Server).handleProjectGet, delegatedAllow},
@@ -152,6 +166,10 @@ func contractRoutes() []route {
 		{"POST /v1/projects/{id}/catalog/{name}/rollback", false, (*Server).handleCatalogRollback, delegatedHandler},
 		{"POST /v1/projects/{id}/catalog/{name}/remove", false, (*Server).handleCatalogRemove, delegatedHandler},
 		{"GET /v1/projects/{id}/catalog/{name}/deploys", false, (*Server).handleCatalogDeploys, delegatedAllow},
+		// api-v1 v1.35 item 3: routes; the replace is a plan for both session kinds.
+		{"GET /v1/projects/{id}/routes", false, (*Server).handleProjectRoutes, delegatedAllow},
+		{"GET /v1/projects/{id}/catalog/{name}/routes", false, (*Server).handleEntryRoutes, delegatedAllow},
+		{"PUT /v1/projects/{id}/catalog/{name}/routes", false, (*Server).handleEntryRoutesPut, delegatedHandler},
 		{"GET /v1/projects/{id}/env-sets", false, (*Server).handleEnvSetList, delegatedAllow},
 		{"POST /v1/projects/{id}/env-sets", false, (*Server).handleEnvSetCreate, delegatedHandler},
 		{"GET /v1/projects/{id}/env-sets/{set}", false, (*Server).handleEnvSetGet, delegatedAllow},
@@ -210,6 +228,9 @@ func contractRoutes() []route {
 		{"GET /v1/hosts/{id}/access", false, (*Server).handleAccessList, delegatedDenyRead},
 		{"PUT /v1/hosts/{id}/access/{project_id}", false, (*Server).handleAccessPut, delegatedDeny},
 		{"DELETE /v1/hosts/{id}/access/{project_id}", false, (*Server).handleAccessDelete, delegatedDeny},
+		// api-v1 v1.35 item 2: the host edge, console only.
+		{"GET /v1/hosts/{id}/edge", false, (*Server).handleEdgeGet, delegatedDenyRead},
+		{"PUT /v1/hosts/{id}/edge", false, (*Server).handleEdgePut, delegatedDeny},
 		// api-v1 v1.24 items 3 and 4: removed routes answer 410 for one release.
 		{"GET /v1/hosts/{id}/shares", false, (*Server).handleSharesGone, delegatedAllow},
 		{"GET /v1/hosts/{id}/shares/{project_id}", false, (*Server).handleSharesGone, delegatedAllow},

@@ -41,9 +41,16 @@ type Config struct {
 	// LatestAgentVersion is BOT_API_LATEST_AGENT_VERSION: the newest
 	// bot-agent release (X.Y.Z), or empty for no update hint (api-v1 v1.34).
 	LatestAgentVersion string
+	// EdgeTLSIssuer is BOT_API_EDGE_TLS_ISSUER: "" (ACME) or "internal"
+	// (Caddy's internal CA, for dev and test hosts that the internet cannot
+	// reach on 80 and 443; api-v1 v1.35 acceptance 3).
+	EdgeTLSIssuer string
 }
 
 const defaultIssuer = "https://accounts.google.com"
+
+// EdgeIssuerInternal is the one non-empty BOT_API_EDGE_TLS_ISSUER value.
+const EdgeIssuerInternal = "internal"
 
 // FromEnv reads configuration. migrateOnly skips the fields a normal
 // server needs and requires only BOT_API_MIGRATE_DATABASE_URL.
@@ -68,6 +75,7 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 		GitHubClientID:         strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_ID")),
 		GitHubClientSecretFile: strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET_FILE")),
 		LatestAgentVersion:     strings.TrimSpace(getenv("BOT_API_LATEST_AGENT_VERSION")),
+		EdgeTLSIssuer:          strings.TrimSpace(getenv("BOT_API_EDGE_TLS_ISSUER")),
 	}
 	if cfg.GoogleIssuer == "" {
 		cfg.GoogleIssuer = defaultIssuer
@@ -107,6 +115,9 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	}
 	if cfg.LatestAgentVersion != "" && !agentversion.Valid(cfg.LatestAgentVersion) {
 		return Config{}, fmt.Errorf("BOT_API_LATEST_AGENT_VERSION must be X.Y.Z or empty")
+	}
+	if cfg.EdgeTLSIssuer != "" && cfg.EdgeTLSIssuer != EdgeIssuerInternal {
+		return Config{}, fmt.Errorf("BOT_API_EDGE_TLS_ISSUER must be empty or internal")
 	}
 	return cfg, nil
 }

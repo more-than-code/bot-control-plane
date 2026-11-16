@@ -370,7 +370,8 @@ func (s *Server) confirmEnvSetCreate(w http.ResponseWriter, r *http.Request, p p
 	c, err := s.Store.GetEnvSetConfirmation(r.Context(), hash)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeCode(w, "not_found", "not found")
+			// api-v1 v1.35: a routes or domain delete plan.
+			s.confirmEdge(w, r, p, hash, key)
 			return
 		}
 		s.fail(w, err)

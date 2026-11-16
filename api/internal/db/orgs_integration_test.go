@@ -489,11 +489,77 @@ func runDown(t *testing.T, ctx context.Context, url string) {
 	if _, err := conn.Exec(ctx, `SET ROLE deploybot_owner`); err != nil {
 		t.Fatal(err)
 	}
+	// 0023 references app.orgs, which the 0015 down drops: take 0023 down
+	// first (its rows, then its down script). Migrate re-applies it.
+	dropEdgeSchema(t, ctx, conn)
 	if _, err := conn.Exec(ctx, fillHostMirrorSQL); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.PgConn().Exec(ctx, string(body)).ReadAll(); err != nil {
 		t.Fatalf("down script: %v", err)
+	}
+}
+
+// dropEdgeSchema clears the 0023 rows and runs its down script on conn
+// (already deploybot_owner), then forgets 0023 so Migrate applies it again.
+// A database without 0023 is left as it is.
+func dropEdgeSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
+	t.Helper()
+	var n int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'app' AND table_name = 'routes'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		return
+	}
+	for _, table := range []string{"edge_confirmations", "routes", "domain_assignments", "org_domains", "host_edges"} {
+		if _, err := conn.Exec(ctx, `DELETE FROM app.`+table); err != nil {
+			t.Fatalf("clear %s: %v", table, err)
+		}
+	}
+	body, err := migrations.FS.ReadFile("0023_domains_edge_routes.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.PgConn().Exec(ctx, string(body)).ReadAll(); err != nil {
+		t.Fatalf("0023 down: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+edgeMigration+`'`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// applyEdgeSchema applies 0023 alone (it needs only 0015 and earlier) and
+// records it, as Migrate would.
+func applyEdgeSchema(t *testing.T, ctx context.Context, url string) {
+	t.Helper()
+	body, err := migrations.FS.ReadFile(edgeMigration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatal("connect failed")
+	}
+	defer conn.Close(ctx)
+	if _, err := conn.Exec(ctx, `SET ROLE deploybot_owner`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	for _, stmt := range splitSQL(string(body)) {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
+			t.Fatalf("0023: %v", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO app.schema_migrations (name) VALUES ($1)`, edgeMigration); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -662,6 +728,9 @@ VALUES ($1::uuid, $2::uuid, $3, $4, 'process', '{}', now(), now(), $5::uuid, $6)
 	if err != nil {
 		t.Fatalf("mapped migrate: %v", err)
 	}
+	// The project delete below runs today's code, which clears the 0023
+	// tables: put 0023 back on the phase 1 schema (runDown drops it again).
+	applyEdgeSchema(t, ctx, url)
 
 	// Placement.
 	for s, org := range map[string]string{"deploybot": "mtc", "daikou": "mtc", "defect-drainer": "mtc", "mohiguide": "sae", "ai-hub": "sae", "ai-hub-uat": "sae"} {

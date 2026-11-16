@@ -173,7 +173,8 @@ func TestTools(t *testing.T) {
 		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
 		"get_registry_connect_request": true,
 		"check_readiness":              true, "image_access": true, "host_policy_snippet": true, "shared_network_snippet": true,
-		"whats_new": true,
+		"whats_new":   true,
+		"list_routes": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -257,6 +258,15 @@ func TestTools(t *testing.T) {
 			}
 			if tool.Name == "delete_catalog_entry" && !strings.Contains(tool.Description, "not stopped") {
 				t.Errorf("%s description %q missing not stopped", tool.Name, tool.Description)
+			}
+		case tool.Name == "set_routes":
+			if readOnly || open {
+				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
+			}
+			for _, phrase := range []string{"Nothing changes until confirm", "user agrees", "every address that goes live or stops", "console only", "127.0.0.1", "never change the entry's spec", "Does not contact"} {
+				if !strings.Contains(tool.Description, phrase) {
+					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
+				}
 			}
 		case tool.Name == "request_env_value":
 			if readOnly || open {
@@ -362,12 +372,14 @@ func TestTools(t *testing.T) {
 		"connect_registry", "get_registry_connect_request",
 		"check_readiness", "image_access", "host_policy_snippet",
 		"update_env_set", "delete_env_set", "shared_network_snippet", "whats_new",
+		"set_routes", "list_routes",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	if len(seen) != 38 {
+	// 37 before api-v1 v1.34 and v1.35, plus whats_new, set_routes and list_routes.
+	if len(seen) != 40 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 

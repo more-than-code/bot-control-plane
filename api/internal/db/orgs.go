@@ -153,6 +153,11 @@ func (d *DB) DeleteOrg(ctx context.Context, id uuid.UUID, at time.Time) ([]uuid.
 	if tag.RowsAffected() == 0 {
 		return nil, store.ErrNotFound
 	}
+	// api-v1 v1.35: a deleted org gives up its domains (and the verified
+	// names they hold). Assignments cascade.
+	if err := exec(ctx, tx, `DELETE FROM app.org_domains WHERE org_id = $1::uuid`, id.String()); err != nil {
+		return nil, mapErr(err)
+	}
 	projects, err := collectIDs(ctx, tx, `SELECT id::text FROM app.projects WHERE org_id = $1::uuid AND deleted_at IS NULL ORDER BY id::text`, id.String())
 	if err != nil {
 		return nil, err

@@ -47,6 +47,10 @@ func clonePrograms(p *store.HostPrograms) *store.HostPrograms {
 		cp.Projects = append([]string{}, p.Projects...)
 	}
 	cp.SharedNetworks = store.CloneSharedNetworks(p.SharedNetworks)
+	if p.Edge != nil {
+		edge := *p.Edge
+		cp.Edge = &edge
+	}
 	return &cp
 }
 
@@ -514,6 +518,7 @@ func (m *Mem) deleteEntryLocked(id uuid.UUID) {
 	delete(m.entries, id)
 	delete(m.entryByName, entryKey(e.ProjectID, e.Name))
 	delete(m.grants, id)
+	m.dropEntryEdgeLocked(id)
 	m.deleteDeploysLocked(id)
 	for key, rec := range m.confirmations {
 		if rec.row.EntryID == id {

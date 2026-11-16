@@ -153,6 +153,7 @@ func (m *Mem) DeleteOrg(_ context.Context, id uuid.UUID, at time.Time) ([]uuid.U
 	}
 	o.DeletedAt = &at
 	m.orgs[id] = o
+	m.dropOrgDomainsLocked(id)
 	for pid, p := range m.projects {
 		if p.OrgID == id && p.DeletedAt == nil {
 			m.deleteProjectLocked(pid, at)

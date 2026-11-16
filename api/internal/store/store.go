@@ -137,6 +137,9 @@ type Org struct {
 	CreatedBy uuid.UUID  `json:"-"`
 	CreatedAt time.Time  `json:"created_at"`
 	DeletedAt *time.Time `json:"-"`
+	// ACMEEmail is the org's ACME contact (api-v1 v1.35 item 5), set by the
+	// API on org reads for owners and admins only ("" when unset).
+	ACMEEmail *string `json:"acme_email,omitempty"`
 }
 
 // OrgMember is one org membership.
@@ -241,10 +244,19 @@ type Host struct {
 	// Programs is the last hello programs object. Nil when the agent has
 	// not reported a policy file.
 	Programs *HostPrograms `json:"programs"`
+	// Edge is the host's edge switch and state (api-v1 v1.35), filled by the
+	// API on host reads; nil (left out) elsewhere.
+	Edge *HostEdgeView `json:"edge,omitempty"`
 	// GrantProjectID is the project the join token granted access to, set
 	// only on the host EnrollHost returns, for the host.enroll audit row
 	// (api-v1 v1.24 item 5). Never sent.
 	GrantProjectID *uuid.UUID `json:"-"`
+}
+
+// HostEdgeView is the edge summary on a host read (api-v1 v1.35).
+type HostEdgeView struct {
+	Enabled bool   `json:"enabled"`
+	Status  string `json:"status"`
 }
 
 // HostAccess is one project's access to a host (api-v1 v1.24).
@@ -511,6 +523,7 @@ type Store interface {
 	ValueRequestStore
 	FileRequestStore
 	ConnectRequestStore
+	EdgeStore
 	// ListOpenRequests is the user's pending, unexpired value, file and
 	// connect requests at at, newest first, at most max (api-v1 v1.33 item
 	// 8), in projects that are not deleted.

@@ -80,6 +80,11 @@ func TestIntegration(t *testing.T) {
 	assertOAuthSchema(t, d, ctx)
 	if _, err := d.pool.Exec(ctx, `
 TRUNCATE TABLE
+    app.edge_confirmations,
+    app.routes,
+    app.domain_assignments,
+    app.org_domains,
+    app.host_edges,
     app.env_value_requests,
     app.file_requests,
     app.registry_connect_requests,

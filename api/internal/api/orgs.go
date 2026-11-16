@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -99,6 +100,10 @@ func (s *Server) handleOrgGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	org.Role = role
+	if org, err = s.withACMEEmail(r, org, role); err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeOK(w, http.StatusOK, org)
 }
 
@@ -107,28 +112,80 @@ func (s *Server) handleOrgPatch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	orgID, role, ok := s.orgGate(w, r, p, orgNeedAdmin, audit.ActionOrgRename)
-	if !ok {
-		return
-	}
+	// name renames; acme_email (api-v1 v1.35 item 5) sets the org's ACME
+	// contact, "" clears it. At least one is required.
 	var body struct {
-		Name string `json:"name"`
+		Name      *string `json:"name"`
+		ACMEEmail *string `json:"acme_email"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	name, ok := cleanName(w, body.Name)
+	action := audit.ActionOrgRename
+	if body.Name == nil {
+		action = audit.ActionOrgACMEEmail
+	}
+	orgID, role, ok := s.orgGate(w, r, p, orgNeedAdmin, action)
 	if !ok {
 		return
 	}
-	org, err := s.Store.RenameOrg(r.Context(), orgID, name)
+	if body.Name == nil && body.ACMEEmail == nil {
+		writeCode(w, "bad_request", "send name or acme_email")
+		return
+	}
+	var name string
+	if body.Name != nil {
+		if name, ok = cleanName(w, *body.Name); !ok {
+			return
+		}
+	}
+	if body.ACMEEmail != nil && *body.ACMEEmail != "" && !acmeEmailRe.MatchString(*body.ACMEEmail) {
+		writeCode(w, "bad_request", "invalid acme_email")
+		return
+	}
+	org, err := s.Store.GetOrg(r.Context(), orgID)
+	if body.Name != nil {
+		org, err = s.Store.RenameOrg(r.Context(), orgID, name)
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	if body.ACMEEmail != nil {
+		if err := s.Store.SetOrgACMEEmail(r.Context(), orgID, *body.ACMEEmail); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 	org.Role = role
-	s.auditOK(r.Context(), p, store.AuditRow{OrgID: idPtr(orgID), Action: audit.ActionOrgRename})
+	if body.Name != nil {
+		s.auditOK(r.Context(), p, store.AuditRow{OrgID: idPtr(orgID), Action: audit.ActionOrgRename})
+	}
+	if body.ACMEEmail != nil {
+		s.auditOK(r.Context(), p, store.AuditRow{OrgID: idPtr(orgID), Action: audit.ActionOrgACMEEmail, Detail: map[string]any{"set": *body.ACMEEmail != ""}})
+		s.kickOrgEdges(r.Context(), orgID)
+	}
+	if org, err = s.withACMEEmail(r, org, role); err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeOK(w, http.StatusOK, org)
+}
+
+// acmeEmailRe is a plain address check for the ACME contact (≤ 254 chars).
+var acmeEmailRe = regexp.MustCompile(`^[A-Za-z0-9._%+-]{1,64}@[a-z0-9.-]{1,185}\.[a-z]{2,63}$`)
+
+// withACMEEmail adds acme_email to an org read for its owners and admins.
+func (s *Server) withACMEEmail(r *http.Request, org store.Org, role string) (store.Org, error) {
+	if !store.OrgAdmin(role) {
+		return org, nil
+	}
+	email, err := s.Store.OrgACMEEmail(r.Context(), org.ID)
+	if err != nil {
+		return org, err
+	}
+	org.ACMEEmail = &email
+	return org, nil
 }
 
 // handleOrgDelete soft-deletes the org: every host credential is revoked
@@ -408,6 +465,10 @@ func (s *Server) handleOrgHosts(w http.ResponseWriter, r *http.Request) {
 		items[i] = projectsView(items[i], uuid.Nil, "", !delegated)
 		if delegated {
 			items[i].Access = nil
+		}
+		if items[i], err = s.withEdge(r.Context(), items[i]); err != nil {
+			s.fail(w, err)
+			return
 		}
 	}
 	writeList(w, s.hostViews(items), next)

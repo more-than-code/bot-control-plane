@@ -183,6 +183,13 @@ func (s *Server) handleCatalogCreate(w http.ResponseWriter, r *http.Request) {
 		s.forbidProgram(w, r, p, id, audit.ActionCatalogCreate)
 		return
 	}
+	if reserved, err := s.reservedEntry(r.Context(), id, body.Name); err != nil {
+		s.fail(w, err)
+		return
+	} else if reserved {
+		writeCode(w, "bad_request", msgReservedEntry)
+		return
+	}
 	if body.Kind == "image" {
 		if programFieldsSet(body.Command, body.Dir, body.RunAs, body.Restart, body.Shell, body.Env, body.Port) || body.EnvSets != nil || specPresent(body.SecretEnv) {
 			writeCode(w, "bad_request", "invalid json")

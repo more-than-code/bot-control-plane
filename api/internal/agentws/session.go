@@ -260,6 +260,9 @@ func (h *Hub) hello(ac *agentConn, token string, f frame) bool {
 		ac.close(websocket.StatusInternalError, "")
 		return false
 	}
+	// api-v1 v1.35 item 5: the full edge config again on every hello. The
+	// hook runs apart from the read loop, which delivers the task result.
+	h.notifyEdge(host.ID, true)
 	return true
 }
 
@@ -272,6 +275,8 @@ func (h *Hub) dispatch(ac *agentConn, f frame) error {
 		return h.onPing(ac)
 	case "services":
 		h.upsertServices(ac, f.Services, true)
+		// A deploy, stop or removal changes which routes a host serves.
+		h.notifyEdge(ac.hostID, false)
 		return nil
 	case "metrics":
 		return h.onMetrics(ac, f)
@@ -345,6 +350,10 @@ func parsePrograms(raw json.RawMessage) (*store.HostPrograms, bool) {
 		}
 	}
 	if !validSharedNetworks(p.SharedNetworks) {
+		return nil, false
+	}
+	// agent-protocol v1.15 item 2: the pinned Caddy image, by digest.
+	if p.Edge != nil && p.Edge.Image != "" && !edgeImageRe.MatchString(p.Edge.Image) {
 		return nil, false
 	}
 	// api-v1 v1.25 amendment A2: a network's "projects": null is no members.
@@ -424,6 +433,9 @@ const (
 )
 
 var helloSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// edgeImageRe is hello.programs.edge.image: a repository pinned by digest.
+var edgeImageRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:-]{0,200}@sha256:[0-9a-f]{64}$`)
 
 // servicesComplete is true when hello omits services_complete or sends true.
 // JSON null is incomplete. A non-bool never reaches here: parseFrame rejects it.
