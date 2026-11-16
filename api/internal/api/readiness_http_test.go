@@ -12,6 +12,7 @@ import (
 
 	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
+	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
@@ -412,7 +413,7 @@ func TestReadinessMoreChecks(t *testing.T) {
 	if c := findCheck(t, checks, "env_values"); c.Status != "missing" || c.Message != "env KEY1 in set keys has no value yet; set it in the console" || c.Fix["key"] != "KEY1" || c.Fix["set"] != "keys" {
 		t.Fatalf("secret_env placeholder %+v", c)
 	}
-	if c := findCheck(t, checks, "registry"); c.Status != "missing" || c.Message != "image ghcr.io/joe/gone not found in the registry" || c.Fix["action"] != "none" {
+	if c := findCheck(t, checks, "registry"); c.Status != "missing" || c.Message != "tag v1 of ghcr.io/joe/gone not found in the registry" || c.Fix["action"] != "none" {
 		t.Fatalf("not_found %+v", c)
 	}
 	if c := findCheck(t, checks, "networks"); c.Status != "missing" || !strings.HasPrefix(c.Message, reasonNoNetworks) || c.Fix["action"] != "none" {
@@ -444,5 +445,22 @@ func TestReadinessMoreChecks(t *testing.T) {
 	_, checks, _ = readinessOf(t, f.w, f.owner, project, "job", "")
 	if c := findCheck(t, checks, "env_refs"); c.Status != "ok" || c.Message != "a program takes its env literally; ${KEY} is not resolved" {
 		t.Fatalf("program env_refs %+v", c)
+	}
+}
+
+func TestNotFoundText(t *testing.T) {
+	cases := map[string]string{
+		"ghcr.io/joe/app:v2": "tag v2 of ghcr.io/joe/app not found in the registry",
+		"ghcr.io/joe/app":    "tag latest of ghcr.io/joe/app not found in the registry (no tag was given, so latest is used)",
+		"ghcr.io/joe/app@sha256:" + strings.Repeat("a", 64): "digest sha256:" + strings.Repeat("a", 64) + " of ghcr.io/joe/app not found in the registry",
+	}
+	for in, want := range cases {
+		ref, err := catalog.ParseImageRef(in)
+		if err != nil {
+			t.Fatalf("%s: %v", in, err)
+		}
+		if got := notFoundText(ref); got != want {
+			t.Errorf("%s: got %q want %q", in, got, want)
+		}
 	}
 }

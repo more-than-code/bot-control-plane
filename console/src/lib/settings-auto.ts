@@ -62,7 +62,7 @@ export function accessLine(result: ImageAccessResult): { text: string; connect: 
 				? { text: 'The stored login for ghcr.io was refused: reconnect GitHub.', connect: true, settings: false }
 				: { text: `The stored login for ${result.registry} was refused: update it.`, connect: false, settings: true };
 		case 'not_found':
-			return { text: 'The registry says this image does not exist.', connect: false, settings: false };
+			return { text: 'The registry has no image with this tag. Without a tag, latest is used.', connect: false, settings: false };
 		default:
 			return { text: 'Image access could not be checked.', connect: false, settings: false };
 	}

@@ -366,7 +366,7 @@ func (s *Server) checkRegistry(ctx context.Context, p principal, rd readiness, l
 		}
 		list.add("registry", readyMissing, msg, loginFix)
 	case accessNotFound:
-		list.add("registry", readyMissing, "image "+ref.Host+"/"+ref.Path+" not found in the registry", readyFix{})
+		list.add("registry", readyMissing, notFoundText(ref), readyFix{})
 	default:
 		list.add("registry", readyWarn, "the registry could not be checked", readyFix{})
 	}
@@ -531,4 +531,18 @@ func hostPolicySnippet(ref catalog.ImageRef, slug string) map[string]any {
 			"add the pattern to images and the slug to projects in /etc/bot-agent/runner.toml, keeping the entries already there, " +
 			"then restart bot-agent. The install.sh command writes a new policy and stops when runner.toml already differs.",
 	}
+}
+
+// notFoundText names what the registry did not find. A 404 with a working
+// login is almost always a tag or digest that does not exist, so the text
+// names it, and says when the tag was implied.
+func notFoundText(ref catalog.ImageRef) string {
+	repo := ref.Host + "/" + ref.Path
+	if ref.Digest != "" {
+		return "digest " + ref.Digest + " of " + repo + " not found in the registry"
+	}
+	if !ref.TagGiven {
+		return "tag latest of " + repo + " not found in the registry (no tag was given, so latest is used)"
+	}
+	return "tag " + ref.Tag + " of " + repo + " not found in the registry"
 }
