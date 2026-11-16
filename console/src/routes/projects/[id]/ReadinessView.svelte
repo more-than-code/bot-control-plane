@@ -37,7 +37,8 @@
 		projectPath,
 		connectAction,
 		snippetAction,
-		onRefresh
+		onRefresh,
+		collapsed = false
 	}: {
 		result: Readiness | null;
 		message?: string | null;
@@ -50,6 +51,8 @@
 		connectAction: string;
 		snippetAction: string;
 		onRefresh?: () => void;
+		/** True once the form beside it scrolls: open details close and the rows needing action fold away. */
+		collapsed?: boolean;
 	} = $props();
 
 	const headingId = $props.id();
@@ -60,6 +63,17 @@
 	const compact = $derived(
 		!loading && !message && result !== null && result.ready && !result.checks.some((c) => c.status === 'missing' || c.status === 'warn')
 	);
+	// Open state of the toggles; collapsing closes them all. Reopening stays the person's choice.
+	let detailsOpen = $state(false);
+	let passedOpen = $state(false);
+	let attentionOpen = $state(false);
+	$effect(() => {
+		if (collapsed) {
+			detailsOpen = false;
+			passedOpen = false;
+			attentionOpen = false;
+		}
+	});
 	const summaryClass = 'text-muted-foreground hover:text-foreground w-fit cursor-pointer text-sm underline-offset-4 hover:underline';
 
 	function badgeVariant(status: ReadyStatus): 'outline' | 'destructive' | 'secondary' {
@@ -79,7 +93,7 @@
 				Ready: {passed.length} check{passed.length === 1 ? '' : 's'} passed
 			</p>
 			<!-- Open, it takes its own row after Check again. -->
-			<details class="min-w-0 open:order-last open:basis-full" data-readiness-details>
+			<details class="min-w-0 open:order-last open:basis-full" data-readiness-details bind:open={detailsOpen}>
 				<summary class={summaryClass}>Details</summary>
 				<div class="mt-2 grid min-w-0 gap-2">
 					<p class="text-muted-foreground text-sm break-words">{readinessSummary(result)}</p>
@@ -101,9 +115,16 @@
 		</div>
 	{:else if result && !compact}
 		<p class="text-sm break-words" role="status">{readinessSummary(result)}</p>
-		{@render list(attention)}
+		{#if collapsed}
+			<details class="min-w-0" data-readiness-attention bind:open={attentionOpen}>
+				<summary class={summaryClass}>Show {attention.length} item{attention.length === 1 ? '' : 's'} that need action</summary>
+				<div class="mt-2 min-w-0">{@render list(attention)}</div>
+			</details>
+		{:else}
+			{@render list(attention)}
+		{/if}
 		{#if passed.length > 0}
-			<details class="min-w-0" data-readiness-passed>
+			<details class="min-w-0" data-readiness-passed bind:open={passedOpen}>
 				<summary class={summaryClass}>Show {passed.length} passed check{passed.length === 1 ? '' : 's'}</summary>
 				<div class="mt-2 min-w-0">{@render list(passed)}</div>
 			</details>

@@ -14,13 +14,16 @@
 		entry,
 		hostId = null,
 		hostName = null,
-		refreshKey = null
+		refreshKey = null,
+		collapsed = false
 	}: {
 		entry: string;
 		hostId?: string | null;
 		hostName?: string | null;
 		/** A new value (a deploy or run result) checks again. */
 		refreshKey?: unknown;
+		/** Passed to ReadinessView: fold the panel once the form beside it scrolls. */
+		collapsed?: boolean;
 	} = $props();
 
 	const readinessAction = $derived(actionUrlFrom(page.url, 'catalogReadiness'));
@@ -74,4 +77,5 @@
 	{connectAction}
 	{snippetAction}
 	onRefresh={load}
+	{collapsed}
 />

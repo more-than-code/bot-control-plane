@@ -592,7 +592,7 @@ describe('catalog images', { concurrency: false }, () => {
 		const dialogSource = readSource('../src/routes/projects/[id]/CatalogImageDialog.svelte');
 		assert.equal(dialogSource.includes('image-form-scroll'), false);
 		assert.equal(dialogSource.includes('Dialog.'), false);
-		assert.match(dialogSource, /<Sheet\.Content side="right" class="data-\[side=right\]:w-full data-\[side=right\]:sm:max-w-2xl">/);
+		assert.match(dialogSource, /<Sheet\.Content side="right" class="data-\[side=right\]:w-full data-\[side=right\]:sm:max-w-2xl"[^>]*>/);
 		function portBox(source: string, label: string): string {
 			const tag = [...source.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]).find((item) => item.includes(`aria-label="${label}"`));
 			assert.equal(tag != null, true, label);

@@ -63,6 +63,17 @@
 	} = $props();
 
 	let open = $state(untrack(() => revealed));
+	// The readiness band sits above the scrolling form (spec-agent-usability-1 §3 A): the first scroll of the form folds it. A new open starts unfolded.
+	let readinessCollapsed = $state(false);
+	let readinessBand = $state<HTMLElement | null>(null);
+	$effect(() => {
+		if (open) readinessCollapsed = false;
+	});
+	function foldReadinessOnScroll(event: Event) {
+		const target = event.target;
+		if (readinessCollapsed || !(target instanceof HTMLElement) || readinessBand?.contains(target)) return;
+		if (target.scrollTop > 24) readinessCollapsed = true;
+	}
 	// The row's "⋯" menu opens this by changing `openRequest`; closing returns focus to that menu button.
 	let requestSeen = untrack(() => openRequest);
 	$effect(() => {
@@ -216,7 +227,7 @@
 		</RowAction>
 	{/if}
 	<!-- A drawer from the right, full width on a phone. The form scrolls between the header and its pinned Save footer. -->
-	<Sheet.Content side="right" class="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
+	<Sheet.Content side="right" class="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl" onscrollcapture={foldReadinessOnScroll}>
 		{#snippet after()}<DrawerResize type="container" />{/snippet}
 		<Sheet.Header class="pr-12 pb-0">
 			<Sheet.Title class="break-all">{mode === 'create' ? 'Container' : `Edit ${entry?.name ?? 'image'}`}</Sheet.Title>
@@ -246,8 +257,8 @@
 		></form>
 		{#if mode === 'edit' && entry}
 			<!-- The entry checks (no host): what this entry still needs before a deploy (api-v1 v1.29). -->
-			<div class="max-h-[35dvh] shrink-0 overflow-y-auto border-b px-4 pb-3">
-				<ReadinessList entry={entry.name} />
+			<div bind:this={readinessBand} class="max-h-[35dvh] shrink-0 overflow-y-auto border-b px-4 pb-3">
+				<ReadinessList entry={entry.name} collapsed={readinessCollapsed} />
 			</div>
 		{/if}
 		<CatalogImageForm {mode} {entry} {hosts} {hostsIncomplete} {projectSlug} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {tagsAction} {digestAction} {editor} onSettled={settle}>

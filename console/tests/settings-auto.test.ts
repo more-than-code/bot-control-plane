@@ -347,7 +347,10 @@ describe('Registries card and readiness markup', () => {
 		assert.match(deploy, /<ReadinessList entry=\{entry\.name\} hostId=[^>]*refreshKey=\{result\?\.resultId \?\? null\}/);
 		assert.equal(/deployBlocked = \$derived\([^)]*readiness/i.test(deploy), false);
 		const drawer = readFileSync(new URL('../src/routes/projects/[id]/CatalogImageDialog.svelte', import.meta.url), 'utf8');
-		assert.match(drawer, /<ReadinessList entry=\{entry\.name\} \/>/);
+		assert.match(drawer, /<ReadinessList entry=\{entry\.name\} collapsed=\{readinessCollapsed\} \/>/);
+		// The first scroll of the form below folds the band; a scroll inside the band itself does not.
+		assert.match(drawer, /onscrollcapture=\{foldReadinessOnScroll\}/);
+		assert.match(drawer, /readinessBand\?\.contains\(target\)/);
 		const run = readFileSync(new URL('../src/routes/projects/[id]/CatalogRunDialog.svelte', import.meta.url), 'utf8');
 		assert.match(run, /entryKind === 'program' && \(kind === 'run' \|\| kind === 'restart'\)/);
 		assert.match(run, /<ReadinessList entry=\{entryName\} \{hostId\} \{hostName\} refreshKey=\{result\} \/>/);
@@ -519,6 +522,22 @@ describe('rendered readiness, access line and Used by states', () => {
 		assert.deepEqual([...passed.matchAll(/data-check="([a-z_]+)"/g)].map((m) => m[1]), ['env_sets', 'networks']);
 		// Nothing passed: no toggle.
 		assert.equal(view({ result: missing }).includes('<details'), false);
+	});
+
+	test('collapsed (the form beside it scrolled): rows needing action fold under a closed toggle, the summary stays', () => {
+		const html = view({ result: { ...missing, checks: [ok('env_sets'), ...missing.checks] }, collapsed: true });
+		assert.match(html, /<p[^>]*role="status"[^>]*>5 items missing\. You can still deploy; the deploy may be refused\.<\/p>/);
+		assert.equal(/data-check=/.test(outsideDetails(html)), false);
+		assert.match(html, /<details(?![^>]*\sopen[\s=>])[^>]*data-readiness-attention/);
+		const folded = detailsOf(html, 'data-readiness-attention');
+		assert.match(folded, /<summary[^>]*>Show 6 items that need action<\/summary>/);
+		assert.deepEqual([...folded.matchAll(/data-check="([a-z_]+)"/g)].map((m) => m[1]), ['env_values', 'registry', 'files', 'host_access', 'host_policy', 'host_online']);
+		// Not collapsed: the same rows show outside any toggle, as before.
+		assert.equal(view({ result: missing }).includes('data-readiness-attention'), false);
+		// All OK and collapsed: still one line, Details closed.
+		const ready = view({ result: { ready: true, checks: [ok('env_sets')] }, collapsed: true });
+		assert.match(ready, /Ready: 1 check passed/);
+		assert.match(ready, /<details(?![^>]*\sopen[\s=>])[^>]*data-readiness-details/);
 	});
 
 	test('missing state: admins get buttons and links, others get who to ask', () => {
