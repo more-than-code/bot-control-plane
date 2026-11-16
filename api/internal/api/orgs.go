@@ -410,7 +410,7 @@ func (s *Server) handleOrgHosts(w http.ResponseWriter, r *http.Request) {
 			items[i].Access = nil
 		}
 	}
-	writeList(w, items, next)
+	writeList(w, s.hostViews(items), next)
 }
 
 func (s *Server) handleOrgJoinCreate(w http.ResponseWriter, r *http.Request) {

@@ -222,6 +222,10 @@ DELETE FROM app.schema_migrations WHERE name = '0010_project_files.sql';
 
 `DeleteProject` deletes that project's files in both stores. Soft-delete does not cascade. Contract: `../docs/contracts/api-v1.md` (v1.9 managed files) and `../docs/contracts/agent-protocol-v1.md` (v1.5 managed files). Behaviour: `docs/spec-catalog-files.md`. Example responses: `docs/examples/v1.9-files.json`. Regenerate that file with `DEPLOYBOT_UPDATE_FIXTURES=1 go test -count=1 ./internal/api -run TestFileFixtures`.
 
+## Agent update hint
+
+`BOT_API_LATEST_AGENT_VERSION` (api-v1 v1.34, spec `docs/spec-update-awareness.md`) is optional: the newest bot-agent release as `X.Y.Z` (digits only), or empty. Any other value stops the API at start with `BOT_API_LATEST_AGENT_VERSION must be X.Y.Z or empty`. Every host in `GET /v1/projects/{id}/hosts`, `GET /v1/orgs/{id}/hosts` and `GET /v1/hosts/{id}` carries `latest_agent_version` (that value, or `null` when it is empty) and `update_available` (true only when the host's `agent_version` and the setting both parse as `X.Y.Z` and the host's is lower by major, minor, patch; false otherwise, including an empty or odd host version). The comparison is `internal/agentversion`. Ops sets the value when a bot-agent release ships and restarts the API; unsetting it hides the hint without a release.
+
 ## License
 
 GNU Affero General Public License v3.0 only (AGPL-3.0-only). See [LICENSE](../LICENSE). You may self-host and change it. If you offer a changed version to users over a network, you must offer them its source code.

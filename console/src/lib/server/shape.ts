@@ -241,6 +241,7 @@ export function parseHost(value: unknown): Host | null {
 	// `programs.projects` names other projects: the API sends it to org owners and admins only and null to
 	// everyone else (api-v1 v1.24 item 1, amended), so the console shows it whenever it is present.
 	const programs = parseProgramsField(value);
+	const { latest_agent_version, update_available } = agentUpdateHint(value);
 	return {
 		id,
 		org_id,
@@ -256,8 +257,21 @@ export function parseHost(value: unknown): Host | null {
 		revoked_at,
 		access_level,
 		access,
-		programs
+		programs,
+		latest_agent_version,
+		update_available
 	};
+}
+
+const AGENT_VERSION = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
+
+/**
+ * api-v1 v1.34 item 2. A hint, so a missing or odd value never fails the host: `latest_agent_version` is an X.Y.Z
+ * string or null, and `update_available` is true only when the API says true and names that version.
+ */
+function agentUpdateHint(value: Record<string, unknown>): { latest_agent_version: string | null; update_available: boolean } {
+	const latest = typeof value.latest_agent_version === 'string' && AGENT_VERSION.test(value.latest_agent_version) ? value.latest_agent_version : null;
+	return { latest_agent_version: latest, update_available: latest !== null && value.update_available === true };
 }
 
 function isAccessLevel(value: unknown): value is AccessLevel {

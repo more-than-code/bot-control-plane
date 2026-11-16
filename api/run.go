@@ -134,6 +134,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		Now:           now,
 		Secrets:       secrets,
 		Registry:      registry.NewService(registry.Options{AllowPrivate: cfg.RegistryAllowPrivate}),
+		// api-v1 v1.34: the agent update hint on host reads.
+		LatestAgentVersion: cfg.LatestAgentVersion,
 	}
 	if gh != nil {
 		srv.GitHub = gh

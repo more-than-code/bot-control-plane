@@ -64,6 +64,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerConnectRequests(server, api)
 	registerReadiness(server, api)
 	registerSharedNetworkSnippet(server, api)
+	registerWhatsNew(server)
 }
 
 func addTool(server *mcp.Server, tool *mcp.Tool, h func(context.Context, json.RawMessage) *mcp.CallToolResult) {

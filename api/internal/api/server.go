@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/more-than-code/bot-control-plane/api/internal/agentversion"
 	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"github.com/more-than-code/bot-control-plane/api/internal/auth"
@@ -43,6 +44,9 @@ type Server struct {
 	// Nil makes start and callback unavailable.
 	GitHub       *github.Client
 	GitHubStates *github.States
+	// LatestAgentVersion is BOT_API_LATEST_AGENT_VERSION (X.Y.Z, checked at
+	// start), or empty for no update hint (api-v1 v1.34).
+	LatestAgentVersion string
 	// imageBudget, when non-zero, replaces the image task timeout.
 	// Production leaves it at 0. Tests set it so a timeout does not wait
 	// out the real deploy budget.
@@ -586,6 +590,34 @@ func (s *Server) hostStatus(h store.Host) string {
 		return "asleep"
 	}
 	return "offline"
+}
+
+// hostView is a Host as the three host reads send it, with the agent
+// update hint of api-v1 v1.34 item 2.
+type hostView struct {
+	store.Host
+	LatestAgentVersion *string `json:"latest_agent_version"`
+	UpdateAvailable    bool    `json:"update_available"`
+}
+
+// withUpdateHint adds latest_agent_version (null when unset) and
+// update_available (the host's agent_version is a lower X.Y.Z).
+func (s *Server) withUpdateHint(h store.Host) hostView {
+	v := hostView{Host: h}
+	if s.LatestAgentVersion != "" {
+		latest := s.LatestAgentVersion
+		v.LatestAgentVersion = &latest
+		v.UpdateAvailable = agentversion.Older(h.AgentVersion, latest)
+	}
+	return v
+}
+
+func (s *Server) hostViews(hosts []store.Host) []hostView {
+	out := make([]hostView, len(hosts))
+	for i, h := range hosts {
+		out[i] = s.withUpdateHint(h)
+	}
+	return out
 }
 
 func (s *Server) auditOK(ctx context.Context, p principal, row store.AuditRow) {

@@ -20,6 +20,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	changelog "github.com/more-than-code/bot-control-plane"
+
 	"github.com/more-than-code/bot-control-plane/mcp/internal/apiclient"
 )
 
@@ -171,6 +173,7 @@ func TestTools(t *testing.T) {
 		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
 		"get_registry_connect_request": true,
 		"check_readiness":              true, "image_access": true, "host_policy_snippet": true, "shared_network_snippet": true,
+		"whats_new": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -358,17 +361,52 @@ func TestTools(t *testing.T) {
 		"request_env_value", "get_env_value_request", "request_file", "get_file_request",
 		"connect_registry", "get_registry_connect_request",
 		"check_readiness", "image_access", "host_policy_snippet",
-		"update_env_set", "delete_env_set", "shared_network_snippet",
+		"update_env_set", "delete_env_set", "shared_network_snippet", "whats_new",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	if len(seen) != 37 {
+	if len(seen) != 38 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
-	res := mustCall(t, cs, "list_projects", map[string]any{})
+	// spec-update-awareness §5 items 2 and 3: instructions name the version
+	// and the newest items; whats_new answers from the build, never the API.
+	init := cs.InitializeResult()
+	if init.ServerInfo == nil || init.ServerInfo.Version != changelog.Version() {
+		t.Fatalf("server info %#v", init.ServerInfo)
+	}
+	latest, _ := changelog.Latest()
+	if !strings.Contains(init.Instructions, "Server v"+latest.Version+" ("+latest.Date+"). New in this release: ") ||
+		!strings.Contains(init.Instructions, strings.TrimRight(latest.Items[0], ".")) ||
+		!strings.HasSuffix(init.Instructions, "Call whats_new for the full list.") {
+		t.Fatalf("instructions %q", init.Instructions)
+	}
+	wnBefore := fake.count()
+	res := mustCall(t, cs, "whats_new", map[string]any{})
+	wnBody := structuredMap(t, res)
+	if wnBody["version"] != changelog.Version() || len(wnBody["entries"].([]any)) != min(3, len(changelog.Entries(10))) {
+		t.Fatalf("whats_new %#v", wnBody)
+	}
+	if !strings.HasPrefix(textOf(t, res), "Deploybot server v"+changelog.Version()+"\n\nv"+latest.Version+" ("+latest.Date+")\n- ") {
+		t.Fatalf("whats_new text %q", textOf(t, res))
+	}
+	res = mustCall(t, cs, "whats_new", map[string]any{"count": 1})
+	if n := len(structuredMap(t, res)["entries"].([]any)); n != 1 {
+		t.Fatalf("whats_new count 1 gave %d", n)
+	}
+	for _, count := range []any{0, 11, -1, "3"} {
+		res = mustCall(t, cs, "whats_new", map[string]any{"count": count})
+		if !res.IsError || !strings.HasPrefix(textOf(t, res), "bad_request:") {
+			t.Fatalf("whats_new count %v error=%v text %q", count, res.IsError, textOf(t, res))
+		}
+	}
+	if fake.count() != wnBefore {
+		t.Fatal("whats_new called the API")
+	}
+
+	res = mustCall(t, cs, "list_projects", map[string]any{})
 	assertTool(t, fake, res, http.MethodGet, "/v1/me", "", "")
 	if textOf(t, res) != "1 projects: lab (owner) in Home Lab" {
 		t.Fatalf("list_projects text %q", textOf(t, res))

@@ -270,3 +270,8 @@ export function hostSharedNetworks(host: Pick<Host, 'access' | 'programs'>): Hos
 	if (!policyShown) return null;
 	return { status: shared == null ? 'not reported' : 'none' };
 }
+
+/** The "Update available" badge's tooltip (api-v1 v1.34): names the newest bot-agent release. */
+export function agentUpdateText(latest: string): string {
+	return `bot-agent ${latest} is available. Upgrading a host is an operator step.`;
+}

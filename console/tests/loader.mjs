@@ -47,6 +47,11 @@ export async function resolve(specifier, context, nextResolve) {
 	if (specifier === '$app/environment') {
 		return { url: fileUrl(resolvePath(root, 'tests/stubs/app-environment.ts')), shortCircuit: true };
 	}
+	// Vite `?raw` (the root CHANGELOG.md): the file's text as the default export.
+	if (specifier.endsWith('?raw') && (specifier.startsWith('./') || specifier.startsWith('../')) && context.parentURL?.startsWith('file:')) {
+		const abs = resolvePath(dirname(fileURLToPath(context.parentURL)), specifier.slice(0, -'?raw'.length));
+		return { url: `${fileUrl(abs)}?raw`, shortCircuit: true };
+	}
 	if (specifier.startsWith('$lib/')) {
 		const url = withExtension(resolvePath(root, 'src/lib', specifier.slice('$lib/'.length)));
 		if (!url) throw new Error(`Cannot resolve ${specifier}`);
@@ -63,6 +68,10 @@ export async function resolve(specifier, context, nextResolve) {
 
 /** Compile route and component modules so `svelte/server` `render` can load them. */
 export async function load(url, context, nextLoad) {
+	if (url.startsWith('file:') && url.endsWith('?raw')) {
+		const text = readFileSync(fileURLToPath(url.slice(0, -'?raw'.length)), 'utf8');
+		return { format: 'module', source: `export default ${JSON.stringify(text)};`, shortCircuit: true };
+	}
 	// Stylesheet imports (the root layout's app.css) have no effect on server render.
 	if (url.startsWith('file:') && url.endsWith('.css')) {
 		return { format: 'module', source: '', shortCircuit: true };

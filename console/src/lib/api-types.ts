@@ -134,6 +134,13 @@ export type Host = {
 	access: HostAccessSummary[] | null;
 	/** Null when the agent reports no program policy. */
 	programs: HostPrograms | null;
+	/**
+	 * api-v1 v1.34: the newest bot-agent release the API knows (X.Y.Z), null when unset. `parseHost` always sets
+	 * both fields; they are optional so a Host built by hand stays valid.
+	 */
+	latest_agent_version?: string | null;
+	/** True only when the host's agent is older than `latest_agent_version`. */
+	update_available?: boolean;
 };
 
 /** What the caller may do with one catalog entry. `status` comes with any other action. */
