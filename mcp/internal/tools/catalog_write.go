@@ -84,7 +84,32 @@ const catalogWriteSchema = `{
         "ports": {"type": "array"},
         "env": {"type": "object"},
         "env_sets": {"type": "array", "items": {"type": "string"}},
-        "secret_env": {"type": "object"},
+        "secret_env": {
+          "type": "object",
+          "description": "Secret env vars, KEY: source. A source is \"<set>.<KEY>\" for a key of a shared env set, or, for a secret only this entry uses, {\"fill\": true} (a placeholder the person fills: call request_env_value with entry and key after confirm) or {\"generate\": {\"kind\": \"password\"|\"hex\"|\"base64url\", \"length\"?: 16-64}}. Those are kept in the entry's private set and read back as \"@<entry>.KEY\"; keep that string to keep the key, and leave a key out to remove it.",
+          "additionalProperties": {
+            "oneOf": [
+              {"type": "string"},
+              {"type": "object", "additionalProperties": false, "required": ["fill"], "properties": {"fill": {"const": true}}},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["generate"],
+                "properties": {
+                  "generate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["kind"],
+                    "properties": {
+                      "kind": {"type": "string", "enum": ["password", "hex", "base64url"]},
+                      "length": {"type": "integer", "minimum": 16, "maximum": 64}
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
         "volumes": {"type": "array"},
         "files": {"type": "array"},
         "healthcheck": {

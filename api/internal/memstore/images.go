@@ -15,6 +15,8 @@ type envSetRec struct {
 	Name      string
 	UpdatedAt time.Time
 	UpdatedBy uuid.UUID
+	// EntryID owns a private set (api-v1 v1.33 item 6); nil for a shared set.
+	EntryID *uuid.UUID
 }
 
 // envValueRec is one stored value. A new rec has RevealPending, NeedsValue,
@@ -384,7 +386,11 @@ func (m *Mem) envSetViewLocked(projectID uuid.UUID, set envSetRec) store.EnvSet 
 		}
 		keys = append(keys, item)
 	}
-	return store.EnvSet{Name: set.Name, Keys: keys, UpdatedAt: set.UpdatedAt, UpdatedBy: set.UpdatedBy}
+	out := store.EnvSet{Name: set.Name, Keys: keys, UpdatedAt: set.UpdatedAt, UpdatedBy: set.UpdatedBy}
+	if set.EntryID != nil {
+		out.Entry = m.entries[*set.EntryID].Name
+	}
+	return out
 }
 
 func (m *Mem) PutEnvSet(_ context.Context, projectID uuid.UUID, name string, keys []store.EnvSecret, actor uuid.UUID, at time.Time, newKeysSecret bool) (store.EnvSet, error) {
@@ -699,9 +705,7 @@ func (m *Mem) DeleteEnvSet(_ context.Context, projectID uuid.UUID, name string) 
 	if m.setReferencedLocked(projectID, name) {
 		return store.ErrConflict
 	}
-	delete(m.envSets, envKey(projectID, name))
-	delete(m.envValues, envKey(projectID, name))
-	m.dropValueRequestsLocked(projectID, name)
+	m.dropEnvSetLocked(projectID, name)
 	return nil
 }
 
@@ -788,7 +792,12 @@ func (m *Mem) ListEnvMaterial(_ context.Context, projectID uuid.UUID, name strin
 	if _, ok := m.envSets[envKey(projectID, name)]; !ok {
 		return nil, store.ErrNotFound
 	}
-	values := m.envValues[envKey(projectID, name)]
+	return m.envMaterialLocked(envKey(projectID, name)), nil
+}
+
+// envMaterialLocked is one set's values as material, sorted by key.
+func (m *Mem) envMaterialLocked(id string) []store.EnvMaterial {
+	values := m.envValues[id]
 	out := make([]store.EnvMaterial, 0, len(values))
 	for _, v := range values {
 		out = append(out, store.EnvMaterial{
@@ -798,7 +807,7 @@ func (m *Mem) ListEnvMaterial(_ context.Context, projectID uuid.UUID, name strin
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
-	return out, nil
+	return out
 }
 
 func (m *Mem) ListRegistries(_ context.Context, projectID uuid.UUID) ([]store.Registry, error) {

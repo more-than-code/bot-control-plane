@@ -11,7 +11,6 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/seal"
-	"github.com/more-than-code/bot-control-plane/api/internal/secret"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
@@ -170,7 +169,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		// api-v1 v1.31 item 6: the login and the request's move to
 		// connected in one transaction. A request that is no longer
 		// pending is left as it is; the connect still applies.
-		reg, err = s.Store.ConnectRegistry(r.Context(), projectID, host, write, p.User.ID, s.now(), secret.Hash(taken.Request))
+		reg, err = s.Store.ConnectRegistry(r.Context(), projectID, host, write, p.User.ID, s.now(), takenRequestHash(taken.Request))
 	}
 	if err != nil {
 		// Nothing stores the new token: revoke it so it does not linger at GitHub.
@@ -189,7 +188,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		"source":     reg.Source,
 	}
 	if taken.Request != "" {
-		detail["request"] = auditRequestRef(secret.Hash(taken.Request))
+		detail["request"] = auditRequestRef(takenRequestHash(taken.Request))
 		out["connect_request_id"] = taken.Request
 	}
 	s.auditOK(r.Context(), p, store.AuditRow{
@@ -249,4 +248,11 @@ func (s *Server) deleteGitHubRegistry(w http.ResponseWriter, r *http.Request, p 
 		Detail:    map[string]any{"host": mat.Host, "revoked": revoked},
 	})
 	writeOK(w, http.StatusOK, map[string]any{"revoked": revoked})
+}
+
+// takenRequestHash is the stored hash of the connect request the OAuth state
+// carries: an id, or a handle a console session gave (api-v1 v1.33 item 8).
+func takenRequestHash(id string) []byte {
+	hash, _ := requestHash(id, true)
+	return hash
 }

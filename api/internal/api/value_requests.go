@@ -61,10 +61,7 @@ func (s *Server) handleValueRequestCreate(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	var body struct {
-		Key    string  `json:"key"`
-		Reason *string `json:"reason"`
-	}
+	var body valueRequestBody
 	if !decodeJSON(w, r, &body) {
 		return
 	}
@@ -80,6 +77,58 @@ func (s *Server) handleValueRequestCreate(w http.ResponseWriter, r *http.Request
 	if !envKeyOK(w, body.Key) {
 		return
 	}
+	s.createValueRequest(w, r, p, id, set, body)
+}
+
+type valueRequestBody struct {
+	Key    string  `json:"key"`
+	Reason *string `json:"reason"`
+}
+
+// handleEntryValueRequestCreate is api-v1 v1.33 item 6: a value request for
+// a key of the entry's private set "@<entry>". The key must be one the
+// entry's secret_env takes from that set.
+func (s *Server) handleEntryValueRequestCreate(w http.ResponseWriter, r *http.Request) {
+	p, id, ok := s.catalogProject(w, r)
+	if !ok {
+		return
+	}
+	if err := authz.Authorize(r.Context(), p.User.ID, id, authz.CapMembers); err != nil {
+		s.writeAuth(w, err)
+		return
+	}
+	entry, err := s.catalogByName(r, id, r.PathValue("name"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	var body valueRequestBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if !envKeyOK(w, body.Key) {
+		return
+	}
+	set, err := s.Store.GetEnvSet(r.Context(), id, catalog.PrivateSet(entry.Name))
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.writeErr(w, err, false)
+		return
+	}
+	found := false
+	for _, k := range set.Keys {
+		found = found || k.Key == body.Key
+	}
+	if !found {
+		writeCode(w, "not_found", fmt.Sprintf(`entry %s has no private key %s; add it to secret_env as {"fill": true} first`, entry.Name, body.Key))
+		return
+	}
+	s.createValueRequest(w, r, p, id, set, body)
+}
+
+// createValueRequest is v1.28 item 2 after the set lookup: the reason rule,
+// the key state, the open limit, and the stored request.
+func (s *Server) createValueRequest(w http.ResponseWriter, r *http.Request, p principal, id uuid.UUID, set store.EnvSet, body valueRequestBody) {
+	name := set.Name
 	reason := ""
 	if body.Reason != nil {
 		reason = *body.Reason
@@ -88,8 +137,10 @@ func (s *Server) handleValueRequestCreate(w http.ResponseWriter, r *http.Request
 		writeCode(w, "bad_request", msgReason)
 		return
 	}
+	// A secret key with a value may be replaced (api-v1 v1.33 item 3); a
+	// plain key with a value is changed with update_env_set.
 	for _, k := range set.Keys {
-		if k.Key == body.Key && !k.NeedsValue {
+		if k.Key == body.Key && !k.NeedsValue && !k.IsSecret {
 			writeCode(w, "conflict", keyHasValueMsg(body.Key))
 			return
 		}
@@ -167,12 +218,21 @@ func (s *Server) handleValueRequestFillPage(w http.ResponseWriter, r *http.Reque
 		s.writeErr(w, err, false)
 		return
 	}
-	// writeJSON sends Cache-Control: no-store on every answer.
+	replace, err := s.replacesValue(r.Context(), req)
+	if err != nil {
+		s.writeErr(w, err, false)
+		return
+	}
+	// writeJSON sends Cache-Control: no-store on every answer. replace and
+	// entry are api-v1 v1.33 items 3 and 6: the page says "Replace the value
+	// of KEY", and names "entry <name>" for a private set.
 	writeOK(w, http.StatusOK, struct {
 		valueRequestView
 		ProjectName string `json:"project_name"`
 		Reason      string `json:"reason"`
-	}{viewValueRequest(id, req, s.now()), proj.Name, req.Reason})
+		Replace     bool   `json:"replace"`
+		Entry       string `json:"entry,omitempty"`
+	}{viewValueRequest(id, req, s.now()), proj.Name, req.Reason, replace, catalog.PrivateEntry(req.Set)})
 }
 
 // handleValueRequestFill is item 5. The route refuses delegated sessions.
@@ -229,6 +289,10 @@ func (s *Server) handleValueRequestFill(w http.ResponseWriter, r *http.Request) 
 	if body.Generate != nil {
 		detail["generated"] = body.Generate.Kind
 	}
+	if stored.Replaced {
+		// A rotation: the request replaced a stored secret value.
+		detail["replaced"] = true
+	}
 	// The value is committed: a client disconnect must not drop the row.
 	s.auditOK(context.WithoutCancel(r.Context()), p, store.AuditRow{
 		ProjectID: idPtr(req.ProjectID),
@@ -279,10 +343,28 @@ func (s *Server) keyStillOpen(w http.ResponseWriter, r *http.Request, req store.
 		return false
 	}
 	for _, k := range set.Keys {
-		if k.Key == req.Key && !k.NeedsValue {
+		if k.Key == req.Key && !k.NeedsValue && !k.IsSecret {
 			writeCode(w, "conflict", keyHasValueMsg(req.Key))
 			return false
 		}
 	}
 	return true
+}
+
+// replacesValue reports whether filling the request replaces a stored
+// secret value (api-v1 v1.33 item 3), for the fill page's wording.
+func (s *Server) replacesValue(ctx context.Context, req store.ValueRequest) (bool, error) {
+	set, err := s.Store.GetEnvSet(ctx, req.ProjectID, req.Set)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, k := range set.Keys {
+		if k.Key == req.Key {
+			return k.IsSecret && !k.NeedsValue, nil
+		}
+	}
+	return false, nil
 }

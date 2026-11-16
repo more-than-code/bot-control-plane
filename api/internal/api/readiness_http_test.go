@@ -237,7 +237,7 @@ func TestReadinessChecksAndFixes(t *testing.T) {
 	})
 
 	ready, checks, raw := readinessOf(t, f.w, f.owner, project, "web", host)
-	want := "env_sets:missing,env_values:missing,env_refs:missing,files:missing,registry:missing,host_access:ok,host_online:ok,host_images:ok,host_policy:unknown,networks:ok"
+	want := "env_sets:missing,env_values:missing,env_refs:missing,env_pairs:ok,files:missing,registry:missing,host_access:ok,host_online:ok,host_images:ok,host_policy:unknown,networks:ok"
 	if ready || checkNames(checks) != want {
 		t.Fatalf("checks %s ready %v", checkNames(checks), ready)
 	}
@@ -267,7 +267,7 @@ func TestReadinessChecksAndFixes(t *testing.T) {
 		}
 	}
 	// Without a host only the entry checks run.
-	if _, checks, _ := readinessOf(t, f.w, f.owner, project, "web", ""); checkNames(checks) != "env_sets:missing,env_values:missing,env_refs:missing,files:missing,registry:missing" {
+	if _, checks, _ := readinessOf(t, f.w, f.owner, project, "web", ""); checkNames(checks) != "env_sets:missing,env_values:missing,env_refs:missing,env_pairs:ok,files:missing,registry:missing" {
 		t.Fatalf("no host %s", checkNames(checks))
 	}
 
@@ -357,7 +357,7 @@ func TestReadinessAccessRules(t *testing.T) {
 		t.Fatalf("offline %q", c.Message)
 	}
 	// A program skips registry, host_images and networks.
-	if _, checks, _ := readinessOf(t, f.w, f.owner, project, "job", host); checkNames(checks) != "env_sets:ok,env_values:ok,env_refs:ok,files:ok,host_access:ok,host_online:warn,host_policy:unknown" {
+	if _, checks, _ := readinessOf(t, f.w, f.owner, project, "job", host); checkNames(checks) != "env_sets:ok,env_values:ok,env_refs:ok,env_pairs:ok,files:ok,host_access:ok,host_online:warn,host_policy:unknown" {
 		t.Fatalf("program %s", checkNames(checks))
 	}
 	path := "/v1/projects/" + project + "/catalog/web/readiness"

@@ -538,19 +538,31 @@ func (s *Server) writeImage(w http.ResponseWriter, r *http.Request, p principal,
 		s.fail(w, err)
 		return
 	}
-	img, err := catalog.BuildImage(name, raw, names, known)
+	// api-v1 v1.33 item 6: secret_env may give private keys as objects.
+	draft, err := draftPrivate(name, catalog.SecretEnvField(raw), names)
 	if err != nil {
 		s.writeField(w, err)
 		return
 	}
+	img, err := catalog.BuildImage(name, draft.spec(raw), names, known)
+	if err != nil {
+		s.writeField(w, err)
+		return
+	}
+	final := draft.finish(img.SecretEnv, names)
 	hash := catalog.ImageHash(img, digestMap(names, img))
 	if p.Session.Kind == store.KindDelegated {
-		s.issueCatalogImage(w, r, p, projectID, name, img, hash, key, replace)
+		s.issueCatalogImage(w, r, p, projectID, name, img, draft, final, key, replace)
+		return
+	}
+	private, err := s.privateWrite(projectID, draft, final)
+	if err != nil {
+		s.secretWriteErr(w, err)
 		return
 	}
 	in := store.CatalogWrite{
 		Name: name, Kind: "image", ImageRaw: json.RawMessage(catalog.SpecJSON(img)),
-		SpecHash: hash, CommandDisplay: img.Image, Actor: p.User.ID, At: s.now(),
+		SpecHash: hash, CommandDisplay: img.Image, Actor: p.User.ID, At: s.now(), Private: private,
 	}
 	var entry store.CatalogEntry
 	var old string
@@ -564,7 +576,7 @@ func (s *Server) writeImage(w http.ResponseWriter, r *http.Request, p principal,
 		return
 	}
 	// Audit right after the commit, before any read that could fail.
-	detail := map[string]any{"name": entry.Name, "spec_hash": entry.SpecHash}
+	detail := withPrivateAudit(map[string]any{"name": entry.Name, "spec_hash": entry.SpecHash}, entry.Name, private)
 	action := audit.ActionCatalogCreate
 	status := http.StatusCreated
 	if replace {

@@ -56,6 +56,9 @@ RETURNING id::text, project_id::text, name, kind, spec, spec_hash, command_displ
 	if err := insertDefaultGrants(ctx, tx, entry.ID, kind); err != nil {
 		return store.CatalogEntry{}, err
 	}
+	if err := syncPrivateEnv(ctx, tx, entry, in.Private, in.Actor, in.At); err != nil {
+		return store.CatalogEntry{}, err
+	}
 	return entry, nil
 }
 
@@ -112,6 +115,9 @@ RETURNING id::text, project_id::text, name, kind, spec, spec_hash, command_displ
           created_by::text, created_at, updated_at
 `, id, spec, in.SpecHash, in.CommandDisplay, in.At))
 	if err != nil {
+		return "", store.CatalogEntry{}, err
+	}
+	if err := syncPrivateEnv(ctx, tx, entry, in.Private, in.Actor, in.At); err != nil {
 		return "", store.CatalogEntry{}, err
 	}
 	return old, entry, nil

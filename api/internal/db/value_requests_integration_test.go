@@ -330,9 +330,12 @@ func TestParityValueRequests(t *testing.T) {
 			t.Fatal("expired fill wrote")
 		}
 
-		// A key that got a value meanwhile: conflict, request stays pending.
+		// A key that got a plain value meanwhile: conflict, request stays
+		// pending (a secret value would be replaced, api-v1 v1.33 item 3).
 		m := mustCreate("MEANWHILE")
-		if _, _, err := p.st.PutEnvKey(p.ctx, proj.ID, "svc", put("MEANWHILE", "console", false), owner.ID, p.at); err != nil {
+		plainPut := put("MEANWHILE", "console", false)
+		plainPut.Secret = new(bool)
+		if _, _, err := p.st.PutEnvKey(p.ctx, proj.ID, "svc", plainPut, owner.ID, p.at); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := p.st.FillValueRequest(p.ctx, m, owner.ID, p.at, put("MEANWHILE", "agent", false)); !errors.Is(err, store.ErrKeyExists) {

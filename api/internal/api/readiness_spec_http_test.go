@@ -110,7 +110,7 @@ func TestReadinessSpecBeforeItExists(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Payload.Ready || checkNames(body.Payload.Checks) != "env_sets:missing,env_values:missing,env_refs:ok,files:missing,registry:ok" {
+	if body.Payload.Ready || checkNames(body.Payload.Checks) != "env_sets:missing,env_values:missing,env_refs:ok,env_pairs:ok,files:missing,registry:ok" {
 		t.Fatalf("checks %s", checkNames(body.Payload.Checks))
 	}
 	if c := findCheck(t, body.Payload.Checks, "env_sets"); c.Fix["action"] != "create_env_set" || c.Fix["set"] != "gone" {

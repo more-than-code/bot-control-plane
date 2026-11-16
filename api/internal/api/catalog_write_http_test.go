@@ -393,8 +393,9 @@ func TestDelegatedCatalogConsoleOnly(t *testing.T) {
 	// The refused PUT above created nothing.
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodGet, "/v1/projects/"+project+"/env-sets/svc", "")
 	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	// api-v1 v1.33 item 2: a delegated delete is a plan; the set is missing here.
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodDelete, "/v1/projects/"+project+"/env-sets/svc", "")
-	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
+	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "no env set svc")
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodPut, "/v1/projects/"+project+"/env-sets/svc/keys/TOKEN", `{"value":"nope"}`)
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
 	status, env, _ = mustCall(t, c.w, c.tok, http.MethodDelete, "/v1/projects/"+project+"/env-sets/svc/keys/TOKEN", "")
@@ -409,7 +410,8 @@ func TestDelegatedCatalogConsoleOnly(t *testing.T) {
 	rows := auditRows(t, c.w, c.sc.project.ID)
 	requireDelegatedDenial(t, rows, audit.ActionCatalogPermissions, 1)
 	requireDelegatedDenial(t, rows, audit.ActionEnvSetReplace, 1)
-	requireDelegatedDenial(t, rows, audit.ActionEnvSetDelete, 1)
+	// api-v1 v1.33 item 2: a delegated delete is a plan, not a denial.
+	requireDelegatedDenial(t, rows, audit.ActionEnvSetDelete, 0)
 	// v1.27 item 5: delegated reads are allowed, so they write no denial.
 	requireDelegatedDenial(t, rows, audit.ActionEnvSetList, 0)
 	requireDelegatedDenial(t, rows, audit.ActionEnvSetGet, 0)

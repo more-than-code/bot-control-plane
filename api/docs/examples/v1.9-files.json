@@ -18,6 +18,7 @@
         "status"
       ],
       "name": "web",
+      "private_keys": [],
       "project_id": "PROJECT",
       "spec": {
         "command": null,

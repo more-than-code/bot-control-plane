@@ -151,6 +151,13 @@ type CatalogWrite struct {
 	CommandDisplay string
 	Actor          uuid.UUID
 	At             time.Time
+	// Private is the entry's private set write (api-v1 v1.33 item 6). nil
+	// leaves the private set as it is.
+	Private *PrivateEnv
+	// PlanBody, when set, is what CommitCatalogWrite compares with the stored
+	// plan body instead of ImageRaw: a plan with new private keys stores them
+	// in their object form.
+	PlanBody json.RawMessage
 }
 
 // MarshalJSON returns a program entry with its ProgramSpec (the v1.6 fields
@@ -328,4 +335,13 @@ func PlaceDiscovered(item Discovered, lookup func(slug, entry, kind string) (uui
 		name = *item.SystemdUnit
 	}
 	return name, "discovered", nil, nil
+}
+
+// PlanJSON is what a confirmed write is compared with: PlanBody when set,
+// else ImageRaw.
+func (w CatalogWrite) PlanJSON() json.RawMessage {
+	if w.PlanBody != nil {
+		return w.PlanBody
+	}
+	return w.ImageRaw
 }

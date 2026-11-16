@@ -36,10 +36,32 @@ func (s *Server) handleEnvSetList(w http.ResponseWriter, r *http.Request) {
 	if !delegated && !requireConsole(w, p) {
 		return
 	}
-	items, err := s.Store.ListEnvSets(r.Context(), id)
+	var includePrivate bool
+	switch r.URL.Query().Get("include") {
+	case "":
+	case "private":
+		includePrivate = true
+	default:
+		writeCode(w, "bad_request", `include must be "private"`)
+		return
+	}
+	all, err := s.Store.ListEnvSets(r.Context(), id)
 	if err != nil {
 		s.writeErr(w, err, false)
 		return
+	}
+	consumers, err := s.envSetConsumers(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	// api-v1 v1.33 item 6: private sets only when asked for.
+	items := make([]store.EnvSet, 0, len(all))
+	for _, item := range all {
+		if catalog.IsPrivateSet(item.Name) && !includePrivate {
+			continue
+		}
+		items = append(items, withUsedBy(item, consumers))
 	}
 	if delegated {
 		// api-v1 v1.27 item 5: names and flags only, nothing decrypted.
@@ -83,6 +105,12 @@ func (s *Server) handleEnvSetGet(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, err, false)
 		return
 	}
+	consumers, err := s.envSetConsumers(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	set = withUsedBy(set, consumers)
 	if delegated {
 		writeOK(w, http.StatusOK, namesOnly(set))
 		return
@@ -228,14 +256,36 @@ func (s *Server) handleEnvSetDelete(w http.ResponseWriter, r *http.Request) {
 		s.writeAuth(w, err)
 		return
 	}
-	if s.refuseDelegated(w, r, p, idPtr(id), nil, audit.ActionEnvSetDelete) || !requireConsole(w, p) {
-		return
-	}
 	name, ok := envSetName(w, r)
 	if !ok {
 		return
 	}
+	// api-v1 v1.33 item 2: a delegated session gets a plan to confirm.
+	if p.Session.Kind == store.KindDelegated {
+		s.issueEnvSetDelete(w, r, p, id, name)
+		return
+	}
+	if !requireConsole(w, p) {
+		return
+	}
+	users, err := s.setUsers(r.Context(), id, name)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if len(users) > 0 {
+		if _, gerr := s.Store.GetEnvSet(r.Context(), id, name); gerr == nil {
+			writeCode(w, "conflict", usedByMsg(name, users))
+			return
+		}
+	}
 	if err := s.Store.DeleteEnvSet(r.Context(), id, name); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			if users, uerr := s.setUsers(r.Context(), id, name); uerr == nil && len(users) > 0 {
+				writeCode(w, "conflict", usedByMsg(name, users))
+				return
+			}
+		}
 		s.writeErr(w, err, false)
 		return
 	}
@@ -395,6 +445,12 @@ func (s *Server) handleEnvKeyReveal(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.revealKey(w, r, p, id, name, key)
+}
+
+// revealKey is the show-once reveal of one generated key (api-v1 v1.27
+// item 3), for a shared or a private set.
+func (s *Server) revealKey(w http.ResponseWriter, r *http.Request, p principal, id uuid.UUID, name, key string) {
 	if s.Secrets == nil {
 		s.logger().Error("secrets key not configured")
 		writeCode(w, "unavailable", errSecretsKey.Error())
@@ -427,6 +483,35 @@ func (s *Server) handleEnvKeyReveal(w http.ResponseWriter, r *http.Request) {
 	})
 	// writeJSON sends Cache-Control: no-store on every answer, this one included.
 	writeOK(w, http.StatusOK, map[string]any{"key": key, "value": plain})
+}
+
+// handlePrivateKeyReveal is handleEnvKeyReveal for a key of an entry's
+// private set "@<entry>" (api-v1 v1.33 item 6, review A): the set routes
+// refuse private names, so a generated private secret is shown once here.
+// Console only (the route refuses delegated sessions); same capability,
+// show-once rule, answer and audit (set "@<entry>", key).
+func (s *Server) handlePrivateKeyReveal(w http.ResponseWriter, r *http.Request) {
+	p, id, ok := s.catalogProject(w, r)
+	if !ok {
+		return
+	}
+	if err := authz.Authorize(r.Context(), p.User.ID, id, authz.CapMembers); err != nil {
+		s.writeAuth(w, err)
+		return
+	}
+	if !requireConsole(w, p) {
+		return
+	}
+	entry, err := s.catalogByName(r, id, r.PathValue("name"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	key, ok := envKeyName(w, r)
+	if !ok {
+		return
+	}
+	s.revealKey(w, r, p, id, catalog.PrivateSet(entry.Name), key)
 }
 
 func (s *Server) handleEnvKeyDelete(w http.ResponseWriter, r *http.Request) {
@@ -680,6 +765,22 @@ func (s *Server) handleRegistryDelete(w http.ResponseWriter, r *http.Request) {
 		Detail:    map[string]any{"host": host},
 	})
 	writeOK(w, http.StatusOK, map[string]any{})
+}
+
+// envSetConsumers is setConsumers of the project's entries (api-v1 v1.33 item 4).
+func (s *Server) envSetConsumers(ctx context.Context, projectID uuid.UUID) (map[string][]string, error) {
+	entries, err := s.Store.ListCatalogEntries(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return setConsumers(entries), nil
+}
+
+// withUsedBy sets used_by, an empty list for a set no entry names.
+func withUsedBy(set store.EnvSet, consumers map[string][]string) store.EnvSet {
+	used := append([]string{}, consumers[set.Name]...)
+	set.UsedBy = &used
+	return set
 }
 
 func requireConsole(w http.ResponseWriter, p principal) bool {

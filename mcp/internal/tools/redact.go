@@ -147,7 +147,7 @@ func linesEqual(a, b []any) bool {
 // they pass unredacted: the keyword rule would read "SMTP_PASSWORD in" as a
 // secret pair and hide the key the user has to fix.
 var envRefusalPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} in set [a-z0-9][a-z0-9-]{0,47} has no value yet; set it in the console$`),
+	regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} in set @?[a-z0-9][a-z0-9-]{0,47} has no value yet; set it in the console$`),
 	regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} references \$\{[A-Z_][A-Z0-9_]{0,63}\}, which is not set for this entry$`),
 	regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} has a reference that is not set for this entry$`),
 	regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} has an unterminated \$\{$`),

@@ -15,7 +15,7 @@ import (
 // writes the value into app.env_values in the same transaction.
 
 func (d *DB) CreateValueRequest(ctx context.Context, hash []byte, in store.ValueRequest) error {
-	if !catalog.ValidName(in.Set) {
+	if !catalog.ValidEnvSetName(in.Set) {
 		return store.ErrInvalid
 	}
 	if err := catalog.ValidateEnvKey(in.Key); err != nil {
@@ -80,6 +80,16 @@ func (d *DB) FillValueRequest(ctx context.Context, hash []byte, userID uuid.UUID
 	if err != nil {
 		return store.EnvKey{}, err
 	}
+	// A secret key that is not a placeholder is a rotation (v1.33 item 3).
+	replaced := false
+	if exists {
+		if err := tx.QueryRow(ctx, `
+SELECT is_secret AND NOT needs_value FROM app.env_values
+WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
+`, req.ProjectID.String(), req.Set, req.Key).Scan(&replaced); err != nil {
+			return store.EnvKey{}, mapErr(err)
+		}
+	}
 	// Written secret, whatever a placeholder was (plain to secret is the
 	// allowed direction); upsertEnvValue sets every v1.27 flag.
 	if err := upsertEnvValue(ctx, tx, req.ProjectID, req.Set, req.Key, true, "", in.Nonce, in.Ciphertext, in.KeyVersion, !exists, in.Generated); err != nil {
@@ -103,7 +113,7 @@ UPDATE app.env_value_requests SET state = 'filled', done_at = $2 WHERE id_hash =
 	if err := tx.Commit(ctx); err != nil {
 		return store.EnvKey{}, mapErr(err)
 	}
-	return store.EnvKey{Key: req.Key, IsSecret: true, RevealPending: in.Generated, Generated: in.Generated}, nil
+	return store.EnvKey{Key: req.Key, IsSecret: true, RevealPending: in.Generated, Generated: in.Generated, Replaced: replaced}, nil
 }
 
 func (d *DB) DeclineValueRequest(ctx context.Context, hash []byte, userID uuid.UUID, at time.Time) error {
@@ -173,22 +183,23 @@ func scanValueRequest(row pgx.Row) (store.ValueRequest, error) {
 	return v, nil
 }
 
-// keyOpenRow locks the key's row and reports whether it exists. A key with
-// a value is ErrKeyExists.
+// keyOpenRow locks the key's row and reports whether it exists. A plain key
+// with a value is ErrKeyExists; a secret key with a value may be replaced
+// (api-v1 v1.33 item 3, a rotation).
 func keyOpenRow(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, set, key string) (bool, error) {
-	var needs bool
+	var needs, secret bool
 	err := tx.QueryRow(ctx, `
-SELECT needs_value FROM app.env_values
+SELECT needs_value, is_secret FROM app.env_values
 WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
 FOR UPDATE
-`, projectID.String(), set, key).Scan(&needs)
+`, projectID.String(), set, key).Scan(&needs, &secret)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, mapErr(err)
 	}
-	if !needs {
+	if !needs && !secret {
 		return true, store.ErrKeyExists
 	}
 	return true, nil

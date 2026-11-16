@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -179,7 +180,7 @@ const listEnvSetsSchema = `{
 func registerListEnvSets(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "list_env_sets",
-		Description: "List a project's env sets as key names and flags: is_secret, needs_value (a placeholder the user must still fill in the console; a deploy that uses it is refused), and reveal_pending (a generated value the user has not viewed yet). Never returns a value or a preview, even for plain keys. Needs project owner or admin. Reads stored API data. Does not contact any host.",
+		Description: "List a project's env sets as key names and flags: is_secret, needs_value (a placeholder the user must still fill in the console; a deploy that uses it is refused), and reveal_pending (a generated value the user has not viewed yet). Each set has used_by, the catalog entries that name it in env_sets or secret_env. A set named @<entry> with an entry field is that entry's private set: secrets only it uses, named in its secret_env as @<entry>.KEY; change them through the entry (update_catalog_entry, request_env_value with entry). Never returns a value or a preview, even for plain keys. Needs project owner or admin. Reads stored API data. Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(listEnvSetsSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -208,7 +209,10 @@ func registerListEnvSets(server *mcp.Server, api *apiclient.Client) {
 			out, _ := json.Marshal(map[string]any{"items": []envSetView{set}})
 			return present(out, summarizeEnvSets([]envSetView{set}))
 		}
-		payload, fail := get(ctx, api, idPath("v1", "projects", in.ProjectID, "env-sets"), nil)
+		// api-v1 v1.33 item 6: entry-private sets are listed too, with entry.
+		q := url.Values{}
+		q.Set("include", "private")
+		payload, fail := get(ctx, api, idPath("v1", "projects", in.ProjectID, "env-sets"), q)
 		if fail != nil {
 			return fail
 		}
@@ -236,6 +240,20 @@ func registerListEnvSets(server *mcp.Server, api *apiclient.Client) {
 type envSetView struct {
 	Name string          `json:"name"`
 	Keys []envSetKeyView `json:"keys"`
+	// Entry and UsedBy are api-v1 v1.33 items 6 and 4.
+	Entry  string   `json:"entry,omitempty"`
+	UsedBy []string `json:"used_by"`
+}
+
+// privateSetPattern is an entry-private set name (api-v1 v1.33 item 6).
+var privateSetPattern = regexp.MustCompile(`^@[a-z0-9][a-z0-9-]{0,47}$`)
+
+// anySetPattern is a shared or a private set name.
+var anySetPattern = regexp.MustCompile(`^@?[a-z0-9][a-z0-9-]{0,47}$`)
+
+// anySetName accepts a shared or a private set name.
+func anySetName(name string) bool {
+	return entryNamePattern.MatchString(name) || privateSetPattern.MatchString(name)
 }
 
 type envSetKeyView struct {
@@ -254,11 +272,21 @@ func projectEnvSet(raw json.RawMessage) (envSetView, error) {
 			NeedsValue    bool    `json:"needs_value"`
 			RevealPending bool    `json:"reveal_pending"`
 		} `json:"keys"`
+		Entry  string   `json:"entry"`
+		UsedBy []string `json:"used_by"`
 	}
-	if err := json.Unmarshal(raw, &in); err != nil || in.Name == nil || !entryNamePattern.MatchString(*in.Name) || in.Keys == nil {
+	if err := json.Unmarshal(raw, &in); err != nil || in.Name == nil || !anySetName(*in.Name) || in.Keys == nil {
 		return envSetView{}, errEnvSetShape
 	}
-	out := envSetView{Name: *in.Name, Keys: make([]envSetKeyView, 0, len(in.Keys))}
+	out := envSetView{Name: *in.Name, Keys: make([]envSetKeyView, 0, len(in.Keys)), UsedBy: []string{}}
+	if privateSetPattern.MatchString(*in.Name) && in.Entry == (*in.Name)[1:] {
+		out.Entry = in.Entry
+	}
+	for _, e := range in.UsedBy {
+		if entryNamePattern.MatchString(e) {
+			out.UsedBy = append(out.UsedBy, e)
+		}
+	}
 	for _, k := range in.Keys {
 		if k.Key == nil || !envKeyPattern.MatchString(*k.Key) || k.IsSecret == nil {
 			return envSetView{}, errEnvSetShape
@@ -283,6 +311,14 @@ func summarizeEnvSets(sets []envSetView) string {
 	text := fmt.Sprintf("%d env sets.", len(sets))
 	if len(sets) == 1 {
 		text = fmt.Sprintf("env set %s, %s.", sets[0].Name, countKeys(len(sets[0].Keys)))
+	}
+	for _, set := range sets {
+		switch {
+		case set.Entry != "":
+			text += fmt.Sprintf(" %s is private to entry %s.", set.Name, set.Entry)
+		case len(set.UsedBy) > 0:
+			text += fmt.Sprintf(" %s is used by %s.", set.Name, strings.Join(set.UsedBy, ", "))
+		}
 	}
 	switch {
 	case needs == 1:

@@ -27,6 +27,25 @@ const msgReason = "reason must be at most 200 characters of plain text"
 // requestIDPattern is the 43-character base64url id secret.NewToken mints.
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
+// requestHandlePattern is a request handle (api-v1 v1.33 item 8): "h-" and
+// the stored SHA-256 of the id as 64 lowercase hex digits. The console's
+// open-requests page links by it; only the console page routes accept it.
+var requestHandlePattern = regexp.MustCompile(`^h-[0-9a-f]{64}$`)
+
+// requestHash is the stored hash a request id names. A handle is accepted
+// only when allowHandle is true (the console page, fill, save and decline
+// routes); ok is false for anything else.
+func requestHash(id string, allowHandle bool) ([]byte, bool) {
+	if requestIDPattern.MatchString(id) {
+		return secret.Hash(id), true
+	}
+	if allowHandle && requestHandlePattern.MatchString(id) {
+		hash, err := hex.DecodeString(id[2:])
+		return hash, err == nil
+	}
+	return nil, false
+}
+
 // reasonOK is the reason rule of every create: at most 200 characters, no
 // control characters.
 func reasonOK(reason string) bool {
@@ -85,11 +104,13 @@ func loadOwnRequest[T storedRequest](s *Server, w http.ResponseWriter, r *http.R
 		return out, false
 	}
 	id := r.PathValue("request_id")
-	if !requestIDPattern.MatchString(id) {
+	// The console-only routes also take a handle, for the request's own
+	// user only (the owner check below); agent reads keep ids only.
+	hash, ok := requestHash(id, consoleOnly)
+	if !ok {
 		writeCode(w, "not_found", "not found")
 		return out, false
 	}
-	hash := secret.Hash(id)
 	req, err := get(r.Context(), hash)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && req.Meta().UserID != p.User.ID) {
 		writeCode(w, "not_found", "not found")
