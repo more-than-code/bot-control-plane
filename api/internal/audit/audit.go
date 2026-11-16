@@ -87,7 +87,11 @@ const (
 	ActionRegistryGitHubDisconnected = "registry.github_disconnected"
 	ActionFilePut                    = "file.put"
 	ActionFileDelete                 = "file.delete"
-	ActionDelegatedDenied            = "delegated.denied"
+	// File requests (api-v1 v1.30). The fill itself is file.put with
+	// detail via "file_request".
+	ActionFileRequested       = "file.requested"
+	ActionFileRequestDeclined = "file.request_declined"
+	ActionDelegatedDenied     = "delegated.denied"
 	// ActionServiceOwnerConflict is an owned services report that would have
 	// moved a row of another project, or an org-level row (review A2).
 	ActionServiceOwnerConflict = "service.owner_conflict"

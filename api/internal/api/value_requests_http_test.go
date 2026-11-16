@@ -75,7 +75,7 @@ func (f vrFixture) create(t *testing.T, tok, key, reason string) string {
 	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
 	out := objectPayload(t, env)
 	id, _ := out["request_id"].(string)
-	if len(id) != 43 || !valueRequestID.MatchString(id) {
+	if len(id) != 43 || !requestIDPattern.MatchString(id) {
 		t.Fatalf("request_id %q", id)
 	}
 	if out["url"] != "http://console.test/fill/"+id || len(out) != 3 {
@@ -192,7 +192,7 @@ func TestValueRequestCreate(t *testing.T) {
 
 func TestValueRequestOpenLimit(t *testing.T) {
 	f := newVRFixture(t)
-	keys := make([]string, store.MaxOpenValueRequests)
+	keys := make([]string, store.MaxOpenRequests)
 	for i := range keys {
 		keys[i] = fmt.Sprintf("KEY_%d", i)
 		f.create(t, f.mcp, keys[i], "")
@@ -231,7 +231,7 @@ func TestValueRequestReplaces(t *testing.T) {
 	// A refused create (limit reached) does not expire the open one.
 	f2 := newVRFixture(t)
 	keep := f2.create(t, f2.mcp, "PH", "")
-	for i := 0; i < store.MaxOpenValueRequests-1; i++ {
+	for i := 0; i < store.MaxOpenRequests-1; i++ {
 		f2.create(t, f2.mcp, fmt.Sprintf("KEY_%d", i), "")
 	}
 	status, env = f2.call(t, f2.mcp, http.MethodPost, vrPath(f2.project, "svc"), `{"key":"OTHER"}`)
@@ -686,4 +686,19 @@ func TestValueRequestUnblocksDeploy(t *testing.T) {
 			t.Fatalf("%s after fill %v", name, k)
 		}
 	}
+}
+
+// TestValueRequestReadAfterRemoval: v1.28 item 3. A creator removed from
+// the project no longer reads the request (not_found); a viewer still does.
+func TestValueRequestReadAfterRemoval(t *testing.T) {
+	f := newVRFixture(t)
+	id := f.create(t, f.adminT, "PH", "")
+	if err := f.w.mem.RemoveMember(context.Background(), f.sc.project.ID, f.admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, env := f.call(t, f.adminT, http.MethodGet, reqPath(id), "")
+	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
+	delegated := tokenKind(t, f.w, f.admin.ID, store.KindDelegated)
+	status, env = f.call(t, delegated, http.MethodGet, reqPath(id), "")
+	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
 }

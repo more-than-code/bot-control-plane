@@ -56,6 +56,8 @@ var delegatedDenyPatterns = []string{
 	"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal",
 	"POST /v1/value-requests/{request_id}/fill",
 	"POST /v1/value-requests/{request_id}/decline",
+	"POST /v1/file-requests/{request_id}/fill",
+	"POST /v1/file-requests/{request_id}/decline",
 	"POST /v1/projects/{id}/registries/github/start",
 	"POST /v1/auth/github/callback",
 }
@@ -210,6 +212,14 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		{"POST /v1/value-requests/{request_id}/decline", http.MethodPost, "/v1/value-requests/" + strings.Repeat("A", 43) + "/decline",
 			"", func(t *testing.T) string {
 				return envSnap(t, w, sc.project.ID, "svc")
+			}},
+		{"POST /v1/file-requests/{request_id}/fill", http.MethodPost, "/v1/file-requests/" + strings.Repeat("A", 43) + "/fill",
+			`{"content":"nope"}`, func(t *testing.T) string {
+				return fileSnap(t, w, sc.project.ID)
+			}},
+		{"POST /v1/file-requests/{request_id}/decline", http.MethodPost, "/v1/file-requests/" + strings.Repeat("A", 43) + "/decline",
+			"", func(t *testing.T) string {
+				return fileSnap(t, w, sc.project.ID)
 			}},
 		{"POST /v1/projects/{id}/registries/github/start", http.MethodPost, "/v1/projects/" + project + "/registries/github/start",
 			"", func(t *testing.T) string {
@@ -674,4 +684,15 @@ func orgState(t *testing.T, w *world, userID, orgID uuid.UUID) string {
 	}
 	orgs, _ := w.mem.ListUserOrgs(context.Background(), userID)
 	return strings.Join(parts, ",") + " orgs=" + strconv.Itoa(len(orgs))
+}
+
+// fileSnap is the project's file list (names, flags and sizes).
+func fileSnap(t *testing.T, w *world, projectID uuid.UUID) string {
+	t.Helper()
+	items, err := w.mem.ListProjectFiles(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(items)
+	return string(raw)
 }

@@ -30,27 +30,13 @@ func (m *Mem) CreateValueRequest(_ context.Context, hash []byte, in store.ValueR
 	if _, err := m.keyOpenLocked(in.ProjectID, in.Set, in.Key); err != nil {
 		return err
 	}
-	// Rows are kept 7 days after they expire, as in the Postgres store.
-	for k, r := range m.valueRequests {
-		if r.ExpiresAt.Before(in.CreatedAt.Add(-7 * 24 * time.Hour)) {
-			delete(m.valueRequests, k)
-		}
-	}
+	pruneRequestsLocked(m.valueRequests, in.CreatedAt)
 	// At most one open request per user and key (api-v1 v1.28 rev 3): the
 	// one this replaces is not counted, and expires only if the create succeeds.
-	open := 0
-	replaced := ""
-	for k, r := range m.valueRequests {
-		if r.UserID != in.UserID || r.StateAt(in.CreatedAt) != store.ValueRequestPending {
-			continue
-		}
-		if r.ProjectID == in.ProjectID && r.Set == in.Set && r.Key == in.Key {
-			replaced = k
-			continue
-		}
-		open++
-	}
-	if open >= store.MaxOpenValueRequests {
+	open, replaced := openRequestsLocked(m.valueRequests, in.UserID, in.CreatedAt, func(r store.ValueRequest) bool {
+		return r.ProjectID == in.ProjectID && r.Set == in.Set && r.Key == in.Key
+	})
+	if open >= store.MaxOpenRequests {
 		return store.ErrTooManyRequests
 	}
 	if m.valueRequests == nil {
@@ -64,7 +50,7 @@ func (m *Mem) CreateValueRequest(_ context.Context, hash []byte, in store.ValueR
 		r.ExpiresAt = in.CreatedAt
 		m.valueRequests[replaced] = r
 	}
-	in.State = store.ValueRequestPending
+	in.State = store.RequestPending
 	in.DoneAt = nil
 	m.valueRequests[hashKey(hash)] = in
 	return nil
@@ -121,7 +107,7 @@ func (m *Mem) FillValueRequest(_ context.Context, hash []byte, userID uuid.UUID,
 	m.envSets[id] = set
 	m.rehashSetLocked(req.ProjectID, req.Set, at)
 	done := at
-	req.State = store.ValueRequestFilled
+	req.State = store.RequestFilled
 	req.DoneAt = &done
 	m.valueRequests[hashKey(hash)] = req
 	return store.EnvKey{Key: req.Key, IsSecret: true, RevealPending: in.Generated, Generated: in.Generated}, nil
@@ -135,7 +121,7 @@ func (m *Mem) DeclineValueRequest(_ context.Context, hash []byte, userID uuid.UU
 		return err
 	}
 	done := at
-	req.State = store.ValueRequestDeclined
+	req.State = store.RequestDeclined
 	req.DoneAt = &done
 	m.valueRequests[hashKey(hash)] = req
 	return nil
@@ -178,18 +164,11 @@ func (m *Mem) liveRequestLocked(hash []byte) (store.ValueRequest, bool) {
 
 // openRequestLocked is a request of userID that is pending and unexpired.
 func (m *Mem) openRequestLocked(hash []byte, userID uuid.UUID, at time.Time) (store.ValueRequest, error) {
-	req, ok := m.liveRequestLocked(hash)
-	if !ok || req.UserID != userID {
-		return store.ValueRequest{}, store.ErrNotFound
+	req, found := m.valueRequests[hashKey(hash)]
+	if err := m.answerableLocked(req.RequestMeta, found, userID, at); err != nil {
+		return store.ValueRequest{}, err
 	}
-	switch req.StateAt(at) {
-	case store.ValueRequestPending:
-		return req, nil
-	case store.ValueRequestExpired:
-		return store.ValueRequest{}, store.ErrRequestExpired
-	default:
-		return store.ValueRequest{}, store.ErrRequestUsed
-	}
+	return req, nil
 }
 
 // keyOpenLocked returns the key's index in the set, -1 when absent. A key

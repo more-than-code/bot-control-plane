@@ -10,51 +10,18 @@ import (
 
 // Value requests (api-v1 v1.28): an agent asks for an env value, and the
 // user who asked fills it in the console. A request never holds a value.
-const (
-	// ValueRequestTTL is how long a value request can be filled.
-	ValueRequestTTL = 15 * time.Minute
-	// MaxOpenValueRequests is the most pending, unexpired requests one user may have.
-	MaxOpenValueRequests = 20
-)
+// Lifetime, limit, states and retention are the shared ones (requests.go);
+// the done state is RequestFilled.
 
-// Stored value request states. "expired" is ValueRequestExpired, computed
-// for a pending row whose expiry has passed; it is never stored.
-const (
-	ValueRequestPending  = "pending"
-	ValueRequestFilled   = "filled"
-	ValueRequestDeclined = "declined"
-	ValueRequestExpired  = "expired"
-)
+// ErrTooManyRequests is a create when the user already has MaxOpenRequests
+// open value requests.
+var ErrTooManyRequests = errors.New("too many open value requests; fill or wait for the ones you have")
 
-var (
-	// ErrRequestUsed is a fill or decline of a request that is filled or declined.
-	ErrRequestUsed = errors.New("this request was already used")
-	// ErrRequestExpired is a fill or decline of a pending request past its expiry.
-	ErrRequestExpired = errors.New("this request has expired; ask the agent for a new one")
-	// ErrTooManyRequests is a create when the user already has MaxOpenValueRequests open.
-	ErrTooManyRequests = errors.New("too many open value requests; fill or wait for the ones you have")
-)
-
-// ValueRequest is one stored request. The id is stored only as its SHA-256.
+// ValueRequest is one stored value request: the shared part and the set and key.
 type ValueRequest struct {
-	UserID    uuid.UUID
-	ProjectID uuid.UUID
-	Set       string
-	Key       string
-	Reason    string
-	State     string
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	DoneAt    *time.Time
-}
-
-// StateAt is the request state at a time: a pending request whose expiry
-// has passed is expired.
-func (v ValueRequest) StateAt(at time.Time) string {
-	if v.State == ValueRequestPending && !at.Before(v.ExpiresAt) {
-		return ValueRequestExpired
-	}
-	return v.State
+	RequestMeta
+	Set string
+	Key string
 }
 
 // ValueRequestStore is the persistence of value requests. Every method
@@ -65,7 +32,7 @@ type ValueRequestStore interface {
 	// needs_value placeholder (ErrKeyExists). A pending, unexpired request of
 	// in.UserID for the same project, set and key expires at in.CreatedAt
 	// (one open request per user and key). in.UserID must have fewer than
-	// MaxOpenValueRequests other pending requests unexpired at in.CreatedAt
+	// MaxOpenRequests other pending requests unexpired at in.CreatedAt
 	// (ErrTooManyRequests). It writes no env value.
 	CreateValueRequest(ctx context.Context, hash []byte, in ValueRequest) error
 	// GetValueRequest returns one request. An unknown hash is ErrNotFound.

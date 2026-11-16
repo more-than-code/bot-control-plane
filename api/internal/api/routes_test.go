@@ -118,6 +118,11 @@ func TestRouteTable(t *testing.T) {
 		"GET /v1/projects/{id}/files/{name}",
 		"PUT /v1/projects/{id}/files/{name}",
 		"DELETE /v1/projects/{id}/files/{name}",
+		"POST /v1/projects/{id}/file-requests",
+		"GET /v1/file-requests/{request_id}",
+		"GET /v1/file-requests/{request_id}/fill",
+		"POST /v1/file-requests/{request_id}/fill",
+		"POST /v1/file-requests/{request_id}/decline",
 		"GET /v1/projects/{id}/hosts",
 		"GET /v1/projects/{id}/services",
 		"GET /v1/hosts/{id}",
@@ -257,6 +262,10 @@ func callsAuthorize(body *ast.BlockStmt) bool {
 	ast.Inspect(body, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
 		if ok && (sel.Sel.Name == "Authorize" || sel.Sel.Name == "AuthorizeHost" || sel.Sel.Name == "AuthorizeAccessRemove" || sel.Sel.Name == "gateHost" || sel.Sel.Name == "orgGate" || sel.Sel.Name == "projectOrgAdmin" || sel.Sel.Name == "fileProject") {
+			found = true
+		}
+		// loadOwnRequest (requests.go) calls authz.Authorize for every request handler.
+		if id, ok := n.(*ast.Ident); ok && id.Name == "loadOwnRequest" {
 			found = true
 		}
 		return true

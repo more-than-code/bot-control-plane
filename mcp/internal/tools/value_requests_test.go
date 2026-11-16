@@ -198,7 +198,7 @@ func TestRequestEnvValueInputRequest(t *testing.T) {
 // reaches the API; a state for another key is refused after the read.
 func TestRequestEnvValueBadState(t *testing.T) {
 	cs, seen := vrSession(t, nil, createdReply)
-	for _, state := range []string{"not-base64!", encodeVRState(createdRequest{RequestID: vrID, URL: "https://evil.example/x"})} {
+	for _, state := range []string{"not-base64!", encodeRequestState(createdRequest{RequestID: vrID, URL: "https://evil.example/x"})} {
 		res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "request_env_value", Arguments: vrArgs, RequestState: state})
 		if err != nil {
 			t.Fatal(err)
@@ -211,7 +211,7 @@ func TestRequestEnvValueBadState(t *testing.T) {
 		t.Fatal("a forged state reached the API")
 	}
 	other := map[string]any{"project_id": vrProject, "set": "services", "key": "OTHER_KEY"}
-	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "request_env_value", Arguments: other, RequestState: encodeVRState(createdRequest{RequestID: vrID, URL: vrURL})})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "request_env_value", Arguments: other, RequestState: encodeRequestState(createdRequest{RequestID: vrID, URL: vrURL})})
 	if err != nil || !res.IsError {
 		t.Fatalf("other key %v %v", res, err)
 	}
@@ -308,7 +308,6 @@ func TestGetEnvValueRequest(t *testing.T) {
 
 // TestRequestSummaryPerState: the retry text reads right for every state (review item 10).
 func TestRequestSummaryPerState(t *testing.T) {
-	in := requestEnvValueArgs{Set: "services", Key: "K"}
 	created := createdRequest{RequestID: vrID, URL: vrURL, ExpiresAt: "2026-11-15T10:15:00Z"}
 	for state, want := range map[string]string{
 		"pending":  "is pending; it can be filled until 2026-11-15T10:15:00Z.",
@@ -316,7 +315,7 @@ func TestRequestSummaryPerState(t *testing.T) {
 		"declined": "was declined by the person.",
 		"expired":  "has expired without a value.",
 	} {
-		text := requestSummary(in, created, state, elicitDeclined)
+		text := valueRequestKind.summary(created, "services.K", state, elicitDeclined)
 		if !strings.Contains(text, want) || !strings.Contains(text, vrURL) || strings.Contains(text, "(open until") {
 			t.Errorf("%s: %s", state, text)
 		}
@@ -346,7 +345,7 @@ func TestRequestEnvValueRetryReadFails(t *testing.T) {
 		}
 		return createdReply(r)
 	})
-	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "request_env_value", Arguments: vrArgs, RequestState: encodeVRState(createdRequest{RequestID: vrID, URL: vrURL})})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "request_env_value", Arguments: vrArgs, RequestState: encodeRequestState(createdRequest{RequestID: vrID, URL: vrURL})})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -87,6 +87,8 @@ type Mem struct {
 	autoActions  map[uuid.UUID]struct{}
 	// valueRequests is keyed by hashKey(id hash); see value_requests.go.
 	valueRequests map[string]store.ValueRequest
+	// fileRequests is keyed by hashKey(id hash); see file_requests.go.
+	fileRequests map[string]store.FileRequest
 }
 
 type sessionRec struct {

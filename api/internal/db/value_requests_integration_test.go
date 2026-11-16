@@ -95,7 +95,7 @@ func TestValueRequestsMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, hash, _ := secret.NewToken()
-	if err := d.CreateValueRequest(ctx, hash, store.ValueRequest{UserID: owner.ID, ProjectID: home.ID, Set: "svc", Key: "NEW", CreatedAt: at, ExpiresAt: at.Add(store.ValueRequestTTL)}); err != nil {
+	if err := d.CreateValueRequest(ctx, hash, store.ValueRequest{RequestMeta: store.RequestMeta{UserID: owner.ID, ProjectID: home.ID, CreatedAt: at, ExpiresAt: at.Add(store.RequestTTL)}, Set: "svc", Key: "NEW"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.pool.Exec(ctx, `UPDATE app.env_value_requests SET state = 'expired' WHERE id_hash = $1`, hash); !checkViolation(err) {
@@ -228,8 +228,9 @@ func TestParityValueRequests(t *testing.T) {
 		create := func(user uuid.UUID, set, key string, at time.Time) ([]byte, error) {
 			_, hash, _ := secret.NewToken()
 			return hash, p.st.CreateValueRequest(p.ctx, hash, store.ValueRequest{
-				UserID: user, ProjectID: proj.ID, Set: set, Key: key, Reason: "why",
-				CreatedAt: at, ExpiresAt: at.Add(store.ValueRequestTTL),
+				RequestMeta: store.RequestMeta{UserID: user, ProjectID: proj.ID, Reason: "why", CreatedAt: at, ExpiresAt: at.Add(store.RequestTTL)},
+				Set:         set,
+				Key:         key,
 			})
 		}
 		mustCreate := func(key string) []byte {
@@ -261,7 +262,7 @@ func TestParityValueRequests(t *testing.T) {
 		}
 		h := mustCreate("PH")
 		got, err := p.st.GetValueRequest(p.ctx, h)
-		if err != nil || got.UserID != owner.ID || got.Key != "PH" || got.Reason != "why" || got.State != store.ValueRequestPending || got.DoneAt != nil {
+		if err != nil || got.UserID != owner.ID || got.Key != "PH" || got.Reason != "why" || got.State != store.RequestPending || got.DoneAt != nil {
 			t.Fatalf("get %#v %v", got, err)
 		}
 		if _, err := p.st.GetValueRequest(p.ctx, secret.Hash("unknown")); !errors.Is(err, store.ErrNotFound) {
@@ -294,7 +295,7 @@ func TestParityValueRequests(t *testing.T) {
 				}
 			}
 		}
-		if got, _ := p.st.GetValueRequest(p.ctx, h); got.State != store.ValueRequestFilled || got.DoneAt == nil {
+		if got, _ := p.st.GetValueRequest(p.ctx, h); got.State != store.RequestFilled || got.DoneAt == nil {
 			t.Fatalf("after fill %#v", got)
 		}
 		if _, err := p.st.FillValueRequest(p.ctx, h, owner.ID, p.at, put("PH", "again", false)); !errors.Is(err, store.ErrRequestUsed) {
@@ -318,7 +319,7 @@ func TestParityValueRequests(t *testing.T) {
 
 		// Expiry: at the expiry time the request is expired.
 		e := mustCreate("PH2")
-		late := p.at.Add(store.ValueRequestTTL)
+		late := p.at.Add(store.RequestTTL)
 		if _, err := p.st.FillValueRequest(p.ctx, e, owner.ID, late, put("PH2", "late", false)); !errors.Is(err, store.ErrRequestExpired) {
 			t.Fatalf("expired fill %v", err)
 		}
@@ -337,7 +338,7 @@ func TestParityValueRequests(t *testing.T) {
 		if _, err := p.st.FillValueRequest(p.ctx, m, owner.ID, p.at, put("MEANWHILE", "agent", false)); !errors.Is(err, store.ErrKeyExists) {
 			t.Fatalf("meanwhile %v", err)
 		}
-		if got, _ := p.st.GetValueRequest(p.ctx, m); got.State != store.ValueRequestPending {
+		if got, _ := p.st.GetValueRequest(p.ctx, m); got.State != store.RequestPending {
 			t.Fatalf("meanwhile state %s", got.State)
 		}
 
@@ -378,7 +379,7 @@ func TestParityValueRequests(t *testing.T) {
 		if err := p.st.DeclineValueRequest(p.ctx, dcl, owner.ID, p.at); err != nil {
 			t.Fatal(err)
 		}
-		if got, _ := p.st.GetValueRequest(p.ctx, dcl); got.State != store.ValueRequestDeclined || got.DoneAt == nil {
+		if got, _ := p.st.GetValueRequest(p.ctx, dcl); got.State != store.RequestDeclined || got.DoneAt == nil {
 			t.Fatalf("declined %#v", got)
 		}
 
@@ -389,44 +390,44 @@ func TestParityValueRequests(t *testing.T) {
 			t.Fatal(err)
 		}
 		var firstK []byte
-		for i := 0; i < store.MaxOpenValueRequests; i++ {
+		for i := 0; i < store.MaxOpenRequests; i++ {
 			_, hash, _ := secret.NewToken()
 			if i == 0 {
 				firstK = hash
 			}
-			if err := p.st.CreateValueRequest(p.ctx, hash, store.ValueRequest{UserID: limited.ID, ProjectID: lp.ID, Set: "svc", Key: fmt.Sprintf("K%d", i), CreatedAt: p.at, ExpiresAt: p.at.Add(store.ValueRequestTTL)}); err != nil {
+			if err := p.st.CreateValueRequest(p.ctx, hash, store.ValueRequest{RequestMeta: store.RequestMeta{UserID: limited.ID, ProjectID: lp.ID, CreatedAt: p.at, ExpiresAt: p.at.Add(store.RequestTTL)}, Set: "svc", Key: fmt.Sprintf("K%d", i)}); err != nil {
 				t.Fatal(err)
 			}
 		}
 		_, hash, _ := secret.NewToken()
-		over := store.ValueRequest{UserID: limited.ID, ProjectID: lp.ID, Set: "svc", Key: "K", CreatedAt: p.at, ExpiresAt: p.at.Add(store.ValueRequestTTL)}
+		over := store.ValueRequest{RequestMeta: store.RequestMeta{UserID: limited.ID, ProjectID: lp.ID, CreatedAt: p.at, ExpiresAt: p.at.Add(store.RequestTTL)}, Set: "svc", Key: "K"}
 		if err := p.st.CreateValueRequest(p.ctx, hash, over); !errors.Is(err, store.ErrTooManyRequests) {
 			t.Fatalf("limit %v", err)
 		}
 		// The refused create changed nothing; a create for an open key
 		// replaces it (one per user and key) and is not counted (rev 3).
-		if got, _ := p.st.GetValueRequest(p.ctx, firstK); got.StateAt(p.at) != store.ValueRequestPending {
+		if got, _ := p.st.GetValueRequest(p.ctx, firstK); got.StateAt(p.at) != store.RequestPending {
 			t.Fatalf("refused create expired K0: %s", got.StateAt(p.at))
 		}
 		_, again, _ := secret.NewToken()
-		if err := p.st.CreateValueRequest(p.ctx, again, store.ValueRequest{UserID: limited.ID, ProjectID: lp.ID, Set: "svc", Key: "K0", CreatedAt: p.at, ExpiresAt: p.at.Add(store.ValueRequestTTL)}); err != nil {
+		if err := p.st.CreateValueRequest(p.ctx, again, store.ValueRequest{RequestMeta: store.RequestMeta{UserID: limited.ID, ProjectID: lp.ID, CreatedAt: p.at, ExpiresAt: p.at.Add(store.RequestTTL)}, Set: "svc", Key: "K0"}); err != nil {
 			t.Fatalf("replace at limit %v", err)
 		}
-		if got, _ := p.st.GetValueRequest(p.ctx, firstK); got.StateAt(p.at) != store.ValueRequestExpired {
+		if got, _ := p.st.GetValueRequest(p.ctx, firstK); got.StateAt(p.at) != store.RequestExpired {
 			t.Fatalf("K0 not replaced: %s", got.StateAt(p.at))
 		}
 		if _, err := p.st.FillValueRequest(p.ctx, firstK, limited.ID, p.at, store.EnvKeyPut{Key: "K0"}); !errors.Is(err, store.ErrRequestExpired) {
 			t.Fatalf("replaced fill %v", err)
 		}
-		over.CreatedAt, over.ExpiresAt = late, late.Add(store.ValueRequestTTL)
+		over.CreatedAt, over.ExpiresAt = late, late.Add(store.RequestTTL)
 		if err := p.st.CreateValueRequest(p.ctx, hash, over); err != nil {
 			t.Fatalf("after expiry %v", err)
 		}
 
 		// Rows 7 days past expiry are removed by the next create.
-		week := p.at.Add(2*store.ValueRequestTTL + 7*24*time.Hour + time.Minute)
+		week := p.at.Add(2*store.RequestTTL + 7*24*time.Hour + time.Minute)
 		_, fresh, _ := secret.NewToken()
-		if err := p.st.CreateValueRequest(p.ctx, fresh, store.ValueRequest{UserID: limited.ID, ProjectID: lp.ID, Set: "svc", Key: "K", CreatedAt: week, ExpiresAt: week.Add(store.ValueRequestTTL)}); err != nil {
+		if err := p.st.CreateValueRequest(p.ctx, fresh, store.ValueRequest{RequestMeta: store.RequestMeta{UserID: limited.ID, ProjectID: lp.ID, CreatedAt: week, ExpiresAt: week.Add(store.RequestTTL)}, Set: "svc", Key: "K"}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := p.st.GetValueRequest(p.ctx, hash); !errors.Is(err, store.ErrNotFound) {
@@ -440,7 +441,7 @@ func TestParityValueRequests(t *testing.T) {
 		}
 		for i := 0; i < 5; i++ {
 			_, rh, _ := secret.NewToken()
-			if err := p.st.CreateValueRequest(p.ctx, rh, store.ValueRequest{UserID: limited.ID, ProjectID: lp.ID, Set: "race", Key: "R", CreatedAt: week, ExpiresAt: week.Add(store.ValueRequestTTL)}); err != nil {
+			if err := p.st.CreateValueRequest(p.ctx, rh, store.ValueRequest{RequestMeta: store.RequestMeta{UserID: limited.ID, ProjectID: lp.ID, CreatedAt: week, ExpiresAt: week.Add(store.RequestTTL)}, Set: "race", Key: "R"}); err != nil {
 				t.Fatal(err)
 			}
 			nonce, ciphertext, err := box.Seal(seal.EnvAAD(lp.ID.String(), "race", "R"), []byte("r"))
@@ -537,14 +538,14 @@ func TestValueRequestsAsAPIRole(t *testing.T) {
 	create := func(key string, when time.Time) []byte {
 		t.Helper()
 		_, hash, _ := secret.NewToken()
-		if err := api.CreateValueRequest(ctx, hash, store.ValueRequest{UserID: owner.ID, ProjectID: home.ID, Set: "svc", Key: key, CreatedAt: when, ExpiresAt: when.Add(store.ValueRequestTTL)}); err != nil {
+		if err := api.CreateValueRequest(ctx, hash, store.ValueRequest{RequestMeta: store.RequestMeta{UserID: owner.ID, ProjectID: home.ID, CreatedAt: when, ExpiresAt: when.Add(store.RequestTTL)}, Set: "svc", Key: key}); err != nil {
 			t.Fatalf("create %s as deploybot_api: %v", key, err)
 		}
 		return hash
 	}
 	first := create("TOKEN", at)
 	second := create("TOKEN", at) // replaces first: UPDATE expires_at
-	if got, _ := api.GetValueRequest(ctx, first); got.StateAt(at) != store.ValueRequestExpired {
+	if got, _ := api.GetValueRequest(ctx, first); got.StateAt(at) != store.RequestExpired {
 		t.Fatalf("first not replaced: %s", got.StateAt(at))
 	}
 	nonce, ciphertext, err := box.Seal(seal.EnvAAD(home.ID.String(), "svc", "TOKEN"), []byte("v"))
@@ -559,7 +560,7 @@ func TestValueRequestsAsAPIRole(t *testing.T) {
 		t.Fatalf("decline as deploybot_api: %v", err)
 	}
 	// The prune of rows 7 days past expiry (DELETE ... FOR UPDATE SKIP LOCKED).
-	later := at.Add(2*store.ValueRequestTTL + 7*24*time.Hour + time.Minute)
+	later := at.Add(2*store.RequestTTL + 7*24*time.Hour + time.Minute)
 	create("LATER", later)
 	if _, err := api.GetValueRequest(ctx, first); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("old row kept as deploybot_api: %v", err)
