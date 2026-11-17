@@ -202,12 +202,13 @@ func TestCloudflareRanges(t *testing.T) {
 }
 
 // Hashes of the daikou routes (the same bytes as testdata/daikou.json,
-// compacted). They changed once, before any release, when "terminal" was
-// dropped and the Cloudflare branch gained its header matcher (review 11);
+// compacted). They changed before any release: when "terminal" was
+// dropped and the Cloudflare branch gained its header matcher (review 11),
+// and again when every proxy gained stream_close_delay (spec rev 3 §11);
 // a change here re-applies every edge.
 const (
-	daikouHash        = "d10d8d0ec59908b3f747d90289f61f7ffd399c5d00267d716080c69197ffc0d3"
-	daikouNoEmailHash = "fa2eb88b8822c63954f2c1802abf7a2673a91af3d7b67cd0fb86418b658313d9"
+	daikouHash        = "a3a8e3c048dac2c534b8e046644655491f8a2449a13c1820a036df668af1d20a"
+	daikouNoEmailHash = "e0e360ecd23bb01e9834b30723ba507ed2a83df872db4052351e749105f7fb61"
 )
 
 // TestBuildAllowlist walks the config and fails on any key outside the
@@ -267,7 +268,11 @@ func TestBuildAllowlist(t *testing.T) {
 					case "encode":
 						keys(handler, "handler", "encodings", "prefer")
 					case "reverse_proxy":
-						keys(handler, "handler", "upstreams", "headers")
+						keys(handler, "handler", "upstreams", "headers", "stream_close_delay")
+						// Every proxy keeps WebSockets across reloads (spec rev 3 §11).
+						if handler["stream_close_delay"] != "1h" {
+							t.Fatalf("stream_close_delay %v", handler["stream_close_delay"])
+						}
 						up := handler["upstreams"].([]any)
 						dial := up[0].(map[string]any)["dial"].(string)
 						if len(up) != 1 || !strings.HasPrefix(dial, "127.0.0.1:") {

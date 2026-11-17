@@ -185,12 +185,18 @@ func hostRoute(r Route) map[string]any {
 	}
 }
 
+// streamCloseDelay keeps WebSockets of the old config open for up to an hour
+// after a reload; without it Caddy closes them (1001) on every config change
+// (spec-domains-edge-routes rev 3 §11). The agent accepts only this value.
+const streamCloseDelay = "1h"
+
 // proxy is reverse_proxy to dial. Caddy proxies WebSockets and sets
 // X-Forwarded-For, -Proto and -Host itself.
 func proxy(dial string, requestHeaders map[string]any) map[string]any {
 	h := map[string]any{
-		"handler":   "reverse_proxy",
-		"upstreams": []any{map[string]any{"dial": dial}},
+		"handler":            "reverse_proxy",
+		"upstreams":          []any{map[string]any{"dial": dial}},
+		"stream_close_delay": streamCloseDelay,
 	}
 	if requestHeaders != nil {
 		h["headers"] = map[string]any{"request": requestHeaders}
