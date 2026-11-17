@@ -45,6 +45,7 @@
 		tagLookupMessage,
 		tagQuery,
 		tagAnnouncement,
+		tagsCut,
 		taggedRef,
 		type ImageDigestResult,
 		type ImageTagsResult
@@ -306,9 +307,12 @@
 		void tagVersion;
 		return lookup.pinLine(draft.image);
 	});
-	const tagOptions = $derived(tagLookup?.state === 'ready' ? filterTags(tagLookup.tags, tagQuery(draft.image)) : { shown: [], more: 0 });
+	const tagFilter = $derived(tagQuery(draft.image));
+	const tagOptions = $derived(tagLookup?.state === 'ready' ? filterTags(tagLookup.tags, tagFilter) : { shown: [], more: 0 });
 	const tagsMessage = $derived(tagLookupMessage(tagLookup));
-	const tagStatus = $derived(tagAnnouncement(tagLookup, pinLine, tagOptions.more > 0 ? tagOptions.shown.length : undefined));
+	const tagStatus = $derived(
+		tagAnnouncement(tagLookup, pinLine, tagOptions.more > 0 ? tagOptions.shown.length : undefined, tagFilter === '' ? undefined : tagOptions.shown.length + tagOptions.more)
+	);
 	const hasTagList = $derived(tagOptions.shown.length > 0);
 	const settingsHref = $derived(`${page.url.pathname}?tab=settings#registries`);
 
@@ -463,7 +467,7 @@
 			<p class="text-muted-foreground text-sm" aria-hidden="true">{TAGS_LOADING}</p>
 		{/if}
 		<div class="sr-only" role="status" aria-live="polite">{tagStatus}</div>
-		<ImageTagNotes {fieldId} message={tagsMessage} authFailed={tagLookup?.state === 'auth_failed'} {settingsHref} {pinLine} />
+		<ImageTagNotes {fieldId} message={tagsMessage} cut={tagsCut(tagLookup)} authFailed={tagLookup?.state === 'auth_failed'} {settingsHref} {pinLine} />
 		{#if accessShown}
 			<ImageAccessLine
 				id={accessId}

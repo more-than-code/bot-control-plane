@@ -29,7 +29,7 @@
 <section id="edge" class="mt-8 grid min-w-0 gap-3" aria-labelledby="edge-heading">
 	<h2 id="edge-heading" class="text-lg font-semibold tracking-tight">Edge</h2>
 	<p class="text-muted-foreground text-sm">
-		The edge serves this host's public addresses on ports 80 and 443 and gets their certificates by itself. The host must be reachable on 80 and 443 from the internet.
+		The edge serves this host's public addresses on ports 80 and 443 and gets their certificates by itself. Certificates come from Let's Encrypt, so ports 80 and 443 must reach this host from the internet, directly or through a proxy such as Cloudflare.
 	</p>
 	{#if actionMessage}
 		<!-- A refused Turn off closes its confirm and focuses this (failureFocusId). -->

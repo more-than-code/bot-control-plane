@@ -419,3 +419,30 @@ func TestEnvKeysSecretSealFailure(t *testing.T) {
 		t.Fatalf("seal failure wrote %d key_secret rows", n)
 	}
 }
+
+// TestEnvKeysSecretEmptyValue is spec-release-v0239 F6: making a plain key
+// whose value is empty secret is refused naming the key, nothing changes and
+// no audit row is written. A needs_value placeholder may still be made secret
+// (it stays a placeholder, v1.27 item 2).
+func TestEnvKeysSecretEmptyValue(t *testing.T) {
+	w := newWorld(t)
+	w.srv.Secrets = testBox(t)
+	owner := w.user("owner@ex.com", "Owner")
+	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
+	tok := w.token(owner.ID)
+	project := sc.project.ID.String()
+	putEnvFlag(t, w, tok, project, "svc", "EMPTY=\nFULL="+plainLong+"\n", false)
+
+	status, env, _ := markSecret(t, w, tok, project, "svc", "FULL", "EMPTY")
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "a secret value cannot be empty; give EMPTY a value first")
+	status, env, _ = mustCall(t, w, tok, http.MethodGet, envPath(project, "svc"), "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	got := keysByName(t, env)
+	assertPlainKey(t, got["EMPTY"], "")
+	assertPlainKey(t, got["FULL"], plainLong)
+	for _, row := range auditRows(t, w, sc.project.ID) {
+		if row.Action == audit.ActionEnvSetKeySecret {
+			t.Fatalf("refused change wrote audit %+v", row)
+		}
+	}
+}

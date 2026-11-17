@@ -261,6 +261,18 @@ SELECT token_hash, body::text FROM app.catalog_write_confirmations WHERE entry_n
 	if kept, err := d.GetCatalogWriteConfirmation(ctx, expHash); err != nil || kept.UsedAt != nil {
 		t.Fatal("expired commit removed the plan")
 	}
+	// A row expired more than store.RequestKeep ago (spec-release-v0239 F4).
+	_, oldHash, err := secret.NewToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PutCatalogWriteConfirmation(ctx, oldHash, store.CatalogWriteConfirmation{
+		UserID: owner.ID, ProjectID: project.ID, Action: "create", EntryName: "stale",
+		Body: expWrite.ImageRaw, RequestHash: bytes.Repeat([]byte{6}, 32), IdempotencyKey: "cw-stale",
+		CreatedAt: at, ExpiresAt: at.Add(-store.RequestKeep - time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	_, freshHash, err := secret.NewToken()
 	if err != nil {
 		t.Fatal(err)
@@ -273,8 +285,12 @@ SELECT token_hash, body::text FROM app.catalog_write_confirmations WHERE entry_n
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.GetCatalogWriteConfirmation(ctx, expHash); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("new plan kept an expired row %v", err)
+	// A new plan keeps the recently expired row and drops the stale one.
+	if _, err := d.GetCatalogWriteConfirmation(ctx, expHash); err != nil {
+		t.Fatalf("new plan dropped a recently expired row %v", err)
+	}
+	if _, err := d.GetCatalogWriteConfirmation(ctx, oldHash); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("new plan kept a stale row %v", err)
 	}
 	if _, err := d.GetCatalogWriteConfirmation(ctx, freshHash); err != nil {
 		t.Fatalf("new plan %v", err)

@@ -167,6 +167,20 @@ func (e *MissingEnvKeyError) Error() string { return "key " + e.Key + " not foun
 
 func (e *MissingEnvKeyError) Is(target error) bool { return target == ErrNotFound }
 
+// EmptySecretKeyError is a MakeEnvKeysSecret key whose plain value is empty
+// and that is not a needs_value placeholder (spec-release-v0239 F6): it
+// would become an empty secret, so nothing changes. It matches
+// ErrSecretEmpty. The message names the key.
+type EmptySecretKeyError struct {
+	Key string
+}
+
+func (e *EmptySecretKeyError) Error() string {
+	return "a secret value cannot be empty; give " + e.Key + " a value first"
+}
+
+func (e *EmptySecretKeyError) Is(target error) bool { return target == ErrSecretEmpty }
+
 // EnvMaterial is a stored env value, including ciphertext. It is not returned over HTTP.
 // Generated is the v1.27 generated flag (see EnvKey).
 type EnvMaterial struct {

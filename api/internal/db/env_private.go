@@ -191,7 +191,7 @@ SELECT EXISTS (
 func applyEnvKeyChanges(ctx context.Context, tx pgx.Tx, projectID uuid.UUID, name string, ch store.EnvSetChange, seal store.EnvSealer) error {
 	pid := projectID.String()
 	rows, err := tx.Query(ctx, `
-SELECT key, is_secret, COALESCE(value, '') FROM app.env_values
+SELECT key, is_secret, COALESCE(value, ''), needs_value FROM app.env_values
 WHERE project_id = $1::uuid AND set_name = $2
 FOR UPDATE
 `, pid, name)
@@ -199,18 +199,19 @@ FOR UPDATE
 		return mapErr(err)
 	}
 	type row struct {
-		secret bool
-		value  string
+		secret     bool
+		value      string
+		needsValue bool
 	}
 	have := map[string]row{}
 	for rows.Next() {
 		var key, value string
-		var secret bool
-		if err := rows.Scan(&key, &secret, &value); err != nil {
+		var secret, needsValue bool
+		if err := rows.Scan(&key, &secret, &value, &needsValue); err != nil {
 			rows.Close()
 			return mapErr(err)
 		}
-		have[key] = row{secret: secret, value: value}
+		have[key] = row{secret: secret, value: value, needsValue: needsValue}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -229,6 +230,13 @@ FOR UPDATE
 	for _, key := range append(append([]string{}, ch.Remove...), ch.MakeSecret...) {
 		if _, ok := have[key]; !ok {
 			return store.ErrConflict
+		}
+	}
+	// make_secret never seals an empty value; a needs_value placeholder may
+	// still become a secret placeholder (spec-release-v0239 F6).
+	for _, key := range ch.MakeSecret {
+		if r := have[key]; !r.secret && !r.needsValue && r.value == "" {
+			return &store.EmptySecretKeyError{Key: key}
 		}
 	}
 	setKeys := make([]string, 0, len(ch.Set))

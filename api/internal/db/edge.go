@@ -704,7 +704,8 @@ func (d *DB) PutEdgeConfirmation(ctx context.Context, hash []byte, c store.EdgeC
 		return mapErr(err)
 	}
 	defer tx.Rollback(ctx)
-	if err := exec(ctx, tx, `DELETE FROM app.edge_confirmations WHERE expires_at < $1`, c.CreatedAt); err != nil {
+	// Rows expired more than store.RequestKeep ago go (spec-release-v0239 F4).
+	if err := exec(ctx, tx, `DELETE FROM app.edge_confirmations WHERE expires_at < $1`, c.CreatedAt.Add(-store.RequestKeep)); err != nil {
 		return mapErr(err)
 	}
 	if err := exec(ctx, tx, `

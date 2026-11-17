@@ -35,6 +35,9 @@ const (
 	msgEdgeOffline     = "the host is offline; the edge config is sent when it reconnects"
 	msgEdgeStopOffline = "the host is offline; the edge stops when it reconnects"
 	msgEdgeOutsider    = "a process outside Deploybot"
+	// A stopped container keeps its service row and drops the port at the
+	// host's next report (spec-release-v0239 F3).
+	msgEdgeOccupantNext = "stop it, wait until the host no longer reports that port (up to a minute), then try again"
 )
 
 // Names that collide with the edge's container (deploybot-edge) and volume
@@ -605,7 +608,7 @@ func (s *Server) edgeOccupant(ctx context.Context, host store.Host) (string, err
 					holder = fmt.Sprintf("%s (project %s)", *svc.CatalogEntry, project.Name)
 				}
 			}
-			return fmt.Sprintf("port %d is used by %s", port, holder), nil
+			return fmt.Sprintf("port %d is used by %s; %s", port, holder, msgEdgeOccupantNext), nil
 		}
 	}
 	return "", nil

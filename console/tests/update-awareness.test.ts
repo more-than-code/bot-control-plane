@@ -248,6 +248,17 @@ describe('agent update hint (api-v1 v1.34)', () => {
 		assert.equal(missing.includes('Update available'), false);
 	});
 
+	test('a revoked host the API marks update_available false shows no Update available', () => {
+		const revoked = parseHost({ ...raw, status: 'revoked', revoked_at: '2026-11-10T00:00:00Z', latest_agent_version: '0.2.10', update_available: false });
+		assert.equal(revoked?.status, 'revoked');
+		assert.equal(revoked?.latest_agent_version, '0.2.10');
+		assert.equal(revoked?.update_available, false);
+		const html = render(AgentVersion, { props: { host: revoked! } }).body;
+		assert.equal(html.includes('Update available'), false);
+		assert.equal(html.includes('data-agent-update'), false);
+		assert.equal(html.includes('0.2.9'), true);
+	});
+
 	test('all three host views use AgentVersion beside the agent version', () => {
 		for (const file of ['src/routes/projects/[id]/HostsSection.svelte', 'src/routes/orgs/[id]/OrgHostsSection.svelte', 'src/routes/hosts/[id]/OverviewTab.svelte']) {
 			const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');

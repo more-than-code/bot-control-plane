@@ -87,13 +87,22 @@ func TestCatalogWriteCommitCreate(t *testing.T) {
 	if kept, err := m.GetCatalogWriteConfirmation(ctx, expiredHash); err != nil || kept.UsedAt != nil {
 		t.Fatal("expired commit removed the plan")
 	}
+	stale := row
+	stale.IdempotencyKey = "cw-stale"
+	stale.ExpiresAt = at.Add(-store.RequestKeep - time.Second)
+	staleHash, _ := putCatalogWrite(t, m, stale)
 	fresh := row
 	fresh.IdempotencyKey = "cw-fresh"
 	fresh.CreatedAt = at
 	fresh.ExpiresAt = at.Add(time.Minute)
 	freshHash, _ := putCatalogWrite(t, m, fresh)
-	if _, err := m.GetCatalogWriteConfirmation(ctx, expiredHash); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("new plan kept an expired row %v", err)
+	// A new plan keeps a recently expired row (its confirm still answers
+	// expired) and drops one expired more than RequestKeep ago.
+	if _, err := m.GetCatalogWriteConfirmation(ctx, expiredHash); err != nil {
+		t.Fatalf("new plan dropped a recently expired row %v", err)
+	}
+	if _, err := m.GetCatalogWriteConfirmation(ctx, staleHash); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("new plan kept a stale row %v", err)
 	}
 	if _, err := m.GetCatalogWriteConfirmation(ctx, freshHash); err != nil {
 		t.Fatalf("new plan %v", err)

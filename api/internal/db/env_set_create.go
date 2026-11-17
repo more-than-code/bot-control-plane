@@ -19,10 +19,11 @@ func (d *DB) PutEnvSetConfirmation(ctx context.Context, hash []byte, c store.Env
 		return mapErr(err)
 	}
 	defer tx.Rollback(ctx)
-	// A new plan drops rows that are already past their TTL.
+	// A new plan drops rows that expired more than store.RequestKeep ago
+	// (spec-release-v0239 F4).
 	if err := exec(ctx, tx, `
 DELETE FROM app.env_set_confirmations WHERE expires_at < $1
-`, c.CreatedAt); err != nil {
+`, c.CreatedAt.Add(-store.RequestKeep)); err != nil {
 		return mapErr(err)
 	}
 	if err := exec(ctx, tx, `

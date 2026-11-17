@@ -657,6 +657,12 @@ func (m *Mem) MakeEnvKeysSecret(_ context.Context, projectID uuid.UUID, name str
 			return store.EnvSet{}, nil, &store.MissingEnvKeyError{Key: key}
 		}
 	}
+	for _, key := range keys {
+		v := values[index[key]]
+		if !v.IsSecret && v.Plain == "" && !v.NeedsValue {
+			return store.EnvSet{}, nil, &store.EmptySecretKeyError{Key: key}
+		}
+	}
 	changed := []string{}
 	for _, key := range keys {
 		i := index[key]

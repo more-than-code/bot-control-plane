@@ -1,12 +1,13 @@
 <script lang="ts">
-	import { imageNoteIds } from '$lib/image-tags';
+	import { TAGS_CUT_NOTE, imageNoteIds } from '$lib/image-tags';
 
 	let {
 		fieldId,
 		message = null,
 		authFailed = false,
 		settingsHref,
-		pinLine = null
+		pinLine = null,
+		cut = false
 	}: {
 		fieldId: string;
 		/** Why no tags are listed. Never blocks saving. */
@@ -16,6 +17,8 @@
 		settingsHref: string;
 		/** "Pinned to sha256:…" or the pin failure line. */
 		pinLine?: string | null;
+		/** The API cut the tag list (`truncated`): adds the cut note. */
+		cut?: boolean;
 	} = $props();
 
 	const ids = $derived(imageNoteIds(fieldId));
@@ -29,6 +32,9 @@
 			<a class="text-foreground underline underline-offset-3" href={settingsHref} rel="noopener noreferrer" target="_blank">Settings → Registries<span class="sr-only">{' (opens in a new tab)'}</span></a>
 		{/if}
 	</p>
+{/if}
+{#if cut}
+	<p class="text-muted-foreground text-sm break-words" data-tags-cut>{TAGS_CUT_NOTE}</p>
 {/if}
 {#if pinLine}
 	<p id={ids.pin} class="text-muted-foreground text-sm break-all">{pinLine}</p>

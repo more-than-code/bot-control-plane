@@ -168,6 +168,23 @@ describe('Make secret row action (api-v1 v1.17)', () => {
 		assert.equal(html.includes('env set key not found: GONE'), true);
 	});
 
+	test('an empty-value refusal from the API reaches the Settings notice word for word (spec-release-v0239 F6)', async () => {
+		const text = 'a secret value cannot be empty; give EMPTY a value first';
+		installFetch(() => envelope(null, 400, 'bad_request', text));
+		const result = await projectActions.makeEnvKeysSecret(fakeEvent({ ...base, url, form: { set: 'app', keys: 'EMPTY' } }).event as never);
+		assert.equal(isActionFailure(result), true);
+		if (!isActionFailure(result)) return;
+		assert.equal(result.status, 400);
+		const data = result.data as unknown as { scope?: string; message?: string };
+		assert.equal(data.scope, 'settings');
+		assert.equal(data.message, text);
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(SettingsSection, {
+			props: { project: PROJECT, canOwner: false, canAdmin: true, message: data.message ?? null, envSets: [SET], registries: [] }
+		}).body;
+		assert.match(html, /<div id="settings-error" tabindex="-1"[^>]*>[\s\S]*a secret value cannot be empty; give EMPTY a value first/);
+	});
+
 	test('a failure focuses the notice on close, or at once when the dialog was already closed', () => {
 		const id = 'settings-error';
 		assert.equal(failureFocusTiming(true, true, id, 'failure'), 'on-close');

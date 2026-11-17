@@ -16,11 +16,12 @@ func (d *DB) PutCatalogWriteConfirmation(ctx context.Context, hash []byte, c sto
 		return mapErr(err)
 	}
 	defer tx.Rollback(ctx)
-	// A new plan drops rows that are already past their TTL. The body is
-	// the image spec, so it should not sit after expiry.
+	// A new plan drops rows that expired more than store.RequestKeep ago.
+	// A recently expired row stays, so confirming it still answers the
+	// expired conflict rather than not_found (spec-release-v0239 F4).
 	if err := exec(ctx, tx, `
 DELETE FROM app.catalog_write_confirmations WHERE expires_at < $1
-`, c.CreatedAt); err != nil {
+`, c.CreatedAt.Add(-store.RequestKeep)); err != nil {
 		return mapErr(err)
 	}
 	if err := exec(ctx, tx, `

@@ -1575,7 +1575,7 @@ describe('catalog images', { concurrency: false }, () => {
 			fakeEvent({ ...base, url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogCreate`, form }).event as never
 		);
 		assert.equal((refused as { status: number }).status, 409);
-		assert.equal(actionData(refused).imageEditor?.message, 'An image entry named web already exists in this project.');
+		assert.equal(actionData(refused).imageEditor?.message, 'An entry named web already exists in this project.');
 		assert.equal(calls.filter((call) => call.method === 'POST').length, 1);
 
 		// Edit keeps the entry's name (it is in the path), so another refusal keeps the API's message.

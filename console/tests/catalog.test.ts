@@ -979,7 +979,7 @@ describe('catalog', { concurrency: false }, () => {
 		);
 		assert.equal(isActionFailure(refused), true);
 		assert.equal((refused as { status: number }).status, 409);
-		assert.equal(editorOf(refused)?.message, 'A program named web already exists in this project.');
+		assert.equal(editorOf(refused)?.message, 'An entry named web already exists in this project.');
 		assert.equal(editorOf(refused)?.mode, 'create');
 		assert.equal(calls.filter((call) => call.method === 'POST').length, 1);
 

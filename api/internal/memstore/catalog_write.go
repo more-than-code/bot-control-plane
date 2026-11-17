@@ -19,7 +19,7 @@ func (m *Mem) PutCatalogWriteConfirmation(_ context.Context, hash []byte, c stor
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key, rec := range m.catalogWriteConfirmations {
-		if rec.row.ExpiresAt.Before(c.CreatedAt) {
+		if rec.row.ExpiresAt.Before(c.CreatedAt.Add(-store.RequestKeep)) {
 			delete(m.catalogWriteConfirmations, key)
 		}
 	}

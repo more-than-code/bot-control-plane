@@ -27,6 +27,17 @@ export const TAG_MESSAGES: Record<Exclude<TagLookupError, 'unsupported'>, string
 
 export const PIN_FAILED = 'Could not pin a digest; the tag will be used.';
 export const TAGS_LOADING = 'Loading tags…';
+/**
+ * Shown when the API marks the tag list `truncated`: it read at most 500 tags from the registry
+ * (`maxRawTags` in api/internal/registry/client.go) or kept only the first 200 after sorting
+ * (`registry.Order`). The console cannot tell which, so the note only says the list is not complete.
+ */
+export const TAGS_CUT_NOTE = 'This image has more tags than this list shows. Type the tag you want.';
+
+/** True when the API said the tag list was cut. */
+export function tagsCut(lookup: TagLookup | undefined): boolean {
+	return lookup?.state === 'ready' && lookup.truncated;
+}
 
 /** The value without its `@digest` and `:tag`. */
 function splitRef(value: string): { repo: string; tag: string | null; digest: string | null } {
@@ -118,14 +129,19 @@ export function tagCountLabel(count: number): string {
 	return count === 1 ? '1 tag' : `${count} tags`;
 }
 
-/** Text for the polite live region: the pin line when there is one, else the lookup state. Empty when there is nothing to say. `shown` is the number of options listed. */
-export function tagAnnouncement(lookup: TagLookup | undefined, pinLine: string | null, shown?: number): string {
+/**
+ * Text for the polite live region: the pin line when there is one, else the lookup state. Empty when there is nothing to say.
+ * `shown` is the number of options listed; `matched` is how many tags the typed filter matched, passed only while a filter is typed.
+ */
+export function tagAnnouncement(lookup: TagLookup | undefined, pinLine: string | null, shown?: number, matched?: number): string {
 	if (pinLine) return pinLine;
 	if (lookup?.state === 'loading') return TAGS_LOADING;
 	if (lookup?.state === 'ready') {
-		const total = tagCountLabel(lookup.tags.length);
+		const count = matched == null ? tagCountLabel(lookup.tags.length) : `${matched} of ${tagCountLabel(lookup.tags.length)}`;
+		const of = matched ?? lookup.tags.length;
 		// `shown` is passed only when the list is capped at 50.
-		return shown != null && shown < lookup.tags.length ? `${total}, ${shown} shown; type to filter` : total;
+		// A cut list's note is shown on screen (ImageTagNotes), so it is not announced here as well.
+		return shown != null && shown < of ? `${count}, ${shown} shown; type to filter` : count;
 	}
 	return tagLookupMessage(lookup) ?? '';
 }

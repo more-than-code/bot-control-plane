@@ -622,13 +622,14 @@ type hostView struct {
 }
 
 // withUpdateHint adds latest_agent_version (null when unset) and
-// update_available (the host's agent_version is a lower X.Y.Z).
+// update_available (the host's agent_version is a lower X.Y.Z; always
+// false for a revoked host).
 func (s *Server) withUpdateHint(h store.Host) hostView {
 	v := hostView{Host: h}
 	if s.LatestAgentVersion != "" {
 		latest := s.LatestAgentVersion
 		v.LatestAgentVersion = &latest
-		v.UpdateAvailable = agentversion.Older(h.AgentVersion, latest)
+		v.UpdateAvailable = h.RevokedAt == nil && agentversion.Older(h.AgentVersion, latest)
 	}
 	return v
 }

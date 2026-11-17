@@ -5,6 +5,7 @@ import { render } from 'svelte/server';
 import {
 	PIN_FAILED,
 	TAG_MESSAGES,
+	TAGS_CUT_NOTE,
 	filterTags,
 	imageDescribedBy,
 	imageRepository,
@@ -17,7 +18,8 @@ import {
 	tagAnnouncement,
 	tagLookupMessage,
 	tagQuery,
-	taggedRef
+	taggedRef,
+	tagsCut
 } from '../src/lib/image-tags.ts';
 import { comboboxKeyAction } from '../src/lib/components/ui/combobox/keys.ts';
 import { ImageTagLookup } from '../src/lib/image-tag-lookup.ts';
@@ -567,6 +569,35 @@ describe('ImageTagLookup', () => {
 		assert.equal(tagAnnouncement(many, null), '83 tags');
 		assert.equal(tagAnnouncement(many, null, 50), '83 tags, 50 shown; type to filter');
 		assert.equal(tagAnnouncement({ state: 'ready', tags: ['a', 'b'], truncated: false }, null, 2), '2 tags');
+	});
+
+	test('while a filter is typed the count is the matches of the total (spec-release-v0239 F7)', () => {
+		const many = { state: 'ready' as const, tags: Array.from({ length: 83 }, (_, index) => `t${index}`), truncated: false };
+		const typed = filterTags(many.tags, 't1');
+		const matched = typed.shown.length + typed.more;
+		assert.equal(matched, 11);
+		assert.equal(tagAnnouncement(many, null, undefined, matched), '11 of 83 tags');
+		assert.equal(tagAnnouncement(many, null, undefined, 0), '0 of 83 tags');
+		// More matches than options: the shown count still follows.
+		assert.equal(tagAnnouncement(many, null, 50, 60), '60 of 83 tags, 50 shown; type to filter');
+		// No filter: the total alone, as before.
+		assert.equal(tagAnnouncement(many, null, 50), '83 tags, 50 shown; type to filter');
+	});
+
+	test('a cut tag list shows the note on screen, not twice in the announcement (spec-release-v0239 F7)', () => {
+		const cut = { state: 'ready' as const, tags: ['v2', 'v1'], truncated: true };
+		assert.equal(TAGS_CUT_NOTE, 'This image has more tags than this list shows. Type the tag you want.');
+		assert.equal(tagsCut(cut), true);
+		assert.equal(tagsCut({ ...cut, truncated: false }), false);
+		assert.equal(tagsCut({ state: 'loading' }), false);
+		assert.equal(tagsCut(undefined), false);
+		assert.equal(tagAnnouncement(cut, null), '2 tags');
+		assert.equal(tagAnnouncement(cut, null, undefined, 1), '1 of 2 tags');
+		assert.equal(tagAnnouncement(cut, null).includes(TAGS_CUT_NOTE), false);
+		const settingsHref = `/projects/${PROJECT.id}?tab=settings#registries`;
+		const shown = render(ImageTagNotes, { props: { fieldId: 'f', settingsHref, cut: true } }).body;
+		assert.match(shown, /<p class="text-muted-foreground[^"]*"[^>]*data-tags-cut[^>]*>This image has more tags than this list shows\. Type the tag you want\.<\/p>/);
+		assert.equal(render(ImageTagNotes, { props: { fieldId: 'f', settingsHref } }).body.includes('data-tags-cut'), false);
 	});
 });
 

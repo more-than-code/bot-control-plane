@@ -308,7 +308,7 @@ describe('v1.35 actions', () => {
 	});
 
 	test('edge on: the occupant refusal is shown as is, outside the page notice', async () => {
-		const text = 'port 443 is used by daikou-caddy (project Daikou)';
+		const text = 'port 443 is used by daikou-caddy (project Daikou); stop it, wait until the host no longer reports that port (up to a minute), then try again';
 		const calls = installFetch(() => envelope(null, 409, 'conflict', text));
 		const event = fakeEvent({ url: `http://console.example/hosts/${HOST_ID}?/setEdge`, form: { enabled: '1' }, params: { id: HOST_ID }, user: USER, session: TOKEN }).event as never;
 		const result = await hostActions.setEdge(event);
@@ -418,15 +418,21 @@ describe('v1.35 renders', () => {
 		assert.doesNotMatch(html, /Confirm delete/);
 	});
 
+	const OUTSIDE_REFUSAL = 'port 443 is used by a process outside Deploybot; stop it, wait until the host no longer reports that port (up to a minute), then try again';
+
 	test('edge not available: the runner.toml line with Copy, Turn on disabled', () => {
 		setPageUrl(`http://console.example/hosts/${HOST_ID}`);
 		const edge: HostEdge = { available: false, enabled: false, status: 'off', detail: null, config_hash: null, applied_at: null, routes: 0 };
-		const html = render(HostEdgeSection, { props: { hostName: 'pi3', edge, actionMessage: 'port 443 is used by a process outside Deploybot' } }).body;
+		const html = render(HostEdgeSection, { props: { hostName: 'pi3', edge, actionMessage: OUTSIDE_REFUSAL } }).body;
 		assert.match(html, /edge = true/);
 		assert.match(html, /Copy runner\.toml line/);
 		assert.match(html, /Turn on edge/);
 		assert.match(html, /disabled/);
-		assert.match(html, /port 443 is used by a process outside Deploybot/);
+		// The whole refusal shows, the what-to-do tail included (spec-release-v0239 F3).
+		assert.ok(html.includes(OUTSIDE_REFUSAL));
+		// F2: the card says where certificates come from and that a proxy in front is fine.
+		assert.match(html, /Certificates come from Let(&#39;|')s Encrypt, so ports 80 and 443 must reach this host from the internet, directly or through a proxy such as Cloudflare\./);
+		assert.doesNotMatch(html, /The host must be reachable on 80 and 443/);
 	});
 
 	test('edge on: status, routes count and Turn off', () => {

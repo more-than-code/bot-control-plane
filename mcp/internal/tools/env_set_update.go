@@ -56,7 +56,7 @@ const updateEnvSetSchema = `{
       }
     },
     "remove": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]{0,63}$"}, "description": "Keys to remove. Refused while an entry uses the key; update that entry first."},
-    "make_secret": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]{0,63}$"}, "description": "Plain keys to make secret. One way: a secret key never becomes plain."}
+    "make_secret": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]{0,63}$"}, "description": "Plain keys to make secret. One way: a secret key never becomes plain. A key with an empty value is refused (give it a value first); an empty placeholder stays a placeholder."}
   }
 }`
 

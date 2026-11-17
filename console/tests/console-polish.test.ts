@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { render } from 'svelte/server';
-import type { JoinToken, ProjectFile, Registry } from '../src/lib/api-types.ts';
+import type { EnvSet, JoinToken, ProjectFile, Registry } from '../src/lib/api-types.ts';
 import { joinGrantText, joinTokenState } from '../src/lib/org-view.ts';
 import TokensSection from '../src/routes/orgs/[id]/TokensSection.svelte';
 import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
@@ -57,12 +57,13 @@ test('the Join tokens tab offers Revoke only on an active token', () => {
 	assert.match(html, />active</);
 });
 
-test('the Settings Delete buttons name the file or registry they delete', () => {
+test('the Settings Delete buttons name the env set, file or registry they delete', () => {
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
 	const file: ProjectFile = { name: 'app.conf', is_secret: false, size: 12, sha256: 'ab'.repeat(32), updated_at: '2026-11-14T10:00:00Z', updated_by: 'joe' };
 	const registry: Registry = { host: 'ghcr.io', username: 'joe', updated_at: '2026-11-14T10:00:00Z', updated_by: 'joe', source: 'manual', connected_by: null };
+	const envSet: EnvSet = { name: 'app', keys: [], updated_at: '2026-11-14T10:00:00Z', updated_by: 'joe' };
 	const html = render(SettingsSection, {
-		props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, envSets: [], files: [file], registries: [registry] }
+		props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, envSets: [envSet], files: [file], registries: [registry] }
 	}).body;
 	// Each alert-dialog trigger: its accessible name (aria-label, else its text) and its visible text.
 	const triggers = [...html.matchAll(/<button([^>]*data-slot="alert-dialog-trigger"[^>]*)>([\s\S]*?)<\/button>/g)].map((match) => {
@@ -72,6 +73,7 @@ test('the Settings Delete buttons name the file or registry they delete', () => 
 	assert.deepEqual(
 		triggers.filter((item) => item.text === 'Delete'),
 		[
+			{ name: 'Delete env set app', text: 'Delete' },
 			{ name: 'Delete file app.conf', text: 'Delete' },
 			{ name: 'Delete registry ghcr.io', text: 'Delete' }
 		]

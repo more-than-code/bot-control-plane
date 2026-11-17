@@ -590,6 +590,7 @@ func (s *Server) handleEnvKeysSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	set, changed, err := s.Store.MakeEnvKeysSecret(r.Context(), id, name, body.Keys, sealer, p.User.ID, s.now())
 	var missing *store.MissingEnvKeyError
+	var empty *store.EmptySecretKeyError
 	var failed sealFailure
 	switch {
 	case errors.As(err, &failed):
@@ -597,6 +598,9 @@ func (s *Server) handleEnvKeysSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.As(err, &missing):
 		writeCode(w, "not_found", missing.Error())
+		return
+	case errors.As(err, &empty):
+		writeCode(w, "bad_request", empty.Error())
 		return
 	case err != nil:
 		s.writeErr(w, err, false)

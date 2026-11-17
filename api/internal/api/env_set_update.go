@@ -310,6 +310,16 @@ func (s *Server) envChangeFits(w http.ResponseWriter, r *http.Request, projectID
 			return false
 		}
 	}
+	// make_secret never seals an empty value (spec-release-v0239 F6); a
+	// needs_value placeholder may still become a secret placeholder. A key
+	// is in one list only, so make_secret keys are not set in this change.
+	for _, key := range plan.MakeSecret {
+		k := have[key]
+		if !k.IsSecret && !k.NeedsValue && (k.Value == nil || *k.Value == "") {
+			writeCode(w, "bad_request", (&store.EmptySecretKeyError{Key: key}).Error())
+			return false
+		}
+	}
 	if len(plan.Remove) == 0 {
 		return true
 	}
@@ -547,6 +557,10 @@ func (s *Server) confirmEnvSetChange(w http.ResponseWriter, r *http.Request, p p
 		return
 	case errors.Is(err, store.ErrConflict):
 		writeCode(w, "conflict", fmt.Sprintf("env set %s changed since the plan; ask for a new one", c.SetName))
+		return
+	case errors.Is(err, store.ErrSecretEmpty):
+		// A value emptied after the confirm pre-check (spec-release-v0239 F6).
+		writeCode(w, "bad_request", err.Error())
 		return
 	case err != nil:
 		s.writeErr(w, err, false)

@@ -192,6 +192,10 @@ func applyEnvKeyChangesLocked(in []envValueRec, ch store.EnvSetChange, seal stor
 		if v.IsSecret {
 			continue
 		}
+		// spec-release-v0239 F6: never seal an empty value.
+		if v.Plain == "" && !v.NeedsValue {
+			return nil, &store.EmptySecretKeyError{Key: key}
+		}
 		sealed, err := seal(key, v.Plain)
 		if err != nil {
 			return nil, err

@@ -648,7 +648,7 @@ func (m *Mem) PutEdgeConfirmation(_ context.Context, hash []byte, c store.EdgeCo
 	defer m.mu.Unlock()
 	plans := m.edgeLocked().confirmations
 	for key, old := range plans {
-		if old.ExpiresAt.Before(c.CreatedAt) {
+		if old.ExpiresAt.Before(c.CreatedAt.Add(-store.RequestKeep)) {
 			delete(plans, key)
 		}
 	}

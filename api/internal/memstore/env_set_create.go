@@ -31,7 +31,7 @@ func (m *Mem) PutEnvSetConfirmation(_ context.Context, hash []byte, c store.EnvS
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key, rec := range m.envSetConfirmations {
-		if rec.row.ExpiresAt.Before(c.CreatedAt) {
+		if rec.row.ExpiresAt.Before(c.CreatedAt.Add(-store.RequestKeep)) {
 			delete(m.envSetConfirmations, key)
 		}
 	}

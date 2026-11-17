@@ -692,7 +692,7 @@ func (d *DB) MakeEnvKeysSecret(ctx context.Context, projectID uuid.UUID, name st
 		return store.EnvSet{}, nil, err
 	}
 	rows, err := tx.Query(ctx, `
-SELECT key, is_secret, value FROM app.env_values
+SELECT key, is_secret, value, needs_value FROM app.env_values
 WHERE project_id = $1::uuid AND set_name = $2 AND key = ANY($3::text[])
 ORDER BY key
 FOR UPDATE
@@ -702,11 +702,13 @@ FOR UPDATE
 	}
 	// plain holds each named plain key's value. A secret key maps to nil.
 	plain := map[string]*string{}
+	// placeholder marks needs_value keys: an empty one may be made secret.
+	placeholder := map[string]bool{}
 	for rows.Next() {
 		var key string
-		var secret bool
+		var secret, needsValue bool
 		var value *string
-		if err := rows.Scan(&key, &secret, &value); err != nil {
+		if err := rows.Scan(&key, &secret, &value, &needsValue); err != nil {
 			rows.Close()
 			return store.EnvSet{}, nil, mapErr(err)
 		}
@@ -717,6 +719,7 @@ FOR UPDATE
 			value = new(string)
 		}
 		plain[key] = value
+		placeholder[key] = needsValue
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -725,6 +728,11 @@ FOR UPDATE
 	for _, key := range keys {
 		if _, ok := plain[key]; !ok {
 			return store.EnvSet{}, nil, &store.MissingEnvKeyError{Key: key}
+		}
+	}
+	for _, key := range keys {
+		if value := plain[key]; value != nil && *value == "" && !placeholder[key] {
+			return store.EnvSet{}, nil, &store.EmptySecretKeyError{Key: key}
 		}
 	}
 	changed := []string{}

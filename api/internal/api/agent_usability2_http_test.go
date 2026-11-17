@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
@@ -755,4 +758,62 @@ func TestValueRequestRotationAudit(t *testing.T) {
 	if got["HAS"] != true || got["PH"] != nil || len(got) != 2 {
 		t.Fatalf("replaced %v", got)
 	}
+}
+
+// TestEnvSetPatchMakeSecretEmpty is spec-release-v0239 F6 on the v1.33
+// update path: make_secret on a plain key whose value is empty is refused at
+// plan time, naming the key, and nothing changes. A key with a value, and a
+// needs_value placeholder (it stays a placeholder), may still be made secret.
+func TestEnvSetPatchMakeSecretEmpty(t *testing.T) {
+	w, sc, tok, _ := refsWorld(t, allowImages())
+	project := sc.project.ID.String()
+	del := tokenKind(t, w, sc.owner, store.KindDelegated)
+	putEnvFlag(t, w, tok, project, "app", "EMPTY=\nFULL=f\n", false)
+
+	status, env, _ := mustCall(t, w, del, http.MethodPatch, envPath(project, "app"), `{"make_secret":["FULL","EMPTY"],"idempotency_key":"e1"}`)
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "a secret value cannot be empty; give EMPTY a value first")
+	status, env, _ = mustCall(t, w, tok, http.MethodGet, envPath(project, "app"), "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if keys := keysByName(t, env); keys["EMPTY"]["is_secret"] != false || keys["FULL"]["is_secret"] != false {
+		t.Fatalf("refused plan changed keys %v", keys)
+	}
+
+	id, _ := planOf(t, w, del, http.MethodPatch, envPath(project, "app"), `{"make_secret":["FULL"],"idempotency_key":"e2"}`)
+	env, _ = confirmOK(t, w, del, id, "e2", http.StatusOK)
+	if keysByName(t, env)["FULL"]["is_secret"] != true {
+		t.Fatal("valued key not made secret")
+	}
+
+	// A plain placeholder may become a secret placeholder.
+	status, env, _ = mustCall(t, w, del, http.MethodPost, envSetsPath(project), `{"name":"ph","keys":[{"key":"PH","is_secret":false}],"idempotency_key":"e3"}`)
+	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
+	confirmOK(t, w, del, objectPayload(t, env)["confirmation_id"].(string), "e3", http.StatusCreated)
+	id, _ = planOf(t, w, del, http.MethodPatch, envPath(project, "ph"), `{"make_secret":["PH"],"idempotency_key":"e4"}`)
+	env, _ = confirmOK(t, w, del, id, "e4", http.StatusOK)
+	if k := keysByName(t, env)["PH"]; k["is_secret"] != true || k["needs_value"] != true {
+		t.Fatalf("placeholder %v", k)
+	}
+}
+
+// emptySecretStore stages a value emptied between the confirm pre-check and
+// the store's locked read: ApplyEnvSetChange refuses with EmptySecretKeyError.
+type emptySecretStore struct {
+	store.Store
+}
+
+func (emptySecretStore) ApplyEnvSetChange(context.Context, uuid.UUID, string, store.EnvSetChange, []byte, store.EnvSealer, uuid.UUID, time.Time) (store.EnvSet, error) {
+	return store.EnvSet{}, &store.EmptySecretKeyError{Key: "FULL"}
+}
+
+// TestEnvSetPatchConfirmSecretEmpty: an ErrSecretEmpty from the store at
+// confirm is bad_request with its message, not an internal error.
+func TestEnvSetPatchConfirmSecretEmpty(t *testing.T) {
+	w, sc, tok, _ := refsWorld(t, allowImages())
+	project := sc.project.ID.String()
+	del := tokenKind(t, w, sc.owner, store.KindDelegated)
+	putEnvFlag(t, w, tok, project, "app", "FULL=f\n", false)
+	id, _ := planOf(t, w, del, http.MethodPatch, envPath(project, "app"), `{"make_secret":["FULL"],"idempotency_key":"z1"}`)
+	w.srv.Store = emptySecretStore{w.srv.Store}
+	status, env, _ := mustCall(t, w, del, http.MethodPost, "/v1/confirmations/"+id, confirmBody("z1"))
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "a secret value cannot be empty; give FULL a value first")
 }

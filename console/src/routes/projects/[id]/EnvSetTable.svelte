@@ -234,6 +234,7 @@
 				id="delete-env-{set.name}"
 				action={deleteSetAction}
 				label="Delete"
+				triggerLabel="Delete env set {set.name}"
 				confirmLabel="Delete"
 				message="Delete env set {set.name}?"
 				onSuccess={onAction}

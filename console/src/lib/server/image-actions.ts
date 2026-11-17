@@ -132,7 +132,7 @@ export async function saveImageEntry(event: RequestEvent, mode: 'create' | 'edit
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
 		if (mode === 'create' && check.name && err instanceof ApiError && err.code === 'conflict') {
-			return editorFailure(event, 409, mode, name, built.draft, null, duplicateEntryMessage(check.name, 'image'));
+			return editorFailure(event, 409, mode, name, built.draft, null, duplicateEntryMessage(check.name));
 		}
 		const message = redactSubmitted(apiMessage(err), submittedSecrets(built.draft));
 		return editorFailure(event, apiStatus(err), mode, name, built.draft, null, message);

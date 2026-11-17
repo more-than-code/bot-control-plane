@@ -102,12 +102,17 @@ func TestHostAgentUpdateHint(t *testing.T) {
 	enrollAt(t, w, sc.project, owner.ID, "empty", "")
 	odd := enrollAt(t, w, sc.project, owner.ID, "odd", "0.2.3.2")
 	newer := enrollAt(t, w, sc.project, owner.ID, "newer", "0.3.0")
+	// A revoked host never offers an update (spec-release-v0239 F1).
+	revoked := enrollAt(t, w, sc.project, owner.ID, "revoked", "0.2.1")
+	if err := w.mem.RevokeHost(ctx, revoked.ID, w.now); err != nil {
+		t.Fatal(err)
+	}
 
 	reads := map[string]string{
 		"project": "/v1/projects/" + sc.project.ID.String() + "/hosts",
 		"org":     "/v1/orgs/" + sc.project.OrgID.String() + "/hosts",
 	}
-	singles := map[string]uuid.UUID{"pi4": sc.host.ID, "same": same.ID, "odd": odd.ID, "newer": newer.ID}
+	singles := map[string]uuid.UUID{"pi4": sc.host.ID, "same": same.ID, "odd": odd.ID, "newer": newer.ID, "revoked": revoked.ID}
 
 	check := func(t *testing.T, latest string, want map[string]bool) {
 		t.Helper()
@@ -153,9 +158,9 @@ func TestHostAgentUpdateHint(t *testing.T) {
 	}
 
 	t.Run("set", func(t *testing.T) {
-		check(t, "0.2.10", map[string]bool{"pi4": true, "same": false, "empty": false, "odd": false, "newer": false})
+		check(t, "0.2.10", map[string]bool{"pi4": true, "same": false, "empty": false, "odd": false, "newer": false, "revoked": false})
 	})
 	t.Run("unset", func(t *testing.T) {
-		check(t, "", map[string]bool{"pi4": false, "same": false, "empty": false, "odd": false, "newer": false})
+		check(t, "", map[string]bool{"pi4": false, "same": false, "empty": false, "odd": false, "newer": false, "revoked": false})
 	})
 }

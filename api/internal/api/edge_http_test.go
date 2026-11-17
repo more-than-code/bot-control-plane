@@ -273,6 +273,19 @@ func TestRoutesPlanAndConfirm(t *testing.T) {
 	assertAuditAction(t, w, audit.ActionRoutesConfirmation)
 }
 
+// spec-release-v0239 F3: a Deploybot container on 443 is named with its
+// project, and the refusal says what to do next.
+func TestEdgeSwitchRefusedByProjectContainer(t *testing.T) {
+	c := newEdgeCast(t)
+	w := c.w
+	createImage(t, w, c.tok, c.sc.project.ID, "web", webSpec)
+	conn := helloAgent(t, w, c.sc.host, c.sc.credPlain, c.sc.credID, edgePrograms(true), []any{ownedWeb(443)})
+	watchTasks(t, conn, edgeAgent)
+	status, env := w.do(c.tok, http.MethodPut, "/v1/hosts/"+c.sc.host.ID.String()+"/edge", `{"enabled":true}`)
+	mustHTTP(t, status, env, http.StatusConflict, "conflict",
+		"port 443 is used by web (project "+c.sc.project.Name+"); stop it, wait until the host no longer reports that port (up to a minute), then try again")
+}
+
 func TestEdgeSwitchApplyAndReconnect(t *testing.T) {
 	c := newEdgeCast(t)
 	w := c.w
@@ -289,7 +302,7 @@ func TestEdgeSwitchApplyAndReconnect(t *testing.T) {
 	conn := helloAgent(t, w, c.sc.host, c.sc.credPlain, c.sc.credID, edgePrograms(true), []any{ownedWeb(18788), occupant})
 	tasks := watchTasks(t, conn, edgeAgent)
 	status, env = w.do(c.tok, http.MethodPut, hostPath, `{"enabled":true}`)
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "port 443 is used by a process outside Deploybot")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "port 443 is used by a process outside Deploybot; stop it, wait until the host no longer reports that port (up to a minute), then try again")
 
 	// The old proxy stops; the next report no longer lists it.
 	writeFrame(t, conn, map[string]any{"v": 1, "type": "services", "services": []any{ownedWeb(18788)}})
