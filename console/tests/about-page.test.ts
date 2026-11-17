@@ -253,26 +253,74 @@ describe('About page', () => {
 		]);
 	});
 
-	test('What you get keeps the former panel facts; the AI section links to /llms.txt', () => {
-		const features = text(section('features-title'));
-		for (const fact of [
-			"Each host's own allowlist of images and projects",
-			'Secrets encrypted at rest (env sets, files and registry logins)',
-			'Programs run as systemd units and survive reboot',
-			'Container logs capped at 10 MB × 3',
-			'One-time join tokens for adding hosts (org admins)'
-		]) {
-			assert.ok(features.includes(fact), fact);
-		}
-		assert.equal(section('features-title').match(/<h3\b/g)?.length, 4);
+	test('What you get has the eight feature groups by name, the same as llms.txt Features', () => {
+		// Bot Product 2026-11-17: one set of feature names on the site and in llms.txt. No routes or domains yet.
+		const groups: [string, string[]][] = [
+			['Safety', ['Catalog', 'Plan and confirm', 'Acts as you', 'Host allowlist', 'Secret requests (one-time page)', 'Audit log']],
+			['Deploys', ['Health-gated deploys', 'Automatic rollback', 'Digest rollback', 'Health policy', 'Run/stop/restart', 'Persistent programs']],
+			['Configuration', ['Env sets', 'Entry secrets (generate, show once)', 'Managed files', 'Registry logins', 'Readiness check']],
+			['Networking', ['Shared networks']],
+			['Visibility', ['Host metrics', 'Processes and services', 'Health history', 'Live logs (redacted, capped']],
+			['Teams', ['Organizations', 'Project roles', 'Per-entry rights', 'Host access per project', 'Invite links', 'Join tokens']],
+			['For AI agents', ['MCP server with OAuth', 'deploybot login', 'llms.txt', 'whats_new']],
+			['Upkeep', ["What's new page", 'Agent update notice']]
+		];
+		const html = section('features-title');
+		const titles = [...html.matchAll(/<h3\b[^>]*>([\s\S]*?)<\/h3>/g)].map((m) => text(m[1] ?? ''));
+		assert.deepEqual(titles, groups.map(([title]) => title));
+		const llms = readFileSync(join(root, 'static/llms.txt'), 'utf8');
+		const llmsFeatures = llms.slice(llms.indexOf('## Features'), llms.indexOf('## Components'));
+		const cards = html.split(/<h3\b/).slice(1).map(text);
+		groups.forEach(([title, names], i) => {
+			const line = llmsFeatures.split('\n').find((l) => l.startsWith(`- ${title}: `)) ?? '';
+			for (const name of names) {
+				assert.ok(cards[i]?.includes(name), `${title} card: ${name}`);
+				assert.ok(line.includes(name), `llms.txt ${title}: ${name}`);
+			}
+		});
+		const features = text(html);
+		assert.ok(
+			features.includes(
+				'Secrets never pass through the AI: when an agent needs a password, token or file, it asks, and you fill it in on a one-time console page.'
+			)
+		);
+		assert.doesNotMatch(features, /\broutes?\b|\bdomains?\b|\bedge\b/i);
+	});
+
+	test('the AI section links to /llms.txt and lists what the AI can and cannot do', () => {
 		const ai = section('ai-title');
 		assert.ok(anchors(ai).some((a) => a.includes('href="/llms.txt"')));
 		assert.ok(
 			text(ai).includes(
-				'Deploy, roll back, run, stop and restart catalog entries; read logs, status and metrics; add or change image catalog entries and their health checks. Every change shows a plan first and waits for your confirm, within your role and per-entry rights.'
+				'Deploy, roll back, run, stop and restart catalog entries; read logs, status and metrics; add or change image catalog entries and their health checks; edit env sets and ask you for secret values or files; check readiness. Every change shows a plan first and waits for your confirm, within your role and per-entry rights.'
 			)
 		);
 		assert.ok(text(ai).includes('Open a shell, see secret values, edit hosts, or act beyond your role.'));
+	});
+
+	test('the components diagram sits only in Open source, before the table, with accessible names and no colour literals', () => {
+		const source = section('source-title');
+		for (const id of ['components-title', 'components-portrait-title']) {
+			assert.ok(source.includes(`<title id="${id}">Deploybot components</title>`), id);
+		}
+		assert.match(source, /<svg[^>]*role="img"[^>]*aria-labelledby="components-title" aria-describedby="components-desc"/);
+		assert.ok(source.indexOf('components-title') < source.indexOf('<table'), 'diagram before the components table');
+		assert.equal(body.match(/id="components-title"/g)?.length, 1, 'one components diagram on the page');
+		const svelte = readFileSync(join(root, 'src/lib/site/ComponentsDiagram.svelte'), 'utf8');
+		assert.doesNotMatch(svelte, /#[0-9a-f]{3,8}\b|rgb\(|oklch\(|style=/i);
+		for (const label of ['Console', 'MCP gateway', 'API', 'PostgreSQL', 'Secrets encrypted', 'bot-agent', 'Root runner', 'Checks host allowlist', 'Dials out, no open ports']) {
+			assert.ok(svelte.includes(`>${label}<`), label);
+		}
+	});
+
+	test('Open source says the name and logo are not under the code licence, with no trademark claim', () => {
+		const source = text(section('source-title'));
+		assert.ok(
+			source.includes(
+				'The Deploybot name and logo are not licensed under any code licence; forks must use a different name.'
+			)
+		);
+		assert.doesNotMatch(body, /™|&trade;|registered trademark/i);
 	});
 
 	test('every external link opens in a new tab, safely, and says so', () => {

@@ -26,6 +26,42 @@ test('llms.txt links the server parts in bot-control-plane, not the retired repo
 	assert.doesNotMatch(LLMS, /more-than-code\/(bot-api-server|bot-mcp-server|bot-console)\b/);
 });
 
+test('llms.txt sends secrets through one-time console pages, never chat', () => {
+	assert.ok(!LLMS.includes('Secrets belong in env sets entered in the web console'));
+	const rule =
+		'Never ask the user to paste a secret into chat. Use `request_env_value` or `request_file`; the user fills it on a one-time console page, and you poll `get_env_value_request` / `get_file_request`.';
+	const safety = LLMS.slice(LLMS.indexOf('## How the safety model works'), LLMS.indexOf('## Instructions for AI agents'));
+	const instructions = LLMS.slice(LLMS.indexOf('## Instructions for AI agents'), LLMS.indexOf('## Connect an MCP client'));
+	assert.ok(safety.includes(rule), 'safety model');
+	assert.ok(instructions.includes(rule), 'instructions');
+	assert.ok(instructions.includes('Call `whats_new` when a tool you expect is missing or behaves differently.'));
+});
+
+test('llms.txt lists the released MCP tools, with env-set edits under plan and confirm, and no unreleased route tools', () => {
+	const tools = LLMS.slice(LLMS.indexOf('## MCP tools'), LLMS.indexOf('## Add a host'));
+	for (const name of [
+		'list_orgs', 'check_readiness', 'list_env_sets', 'create_env_set', 'update_env_set', 'delete_env_set',
+		'request_env_value', 'get_env_value_request', 'request_file', 'get_file_request', 'connect_registry',
+		'get_registry_connect_request', 'image_access', 'host_policy_snippet', 'shared_network_snippet', 'whats_new'
+	]) {
+		assert.ok(tools.includes(`\`${name}\``), name);
+	}
+	const change = tools.split('\n').find((line) => line.startsWith('- Change, with plan and confirm:')) ?? '';
+	for (const name of ['create_env_set', 'update_env_set', 'delete_env_set']) {
+		assert.ok(change.includes(`\`${name}\``), name);
+	}
+	// v0.2.38 (routes, domains, edge) is not released: nothing about it on the public site yet.
+	assert.doesNotMatch(LLMS, /list_routes|set_routes|\bdomains?\b|\bedge\b/i);
+});
+
+test('llms.txt explains the components in text', () => {
+	assert.ok(
+		LLMS.includes(
+			'## Components\n\nConsole and MCP gateway both go through the API; only the API writes PostgreSQL, where secrets are encrypted. bot-agent runs unprivileged on each host and dials out to the API, so hosts open no ports. A root runner on the host checks the root-owned /etc/bot-agent/runner.toml allowlist before it runs Docker containers or systemd units.\n'
+		)
+	);
+});
+
 test('robots.txt allows all crawlers and names the apex sitemap', () => {
 	// Umbrella docs/spec-seo-site.md §3.4.
 	assert.equal(

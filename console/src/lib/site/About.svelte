@@ -1,11 +1,16 @@
 <script lang="ts">
+	import BellRingIcon from '@lucide/svelte/icons/bell-ring';
+	import BotIcon from '@lucide/svelte/icons/bot';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import CircleXIcon from '@lucide/svelte/icons/circle-x';
 	import EyeIcon from '@lucide/svelte/icons/eye';
-	import HistoryIcon from '@lucide/svelte/icons/history';
+	import NetworkIcon from '@lucide/svelte/icons/network';
+	import RocketIcon from '@lucide/svelte/icons/rocket';
+	import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import { GITHUB_URL, INSTALL_GUIDE_URL, REPO_URL, SIGN_IN_URL } from './links';
+	import ComponentsDiagram from './ComponentsDiagram.svelte';
 	import PitchDiagram from './PitchDiagram.svelte';
 
 	const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring';
@@ -92,40 +97,62 @@
 		}
 	];
 
-	// The four former diagram panels, with the same facts.
+	// What you get: the feature names (Bot Product, 2026-11-17), the same groups and names as llms.txt Features.
+	// Each item is a feature name with an optional short note.
 	const features = [
 		{
-			title: 'Security',
+			title: 'Safety',
 			icon: ShieldIcon,
-			body: 'On top of acting as you, catalog only and the confirm step:',
+			body: 'Secrets never pass through the AI: when an agent needs a password, token or file, it asks, and you fill it in on a one-time console page.',
 			items: [
-				{ text: "Each host's own allowlist of images and projects" },
-				{ text: 'Secrets encrypted at rest', note: 'env sets, files and registry logins' },
-				{ text: 'Changes recorded in an audit log' }
+				{ text: 'Catalog', note: 'only approved images and programs run' },
+				{ text: 'Plan and confirm', note: 'every change waits for your yes' },
+				{ text: 'Acts as you', note: 'your role, no more' },
+				{ text: 'Host allowlist', note: "each host's own, root-owned" },
+				{ text: 'Secret requests', note: 'one-time page' },
+				{ text: 'Audit log' }
 			]
 		},
 		{
-			title: 'Resilience',
-			icon: HistoryIcon,
+			title: 'Deploys',
+			icon: RocketIcon,
 			body: 'Deploys wait for health, and you can go back in one step.',
 			items: [
-				{ text: 'Deploys wait for health: Docker or HTTP/TCP checks' },
-				{ text: 'An unhealthy deploy rolls back automatically' },
-				{ text: 'One-step rollback to an earlier image digest' },
-				{ text: 'A health failure policy per service' },
-				{ text: 'Programs run as systemd units and survive reboot' }
+				{ text: 'Health-gated deploys', note: 'Docker or HTTP/TCP checks' },
+				{ text: 'Automatic rollback', note: 'when a deploy is unhealthy' },
+				{ text: 'Digest rollback', note: 'to an earlier image digest' },
+				{ text: 'Health policy', note: 'per service' },
+				{ text: 'Run/stop/restart' },
+				{ text: 'Persistent programs', note: 'systemd units that survive reboot' }
 			]
+		},
+		{
+			title: 'Configuration',
+			icon: SlidersHorizontalIcon,
+			body: 'Give each entry what it needs to run; secret values are encrypted at rest.',
+			items: [
+				{ text: 'Env sets', note: 'for containers and programs' },
+				{ text: 'Entry secrets', note: 'generate, show once' },
+				{ text: 'Managed files', note: 'for containers' },
+				{ text: 'Registry logins', note: 'for private images' },
+				{ text: 'Readiness check', note: 'before deploy' }
+			]
+		},
+		{
+			title: 'Networking',
+			icon: NetworkIcon,
+			body: 'Let projects on one host reach each other when the host allows it.',
+			items: [{ text: 'Shared networks', note: "between projects on one host, offered by the host's admin" }]
 		},
 		{
 			title: 'Visibility',
 			icon: EyeIcon,
 			body: 'See what runs on each host and how it is doing.',
 			items: [
-				{ text: 'Host metrics with history' },
-				{ text: 'Running processes and discovered services' },
-				{ text: 'Health check history for each service' },
-				{ text: 'Container logs with secrets redacted' },
-				{ text: 'Container logs capped at 10 MB × 3' }
+				{ text: 'Host metrics', note: 'with history' },
+				{ text: 'Processes and services', note: 'running and discovered' },
+				{ text: 'Health history', note: 'per service' },
+				{ text: 'Live logs', note: 'redacted, capped' }
 			]
 		},
 		{
@@ -133,12 +160,32 @@
 			icon: UsersIcon,
 			body: 'An organization owns the hosts; its projects get the access they need.',
 			items: [
-				{ text: 'Organizations own hosts; org admins manage them' },
-				{ text: 'Owner, admin and viewer roles per project' },
-				{ text: 'Invite links that expire (single-use by default)' },
-				{ text: 'Per-entry rights to run, stop, restart or deploy' },
-				{ text: 'Project access per host (metrics or deploy)' },
-				{ text: 'One-time join tokens for adding hosts (org admins)' }
+				{ text: 'Organizations', note: 'own the hosts; org admins manage them' },
+				{ text: 'Project roles', note: 'owner, admin and viewer' },
+				{ text: 'Per-entry rights', note: 'run, stop, restart or deploy' },
+				{ text: 'Host access per project', note: 'metrics or deploy' },
+				{ text: 'Invite links', note: 'expire, single-use by default' },
+				{ text: 'Join tokens', note: 'one-time, for adding hosts' }
+			]
+		},
+		{
+			title: 'For AI agents',
+			icon: BotIcon,
+			body: 'Connect any MCP client; it signs in as you.',
+			items: [
+				{ text: 'MCP server with OAuth' },
+				{ text: 'deploybot login', note: 'for clients without a browser' },
+				{ text: 'llms.txt', note: 'a guide written for agents' },
+				{ text: 'whats_new', note: 'recent changes, as an MCP tool' }
+			]
+		},
+		{
+			title: 'Upkeep',
+			icon: BellRingIcon,
+			body: 'See what changed and which hosts need an update.',
+			items: [
+				{ text: "What's new page", note: 'in the account menu' },
+				{ text: 'Agent update notice', note: 'when a newer bot-agent release exists' }
 			]
 		}
 	];
@@ -338,7 +385,9 @@
 				<ul class="mt-3 list-disc space-y-1 pl-5 text-sm marker:text-primary">
 					{#each feature.items as item (item.text)}
 						<li>
-							{item.text}{#if item.note}<span class="text-muted-foreground">{` (${item.note})`}</span>{/if}
+							<span class="font-medium">{item.text}</span>{#if item.note}<span class="text-muted-foreground"
+									>{` (${item.note})`}</span
+								>{/if}
 						</li>
 					{/each}
 				</ul>
@@ -357,7 +406,7 @@
 			</div>
 			<p class="text-muted-foreground mt-2 text-sm">
 				Deploy, roll back, run, stop and restart catalog entries; read logs, status and metrics; add or change image catalog
-				entries and their health checks. Every change shows a plan first and waits for your confirm, within your role and
+				entries and their health checks; edit env sets and ask you for secret values or files; check readiness. Every change shows a plan first and waits for your confirm, within your role and
 				per-entry rights.
 			</p>
 		</div>
@@ -393,6 +442,13 @@
 <section class="py-8" aria-labelledby="source-title">
 	<h2 id="source-title" class="text-2xl font-semibold tracking-tight">Open source</h2>
 	<p class="text-muted-foreground mt-2">Use Deploybot hosted, or run all of it yourself from these two repos.</p>
+	<figure class="mt-4">
+		<ComponentsDiagram />
+		<figcaption class="text-muted-foreground mt-2 text-sm">
+			The console and the MCP gateway both go through the API; hosts dial out, and a root runner checks each host's
+			allowlist.
+		</figcaption>
+	</figure>
 	<table class="mt-4 w-full text-left text-sm max-sm:block">
 		<thead class="max-sm:sr-only">
 			<tr class="border-b">
@@ -427,6 +483,9 @@
 	<p class="text-muted-foreground mt-4 text-sm">
 		To self-host you need a Linux server, PostgreSQL 18 with TimescaleDB, a Google OAuth client, a TLS reverse proxy
 		(agents connect over wss://) and a secrets key file for encrypted values. Each README has the steps.
+	</p>
+	<p class="text-muted-foreground mt-2 text-sm">
+		The Deploybot name and logo are not licensed under any code licence; forks must use a different name.
 	</p>
 </section>
 

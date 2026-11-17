@@ -333,7 +333,7 @@ describe('public site pages', () => {
 		assert.ok(how.includes('Three steps from a new host to a running service.'));
 		// Spec about-page §3.3/§3.5 (Joe 2026-10-29): the diagram shows only the flow; its four panels
 		// became the What you get section, so each panel heading appears there once and nowhere else.
-		for (const panel of ['Security', 'Resilience', 'Visibility', 'Teams']) {
+		for (const panel of ['Safety', 'Deploys', 'Configuration', 'Networking', 'Visibility', 'Teams', 'For AI agents', 'Upkeep']) {
 			assert.equal(body.match(new RegExp(`>${panel}<`, 'g'))?.length, 1, panel);
 		}
 	});

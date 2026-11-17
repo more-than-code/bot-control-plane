@@ -2,6 +2,8 @@
 
 The server side of [Deploybot](https://deploybot.dev): the API, the MCP gateway for AI agents, and the web console. Hosts run the separate agent, [bot-agent](https://github.com/more-than-code/bot-agent), which dials out to the API. The product overview lives in [more-than-code/deploybot](https://github.com/more-than-code/deploybot).
 
+![Deploybot components: people and AI agents reach the console and the MCP gateway in this repo; both go through the API, which alone writes PostgreSQL. bot-agent and its root runner on each host, shown faded, are outside this repo.](docs/images/components.svg)
+
 ## Layout
 
 | Path | What it is |

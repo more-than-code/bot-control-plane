@@ -12,16 +12,18 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 
 - An MCP client acts as the signed-in user, with that user's role in each project, and no more.
 - Only catalog entries can run. There are no free-form commands, no shell tool and no file tools.
-- Every change made over MCP (deploy, rollback, run, stop, restart, health-check and catalog edits) first returns a plan and a `confirmation_id`. Nothing happens until the `confirm` tool is called with the same `idempotency_key`.
+- Every change made over MCP (deploy, rollback, run, stop, restart, health-check, catalog and env-set edits) first returns a plan and a `confirmation_id`. Nothing happens until the `confirm` tool is called with the same `idempotency_key`.
 - Each host has its own root-owned allowlist that the server cannot change: the projects that may run programs and containers on it, the accounts, directories and commands programs may use, and the images containers may use.
 - Secret values (env sets, files and registry logins) are encrypted at rest and write-only for people. MCP tools return env key names, never env values. Logs are redacted.
+- Secrets never pass through the AI. Never ask the user to paste a secret into chat. Use `request_env_value` or `request_file`; the user fills it on a one-time console page, and you poll `get_env_value_request` / `get_file_request`.
 - Changes are recorded in an audit log.
 
 ## Instructions for AI agents
 
 - Read before you change: call `list_catalog`, `entry_status` or `get_health_checks` first.
 - Show the user the plan that a change returns, and call `confirm` only after the user agrees. Use the same `idempotency_key` as the call that returned the plan.
-- Do not put secret values in `spec.env` on catalog entries. Secrets belong in env sets entered in the web console.
+- Do not put secret values in `spec.env` on catalog entries. Never ask the user to paste a secret into chat. Use `request_env_value` or `request_file`; the user fills it on a one-time console page, and you poll `get_env_value_request` / `get_file_request`.
+- Call `whats_new` when a tool you expect is missing or behaves differently.
 - A `forbidden` or `not_found` result means the user's role does not allow the call or cannot see the resource. Do not retry it with other ids.
 
 ## Connect an MCP client
@@ -31,9 +33,11 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 
 ## MCP tools
 
-- Read: `list_projects`, `list_hosts`, `list_services`, `list_processes`, `query_metrics`, `service_health_history`, `get_health_checks`, `list_catalog`.
+- Read: `list_orgs`, `list_projects`, `list_hosts`, `list_services`, `list_processes`, `query_metrics`, `service_health_history`, `get_health_checks`, `list_catalog`, `list_env_sets`, `whats_new`.
+- Before a deploy (read only): `check_readiness`, `image_access`, `host_policy_snippet` (the host allowlist lines for an entry), `shared_network_snippet` (the host allowlist lines for a shared network).
 - Contact a host live (read only): `host_snapshot`, `probe_service`, `entry_status`, `entry_logs`.
-- Change, with plan and confirm: `deploy_entry`, `rollback_entry`, `run_entry`, `stop_entry`, `restart_entry`, `set_health_checks`, `create_catalog_entry`, `update_catalog_entry`, `delete_catalog_entry`.
+- Change, with plan and confirm: `deploy_entry`, `rollback_entry`, `run_entry`, `stop_entry`, `restart_entry`, `set_health_checks`, `create_catalog_entry`, `update_catalog_entry`, `delete_catalog_entry`, `create_env_set`, `update_env_set`, `delete_env_set`.
+- Ask the user, who answers on a one-time console page: `request_env_value`, `get_env_value_request`, `request_file`, `get_file_request`, `connect_registry` (connect GitHub for private ghcr.io images), `get_registry_connect_request`.
 - `confirm`: carries out a plan after the user agrees.
 
 ## Add a host
@@ -45,9 +49,18 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 
 ## Features
 
-- Resilience: deploys wait for health (Docker health status or HTTP/TCP checks); an unhealthy deploy rolls back to the previous container automatically; one-step rollback to an earlier image digest; a health failure policy per service; programs run as systemd units and survive reboot.
-- Visibility: host metrics with history, running processes and discovered services, health check history per service, container logs with secrets redacted, container logs capped at 10 MB × 3 by default.
-- Teams: organizations that own the hosts, with owner, admin and member roles; owner, admin and viewer roles per project; invite links that expire (single-use by default); per-entry rights to run, stop, restart or deploy for a role or a user; project access to each host at metrics or deploy level, set by org admins; and one-time join tokens for adding hosts.
+- Safety: Catalog (only approved images and programs run); Plan and confirm (every change waits for the user's yes); Acts as you (the user's role, no more); Host allowlist (each host's own, root-owned); Secret requests (one-time page); Audit log.
+- Deploys: Health-gated deploys (Docker health status or HTTP/TCP checks); Automatic rollback (an unhealthy deploy goes back to the previous container); Digest rollback (to an earlier image digest); Health policy (per service); Run/stop/restart; Persistent programs (systemd units that survive reboot).
+- Configuration: Env sets (for containers and programs); Entry secrets (generate, show once); Managed files (for containers); Registry logins (for private images); Readiness check (before deploy). Secret values are encrypted at rest.
+- Networking: Shared networks (between projects on one host, offered by the host's admin).
+- Visibility: Host metrics (with history); Processes and services (running and discovered); Health history (per service); Live logs (redacted, capped at 10 MB × 3 by default).
+- Teams: Organizations (own the hosts, with owner, admin and member roles); Project roles (owner, admin and viewer); Per-entry rights (run, stop, restart or deploy, for a role or a user); Host access per project (metrics or deploy, set by org admins); Invite links (expire, single-use by default); Join tokens (one-time, for adding hosts).
+- For AI agents: MCP server with OAuth; deploybot login (for clients without a browser); llms.txt (this file); whats_new (recent changes, as an MCP tool).
+- Upkeep: What's new page (in the console's account menu); Agent update notice (when a newer bot-agent release exists).
+
+## Components
+
+Console and MCP gateway both go through the API; only the API writes PostgreSQL, where secrets are encrypted. bot-agent runs unprivileged on each host and dials out to the API, so hosts open no ports. A root runner on the host checks the root-owned /etc/bot-agent/runner.toml allowlist before it runs Docker containers or systemd units.
 
 ## Self-hosting from source
 
