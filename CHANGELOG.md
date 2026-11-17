@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.38 — 2026-11-17
+- Public addresses: verify your own domain with a DNS TXT record, assign it to projects, and give an entry an HTTPS address, served by a per-host edge with automatic certificates.
+- Routes go through plan and confirm, in the console and over MCP (`set_routes`, `list_routes`), with two options: client IPs from Cloudflare, and no-store paths.
+- An org admin turns the edge on per host; it is refused while another program holds port 80 or 443, and the message names it.
+- Open WebSockets stay up when routes change.
+- The site and llms.txt describe the current features, with a components diagram.
+- Works with bot-agent v0.2.11 (needed only for the edge).
+
 ## v0.2.37 — 2026-11-17
 - A "What's new" page in the console, opened from the account menu; a dot on the menu marks a release you have not seen yet.
 - A new MCP tool `whats_new` lists recent changes, and the MCP server tells AI clients its version and newest changes when they connect.
