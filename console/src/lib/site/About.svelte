@@ -28,7 +28,7 @@
 			from: 'agent',
 			lines: [
 				{ text: "Deploybot's plan:" },
-				{ text: 'will deploy my-website (nginx:alpine) on my-raspberry-pi', tool: true },
+				{ text: 'will deploy my-website (docker.io/library/nginx:alpine) on my-raspberry-pi', tool: true },
 				{ text: 'Deploy it?' }
 			]
 		},
@@ -37,7 +37,7 @@
 			from: 'agent',
 			lines: [
 				{ text: 'Deployed and healthy.' },
-				{ text: 'succeeded · sha256:785835ea65db · running, 0 restarts', tool: true },
+				{ text: 'succeeded sha256:785835ea65db', tool: true },
 				{ text: '"GET / HTTP/1.1" 200', tool: true }
 			]
 		},
@@ -49,15 +49,6 @@
 	];
 	/** Splits a line so each hyphenated word (a name like my-raspberry-pi) can sit in a no-wrap span: odd parts. */
 	const wordsWithHyphens = (text: string) => text.split(/(\S*-\S*)/);
-
-	// A real dev capture of the Catalog tab of a clean demo project (no client, host or project names),
-	// in a dark and a light version (static/brand/about-catalog-{dark,light}.webp).
-	const catalogShot = {
-		width: 784,
-		height: 780,
-		caption: 'In the console: your catalog, the only things your AI agent can deploy.',
-		alt: "The Deploybot console's Catalog tab: eight entries such as my-website (nginx), my-database (postgres) and home-assistant, with their images, ports where set, and row actions."
-	};
 
 	// Spec §3.4: the three ways, cell text exact. The highlighted approach is Deploybot.
 	const aspects = [
@@ -260,63 +251,39 @@
 
 <section class="py-8" aria-labelledby="visual-title">
 	<h2 id="visual-title" class="text-2xl font-semibold tracking-tight">See it in action</h2>
-	<!-- From lg both figures span two shared rows (subgrid): the frames share row 1, whose height the chat
-	     sets, and the captions start together in row 2. -->
-	<div class="mt-4 grid gap-6 lg:grid-cols-2 lg:grid-rows-[1fr_auto] lg:gap-y-2">
-		<figure class="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid">
-			<div class="bg-card overflow-hidden rounded-lg border">
-				<div class="bg-muted flex items-center gap-1.5 border-b px-3 py-1.5" aria-hidden="true">
-					<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
-					<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
-					<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
-					<span class="text-muted-foreground ml-2 text-xs">AI agent</span>
-				</div>
-				<ol class="flex flex-col gap-2 p-3 text-sm sm:p-4" role="list">
-					{#each thread as message (message)}
-						<li
-							class={[
-								'max-w-[85%] space-y-1.5 rounded-lg px-3 py-2',
-								message.from === 'user' ? 'bg-primary text-primary-foreground self-end' : 'bg-muted self-start'
-							]}
-						>
-							<span class="sr-only">{message.from === 'user' ? 'You: ' : 'AI agent: '}</span>
-							{#each message.lines as line (line)}
-								<p class={[line.tool && 'text-muted-foreground border-l-2 pl-2 font-mono text-xs']}>
-									{#each wordsWithHyphens(line.text) as part, i}{#if i % 2}<span class="whitespace-nowrap"
-												>{part}</span
-											>{:else}{part}{/if}{/each}
-								</p>
-							{/each}
-						</li>
-					{/each}
-				</ol>
+	<!-- The chat alone (Joe 2026-11-17: the stale Catalog capture is dropped until a retake). -->
+	<figure class="mt-4 max-w-2xl min-w-0">
+		<div class="bg-card overflow-hidden rounded-lg border">
+			<div class="bg-muted flex items-center gap-1.5 border-b px-3 py-1.5" aria-hidden="true">
+				<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
+				<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
+				<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
+				<span class="text-muted-foreground ml-2 text-xs">AI agent</span>
 			</div>
-			<figcaption class="text-muted-foreground mt-2 text-sm lg:mt-0">
-				Your AI agent asks, you confirm, Deploybot does it. Anything outside your catalog is refused.
-			</figcaption>
-		</figure>
-		<!-- The image is absolute from lg, so it never drives the row height; object-top trims only the empty
-		     margin under the last row, never the tab bar. -->
-		<figure class="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid">
-			<div class="bg-card overflow-hidden rounded-lg border lg:relative">
-				{#each ['dark', 'light'] as theme (theme)}
-					<img
+			<ol class="flex flex-col gap-2 p-3 text-sm sm:p-4" role="list">
+				{#each thread as message (message)}
+					<li
 						class={[
-							'h-auto w-full lg:absolute lg:inset-0 lg:h-full lg:object-cover lg:object-top',
-							theme === 'dark' ? 'hidden dark:block' : 'block dark:hidden'
+							'max-w-[85%] space-y-1.5 rounded-lg px-3 py-2',
+							message.from === 'user' ? 'bg-primary text-primary-foreground self-end' : 'bg-muted self-start'
 						]}
-						src={`/brand/about-catalog-${theme}.webp`}
-						width={catalogShot.width}
-						height={catalogShot.height}
-						loading="lazy"
-						decoding="async"
-						alt={catalogShot.alt}
-					/>
+					>
+						<span class="sr-only">{message.from === 'user' ? 'You: ' : 'AI agent: '}</span>
+						{#each message.lines as line (line)}
+							<p class={[line.tool && 'text-muted-foreground border-l-2 pl-2 font-mono text-xs']}>
+								{#each wordsWithHyphens(line.text) as part, i}{#if i % 2}<span class="whitespace-nowrap"
+											>{part}</span
+										>{:else}{part}{/if}{/each}
+							</p>
+						{/each}
+					</li>
 				{/each}
-			</div>
-			<figcaption class="text-muted-foreground mt-2 text-sm lg:mt-0">{catalogShot.caption}</figcaption>
-		</figure>
-	</div>
+			</ol>
+		</div>
+		<figcaption class="text-muted-foreground mt-2 text-sm">
+			Your AI agent asks, you confirm, Deploybot does it. Anything outside your catalog is refused.
+		</figcaption>
+	</figure>
 </section>
 
 <section class="py-8" aria-labelledby="compare-title">
