@@ -115,7 +115,6 @@ describe('About page', () => {
 	});
 
 	test('every image has alt, width and height, and lives under static/brand (served on the apex) below 200 KB', () => {
-		// No image while the Catalog capture is dropped (Joe 2026-11-17); the rule holds for the retake.
 		const images = [...body.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
 		for (const img of images) {
 			assert.match(img, /\balt="[^"]+"/, img);
@@ -166,7 +165,8 @@ describe('About page', () => {
 		assert.doesNotMatch(outside, /\S-\S/);
 		const captions = [...visual.matchAll(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/g)].map((m) => text(m[1] ?? ''));
 		assert.deepEqual(captions, [
-			'Your AI agent asks, you confirm, Deploybot does it. Anything outside your catalog is refused.'
+			'Your AI agent asks, you confirm, Deploybot does it. Anything outside your catalog is refused.',
+			'In the console: your catalog, the only things your AI agent can deploy, and where each one runs.'
 		]);
 		for (const word of ['pi3-2', 'deploy_entry', 'confirmation_id']) {
 			assert.equal(text(visual).includes(word), false, word);
@@ -174,13 +174,56 @@ describe('About page', () => {
 		assert.doesNotMatch(visual, /\b(role="tab|tablist|aria-selected)/);
 	});
 
-	test('See it in action shows the chat alone: the stale Catalog capture is dropped until a retake', () => {
-		// Joe 2026-11-17 ("Drop them for now"): the old console capture left the page; the WebP files stay in
-		// static/brand for the retake.
+	test('beside the chat at 50/50: one name-free Catalog & services capture, a dark and a light image, frame aligned with the chat from lg, lazy', () => {
+		// Retaken 2026-11-17 (Joe "both"): the merged Catalog & services tab of a demo project with generic names.
 		const visual = section('visual-title');
-		assert.equal(visual.match(/<figure\b/g)?.length, 1);
-		assert.doesNotMatch(visual, /<img\b/);
-		assert.doesNotMatch(body, /about-catalog/);
+		const tokens = (tag: string) => (tag.match(/\bclass="([^"]*)"/)?.[1] ?? '').split(' ');
+		const grid = tokens(visual.match(/<div\b[^>]*>/)?.[0] ?? '');
+		for (const name of ['grid', 'gap-6', 'lg:grid-cols-2', 'lg:grid-rows-[1fr_auto]', 'lg:gap-y-2']) {
+			assert.ok(grid.includes(name), name);
+		}
+		const figures = [...visual.matchAll(/<figure\b[\s\S]*?<\/figure>/g)].map((m) => m[0]);
+		assert.equal(figures.length, 2);
+		// From lg both figures share the section's two rows (subgrid): equal frames, captions on one line.
+		for (const figure of figures) {
+			const classes = tokens(figure.match(/^<figure\b[^>]*>/)?.[0] ?? '');
+			for (const name of ['lg:row-span-2', 'lg:grid', 'lg:grid-rows-subgrid']) assert.ok(classes.includes(name), name);
+		}
+		const shot = figures[1] ?? '';
+		// The image is absolute in a relative frame from lg, so only the chat sets the row height.
+		assert.ok(tokens(shot.match(/<div\b[^>]*>/)?.[0] ?? '').includes('lg:relative'));
+		const images = [...visual.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+		assert.equal(images.length, 2);
+		assert.deepEqual(
+			images.map((img) => img.match(/\bsrc="([^"]+)"/)?.[1]),
+			['/brand/about-catalog-dark.webp', '/brand/about-catalog-light.webp']
+		);
+		const [dark = '', light = ''] = images;
+		assert.match(dark, /class="[^"]*\bhidden dark:block\b/);
+		assert.doesNotMatch(dark, /\bdark:hidden\b/);
+		assert.match(light, /class="[^"]*\bblock dark:hidden\b/);
+		assert.doesNotMatch(light, /\bdark:block\b/);
+		for (const img of images) {
+			assert.ok(shot.includes(img), 'both images sit in the capture figure');
+			assert.match(
+				img,
+				/\balt="The Deploybot console's Catalog &amp; services tab: eight entries such as my-website \(nginx\), my-cache \(redis\) and home-assistant\. my-website is expanded to show its copy running on my-raspberry-pi on port 8088; my-cache shows one running copy; the rest are not deployed\."/,
+				img
+			);
+			assert.match(img, /\bwidth="784"/, img);
+			assert.match(img, /\bheight="678"/, img);
+			assert.match(img, /\bloading="lazy"/, img);
+			assert.match(img, /\bdecoding="async"/, img);
+			// Natural size below lg; cropping (object-cover) and a forced height only from lg.
+			const classes = (img.match(/\bclass="([^"]*)"/)?.[1] ?? '').split(' ');
+			assert.ok(classes.includes('h-auto') && classes.includes('w-full'), img);
+			for (const name of classes.filter((c) => /object-|h-full/.test(c))) {
+				assert.ok(name.startsWith('lg:'), name);
+			}
+			for (const name of ['lg:absolute', 'lg:object-cover', 'lg:object-left-top']) assert.ok(classes.includes(name), name);
+			const src = img.match(/\bsrc="([^"]+)"/)?.[1] ?? '';
+			assert.ok(statSync(join(root, 'static', src)).size < 200 * 1024, src);
+		}
 	});
 
 	test('no dev or production project and host names anywhere on the page, alt texts included', () => {
@@ -216,7 +259,7 @@ describe('About page', () => {
 			['Safety', ['Catalog', 'Plan and confirm', 'Acts as you', 'Host allowlist', 'Secret requests (one-time page)', 'Audit log']],
 			['Deploys', ['Health-gated deploys', 'Automatic rollback', 'Digest rollback', 'Health policy', 'Run/stop/restart', 'Persistent programs']],
 			['Configuration', ['Env sets', 'Entry secrets (generate, show once)', 'Managed files', 'Registry logins', 'Readiness check']],
-			['Networking', ['Shared networks']],
+			['Networking', ['Public addresses', 'Route options', 'Shared networks']],
 			['Visibility', ['Host metrics', 'Processes and services', 'Health history', 'Live logs (redacted, capped']],
 			['Teams', ['Organizations', 'Project roles', 'Per-entry rights', 'Host access per project', 'Invite links', 'Join tokens']],
 			['For AI agents', ['MCP server with OAuth', 'deploybot login', 'llms.txt', 'whats_new']],
@@ -241,7 +284,12 @@ describe('About page', () => {
 				'Secrets never pass through the AI: when an agent needs a password, token or file, it asks, and you fill it in on a one-time console page.'
 			)
 		);
-		assert.doesNotMatch(features, /\broutes?\b|\bdomains?\b|\bedge\b/i);
+		// Released in v0.2.38: public addresses on your own domain, served by a per-host edge.
+		assert.ok(
+			features.includes(
+				'Give an entry an HTTPS address on your own domain, and let projects on one host reach each other when the host allows it.'
+			)
+		);
 	});
 
 	test('the AI section links to /llms.txt and lists what the AI can and cannot do', () => {

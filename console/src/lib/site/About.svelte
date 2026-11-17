@@ -50,6 +50,16 @@
 	/** Splits a line so each hyphenated word (a name like my-raspberry-pi) can sit in a no-wrap span: odd parts. */
 	const wordsWithHyphens = (text: string) => text.split(/(\S*-\S*)/);
 
+	// A real dev capture of the Catalog & services tab of a clean demo project (generic names only; the host
+	// label reads my-raspberry-pi, as in the chat), in a dark and a light version
+	// (static/brand/about-catalog-{dark,light}.webp).
+	const catalogShot = {
+		width: 784,
+		height: 678,
+		caption: 'In the console: your catalog, the only things your AI agent can deploy, and where each one runs.',
+		alt: "The Deploybot console's Catalog & services tab: eight entries such as my-website (nginx), my-cache (redis) and home-assistant. my-website is expanded to show its copy running on my-raspberry-pi on port 8088; my-cache shows one running copy; the rest are not deployed."
+	};
+
 	// Spec §3.4: the three ways, cell text exact. The highlighted approach is Deploybot.
 	const aspects = [
 		{ key: 'can', label: 'What the AI can do' },
@@ -132,8 +142,12 @@
 		{
 			title: 'Networking',
 			icon: NetworkIcon,
-			body: 'Let projects on one host reach each other when the host allows it.',
-			items: [{ text: 'Shared networks', note: "between projects on one host, offered by the host's admin" }]
+			body: 'Give an entry an HTTPS address on your own domain, and let projects on one host reach each other when the host allows it.',
+			items: [
+				{ text: 'Public addresses', note: 'your own domain over HTTPS, from a per-host edge' },
+				{ text: 'Route options', note: 'client IPs from Cloudflare, no-store paths' },
+				{ text: 'Shared networks', note: "between projects on one host, offered by the host's admin" }
+			]
 		},
 		{
 			title: 'Visibility',
@@ -251,39 +265,63 @@
 
 <section class="py-8" aria-labelledby="visual-title">
 	<h2 id="visual-title" class="text-2xl font-semibold tracking-tight">See it in action</h2>
-	<!-- The chat alone (Joe 2026-11-17: the stale Catalog capture is dropped until a retake). -->
-	<figure class="mt-4 max-w-2xl min-w-0">
-		<div class="bg-card overflow-hidden rounded-lg border">
-			<div class="bg-muted flex items-center gap-1.5 border-b px-3 py-1.5" aria-hidden="true">
-				<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
-				<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
-				<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
-				<span class="text-muted-foreground ml-2 text-xs">AI agent</span>
+	<!-- From lg both figures span two shared rows (subgrid): the frames share row 1, whose height the chat
+	     sets, and the captions start together in row 2. -->
+	<div class="mt-4 grid gap-6 lg:grid-cols-2 lg:grid-rows-[1fr_auto] lg:gap-y-2">
+		<figure class="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid">
+			<div class="bg-card overflow-hidden rounded-lg border">
+				<div class="bg-muted flex items-center gap-1.5 border-b px-3 py-1.5" aria-hidden="true">
+					<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
+					<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
+					<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
+					<span class="text-muted-foreground ml-2 text-xs">AI agent</span>
+				</div>
+				<ol class="flex flex-col gap-2 p-3 text-sm sm:p-4" role="list">
+					{#each thread as message (message)}
+						<li
+							class={[
+								'max-w-[85%] space-y-1.5 rounded-lg px-3 py-2',
+								message.from === 'user' ? 'bg-primary text-primary-foreground self-end' : 'bg-muted self-start'
+							]}
+						>
+							<span class="sr-only">{message.from === 'user' ? 'You: ' : 'AI agent: '}</span>
+							{#each message.lines as line (line)}
+								<p class={[line.tool && 'text-muted-foreground border-l-2 pl-2 font-mono text-xs']}>
+									{#each wordsWithHyphens(line.text) as part, i}{#if i % 2}<span class="whitespace-nowrap"
+												>{part}</span
+											>{:else}{part}{/if}{/each}
+								</p>
+							{/each}
+						</li>
+					{/each}
+				</ol>
 			</div>
-			<ol class="flex flex-col gap-2 p-3 text-sm sm:p-4" role="list">
-				{#each thread as message (message)}
-					<li
+			<figcaption class="text-muted-foreground mt-2 text-sm lg:mt-0">
+				Your AI agent asks, you confirm, Deploybot does it. Anything outside your catalog is refused.
+			</figcaption>
+		</figure>
+		<!-- The image is absolute from lg, so it never drives the row height; object-left-top keeps the tab bar
+		     and the Name column and trims only the right and bottom edges. -->
+		<figure class="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid">
+			<div class="bg-card overflow-hidden rounded-lg border lg:relative">
+				{#each ['dark', 'light'] as theme (theme)}
+					<img
 						class={[
-							'max-w-[85%] space-y-1.5 rounded-lg px-3 py-2',
-							message.from === 'user' ? 'bg-primary text-primary-foreground self-end' : 'bg-muted self-start'
+							'h-auto w-full lg:absolute lg:inset-0 lg:h-full lg:object-cover lg:object-left-top',
+							theme === 'dark' ? 'hidden dark:block' : 'block dark:hidden'
 						]}
-					>
-						<span class="sr-only">{message.from === 'user' ? 'You: ' : 'AI agent: '}</span>
-						{#each message.lines as line (line)}
-							<p class={[line.tool && 'text-muted-foreground border-l-2 pl-2 font-mono text-xs']}>
-								{#each wordsWithHyphens(line.text) as part, i}{#if i % 2}<span class="whitespace-nowrap"
-											>{part}</span
-										>{:else}{part}{/if}{/each}
-							</p>
-						{/each}
-					</li>
+						src={`/brand/about-catalog-${theme}.webp`}
+						width={catalogShot.width}
+						height={catalogShot.height}
+						loading="lazy"
+						decoding="async"
+						alt={catalogShot.alt}
+					/>
 				{/each}
-			</ol>
-		</div>
-		<figcaption class="text-muted-foreground mt-2 text-sm">
-			Your AI agent asks, you confirm, Deploybot does it. Anything outside your catalog is refused.
-		</figcaption>
-	</figure>
+			</div>
+			<figcaption class="text-muted-foreground mt-2 text-sm lg:mt-0">{catalogShot.caption}</figcaption>
+		</figure>
+	</div>
 </section>
 
 <section class="py-8" aria-labelledby="compare-title">

@@ -37,21 +37,30 @@ test('llms.txt sends secrets through one-time console pages, never chat', () => 
 	assert.ok(instructions.includes('Call `whats_new` when a tool you expect is missing or behaves differently.'));
 });
 
-test('llms.txt lists the released MCP tools, with env-set edits under plan and confirm, and no unreleased route tools', () => {
+test('llms.txt lists the released MCP tools, with env-set and route edits under plan and confirm', () => {
 	const tools = LLMS.slice(LLMS.indexOf('## MCP tools'), LLMS.indexOf('## Add a host'));
 	for (const name of [
 		'list_orgs', 'check_readiness', 'list_env_sets', 'create_env_set', 'update_env_set', 'delete_env_set',
 		'request_env_value', 'get_env_value_request', 'request_file', 'get_file_request', 'connect_registry',
-		'get_registry_connect_request', 'image_access', 'host_policy_snippet', 'shared_network_snippet', 'whats_new'
+		'get_registry_connect_request', 'image_access', 'host_policy_snippet', 'shared_network_snippet', 'whats_new',
+		'list_routes', 'set_routes'
 	]) {
 		assert.ok(tools.includes(`\`${name}\``), name);
 	}
 	const change = tools.split('\n').find((line) => line.startsWith('- Change, with plan and confirm:')) ?? '';
-	for (const name of ['create_env_set', 'update_env_set', 'delete_env_set']) {
+	for (const name of ['create_env_set', 'update_env_set', 'delete_env_set', 'set_routes']) {
 		assert.ok(change.includes(`\`${name}\``), name);
 	}
-	// v0.2.38 (routes, domains, edge) is not released: nothing about it on the public site yet.
-	assert.doesNotMatch(LLMS, /list_routes|set_routes|\bdomains?\b|\bedge\b/i);
+});
+
+test('llms.txt explains public addresses: domains and the edge switch are console-only, routes go through set_routes', () => {
+	const part = LLMS.slice(LLMS.indexOf('## Public addresses'), LLMS.indexOf('## Add a host'));
+	assert.ok(part.startsWith('## Public addresses\n'));
+	assert.ok(part.includes('there is no MCP tool for domains or for turning the edge on'));
+	assert.ok(part.includes('`set_routes`') && part.includes('`list_routes`'));
+	assert.ok(part.includes('client IPs from Cloudflare') && part.includes('no-store paths'));
+	assert.ok(part.includes('pending') && part.includes('live'));
+	assert.ok(LLMS.includes('catalog, env-set and route edits'));
 });
 
 test('llms.txt explains the components in text', () => {
