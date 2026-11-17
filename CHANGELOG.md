@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.39 — 2026-11-18
+- The landing page shows the console's Catalog & services tab again, and the site and llms.txt describe public addresses and routes.
+- Turning the edge on while another program holds port 80 or 443 now says what to do next.
+- An expired confirmation says so and asks you to run the tool again, instead of "not found".
+- Making a key secret while its value is empty is refused, in the console and over MCP, so no empty secret is created.
+- Revoked hosts no longer show "Update available".
+- Smaller console fixes: a neutral message when an entry name is taken, an accessible name on the env-set Delete button, clearer Edge card text, and the tag list shows how many tags match your filter and says when a long list is not complete.
+
 ## v0.2.38 — 2026-11-17
 - Public addresses: verify your own domain with a DNS TXT record, assign it to projects, and give an entry an HTTPS address, served by a per-host edge with automatic certificates.
 - Routes go through plan and confirm, in the console and over MCP (`set_routes`, `list_routes`), with two options: client IPs from Cloudflare, and no-store paths.
