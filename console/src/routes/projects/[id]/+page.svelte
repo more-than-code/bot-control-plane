@@ -68,15 +68,12 @@
 </svelte:head>
 
 {#if !data.project}
-	<PageHeader title="Project" breadcrumbs={[{ label: 'Projects', href: '/projects' }, { label: 'Project' }]} />
+	<PageHeader title="Project" />
 	<Notice kind="error">{data.message ?? 'This project is not available.'}</Notice>
 {:else}
 	<PageHeader
 		title={data.project.name}
 		subtitle="{data.project.slug} · your role {data.project.role}{data.project.via === 'org' ? ' (organization admin)' : ''}"
-		breadcrumbs={data.orgName && data.project.org_id
-			? [{ label: data.orgName, href: `/orgs/${data.project.org_id}` }, { label: data.project.name }]
-			: [{ label: 'Projects', href: '/projects' }, { label: data.project.name }]}
 	>
 		{#snippet actions()}
 			{#if scope === 'catalog' && data.canOwner}

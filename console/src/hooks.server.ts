@@ -10,6 +10,7 @@ import {
 	needsNoStore,
 	signinLocation
 } from '$lib/server/session';
+import { NOTIFICATIONS_ROUTE } from '$lib/notifications';
 import { applyThemeMarker, parseTheme, THEME_COOKIE } from '$lib/theme';
 
 /**
@@ -123,7 +124,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// POST /signout stays reachable when /v1/me is down so the browser can drop the cookie.
 	if (!event.locals.user && !isPublicPath(path) && !signOutPost) {
 		if (event.locals.sessionUnavailable) return applyHeaders(path, unavailable(path));
-		if (isApiPath(path)) {
+		// The bell's console route is a fetch, not a page: it gets the JSON 401 too, never the sign-in redirect.
+		if (isApiPath(path) || path === NOTIFICATIONS_ROUTE) {
 			const response = new Response(JSON.stringify({ message: 'Sign in required.' }), {
 				status: 401,
 				headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }

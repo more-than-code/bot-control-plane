@@ -38,6 +38,8 @@ export type Project = {
 	org_id: string | null;
 	/** `org`: the caller reaches the project only as an org owner or admin, and `role` is then `admin`. */
 	via: 'member' | 'org';
+	/** The project's org name (api-v1 v1.37 item 4), also when the caller is not in that org. Null from an older API. */
+	org_name?: string | null;
 };
 
 export type Member = {
@@ -706,3 +708,19 @@ export type Grant = {
 	last_used_at: string | null;
 	kind: 'oauth' | 'device';
 };
+
+/** `GET /v1/me/notifications` item (api-v1 v1.37 item 1). Computed by the API on each call. */
+export type NotificationKind = 'release' | 'host_update';
+
+export type Notification = {
+	key: string;
+	kind: NotificationKind;
+	title: string;
+	detail: string;
+	/** A console path, for example `/whats-new#v0.2.40` or `/hosts/<id>`. */
+	href: string;
+	at: string;
+	read: boolean;
+};
+
+export type NotificationList = { items: Notification[]; unread: number };

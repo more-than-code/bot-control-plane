@@ -19,7 +19,7 @@ function scriptOf(source: string): string {
 
 describe('Toaster in the root layout', () => {
 	const children = createRawSnippet(() => ({ render: () => '<p>child</p>' }));
-	const data = { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null };
+	const data = { user: null, orgs: [], projects: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null };
 
 	test('the app shell mounts one bottom-center Toaster with a polite live region', () => {
 		setPageUrl('http://console.example/projects');

@@ -1,5 +1,5 @@
 /**
- * The repository's CHANGELOG.md, parsed for the "What's new" page and the account menu dot (spec-update-awareness §2.4).
+ * The repository's CHANGELOG.md, parsed for the "What's new" page (spec-update-awareness §2.4).
  * Restricted format: `## vX.Y.Z — YYYY-MM-DD` headings, each followed by `- ` bullets; inline `code` is the only
  * markup. The text is turned into plain data here and rendered as Svelte elements: no markdown library and no raw HTML.
  * The file itself is read on the server only, in `$lib/server/changelog.ts`.
@@ -75,24 +75,5 @@ export function compareVersions(a: string, b: string): number | null {
 	return 0;
 }
 
+/** The retired What's new cookie (spec-update-awareness §2.4). Read once and imported as a read mark, then deleted. */
 export const SEEN_VERSION_COOKIE = 'bot_seen_version';
-export const SEEN_VERSION_MAX_AGE = 31536000;
-
-/** The dot shows while the latest release is newer than the seen marker; a missing or odd marker counts as unseen. */
-export function hasUnseenRelease(latest: string | null, seen: string | null | undefined): boolean {
-	if (!latest) return false;
-	const order = seen ? compareVersions(seen, latest) : null;
-	return order === null || order < 0;
-}
-
-/** Not HttpOnly: the browser writes it on /whats-new, like `bot_tz`. */
-export function seenVersionCookie(version: string, secure: boolean): string {
-	const securePart = secure ? '; Secure' : '';
-	return `${SEEN_VERSION_COOKIE}=${encodeURIComponent(version)}; Path=/; Max-Age=${SEEN_VERSION_MAX_AGE}; SameSite=Lax${securePart}`;
-}
-
-export function rememberSeenVersion(version: string): void {
-	if (typeof document === 'undefined' || !VERSION.test(version)) return;
-	const secure = typeof location !== 'undefined' && location.protocol === 'https:';
-	document.cookie = seenVersionCookie(version, secure);
-}

@@ -6,21 +6,20 @@ import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import {
 	compareVersions,
-	hasUnseenRelease,
 	inlineParts,
 	parseChangelog,
-	SEEN_VERSION_COOKIE,
-	seenVersionCookie
+	SEEN_VERSION_COOKIE
 } from '../src/lib/changelog.ts';
 import { agentUpdateText } from '../src/lib/host-view.ts';
 import { parseHost } from '../src/lib/server/shape.ts';
-import { latestVersion } from '../src/lib/server/changelog.ts';
+import { changelogEntries, latestVersion } from '../src/lib/server/changelog.ts';
+import { IMPORT_TIMEOUT_MS } from '../src/lib/server/notifications.ts';
 import AgentVersion from '../src/lib/components/AgentVersion.svelte';
 import { load as layoutLoad } from '../src/routes/+layout.server.ts';
 import RootLayout from '../src/routes/+layout.svelte';
 import { load as whatsNewLoad } from '../src/routes/whats-new/+page.server.ts';
 import WhatsNewPage from '../src/routes/whats-new/+page.svelte';
-import { fakeEvent, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
+import { envelope, fakeEvent, installFetch, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { setPageUrl, setRouteId } from './stubs/app-state.ts';
 
 // spec-update-awareness §2.4, §2.5 and §6 (console).
@@ -75,24 +74,15 @@ describe('changelog', () => {
 		]);
 	});
 
-	test('version order and the unseen rule', () => {
+	test('version order', () => {
 		assert.equal(compareVersions('0.2.9', '0.2.10'), -1);
 		assert.equal(compareVersions('0.10.0', '0.9.9'), 1);
 		assert.equal(compareVersions('0.2.37', '0.2.37'), 0);
 		assert.equal(compareVersions('v0.2.37', '0.2.37'), null);
-		assert.equal(hasUnseenRelease('0.2.37', undefined), true);
-		assert.equal(hasUnseenRelease('0.2.37', ''), true);
-		assert.equal(hasUnseenRelease('0.2.37', 'junk'), true);
-		assert.equal(hasUnseenRelease('0.2.37', '0.2.36'), true);
-		assert.equal(hasUnseenRelease('0.2.37', '0.2.37'), false);
-		assert.equal(hasUnseenRelease('0.2.37', '0.2.38'), false);
-		assert.equal(hasUnseenRelease(null, undefined), false);
 	});
 
-	test('the seen cookie follows the bot_tz pattern', () => {
+	test('the retired seen cookie keeps its name for the one-time import', () => {
 		assert.equal(SEEN_VERSION_COOKIE, 'bot_seen_version');
-		assert.equal(seenVersionCookie('0.2.37', false), 'bot_seen_version=0.2.37; Path=/; Max-Age=31536000; SameSite=Lax');
-		assert.equal(seenVersionCookie('0.2.37', true), 'bot_seen_version=0.2.37; Path=/; Max-Age=31536000; SameSite=Lax; Secure');
 	});
 
 	test('no markdown library, no {@html}, no localStorage', () => {
@@ -147,48 +137,110 @@ describe('/whats-new', () => {
 	});
 });
 
-describe('account menu dot', () => {
+// spec-header-org-project-bell §3.2 and §4 option B: the dot moved to the bell; the cookie is imported once.
+describe('What\'s new moves to the bell', () => {
 	const latest = latestVersion() as string;
-	const layoutData = (url: string, cookie?: string, signedIn = true) => {
-		const fake = fakeEvent({ url, session: TOKEN, user: signedIn ? USER : null });
-		if (cookie !== undefined) fake.jar.set(SEEN_VERSION_COOKIE, cookie);
-		return layoutLoad(fake.event as never) as { whatsNew: { version: string | null; unseen: boolean } | null };
-	};
+	const API = 'https://api.test';
 
-	test('the layout load reads bot_seen_version', () => {
-		assert.deepEqual(layoutData('http://console.example/projects').whatsNew, { version: latest, unseen: true });
-		assert.equal(layoutData('http://console.example/projects', '0.2.36').whatsNew?.unseen, true);
-		assert.equal(layoutData('http://console.example/projects', 'odd').whatsNew?.unseen, true);
-		assert.equal(layoutData('http://console.example/projects', latest).whatsNew?.unseen, false);
-		// The page itself counts as seen, so the dot never shows there.
-		assert.equal(layoutData('http://console.example/whats-new').whatsNew?.unseen, false);
-		assert.equal(layoutData('http://console.example/projects', undefined, false).whatsNew, null);
+	async function layoutWith(cookie: string | undefined, status = 200) {
+		useApi(API);
+		const calls = installFetch(() => (status === 200 ? envelope(null) : envelope(null, status, 'error', 'down')));
+		const fake = fakeEvent({ url: 'http://console.example/projects', session: TOKEN, user: USER });
+		if (cookie !== undefined) fake.jar.set(SEEN_VERSION_COOKIE, cookie);
+		try {
+			const data = (await layoutLoad(fake.event as never)) as { whatsNew: { version: string | null } | null };
+			return { data, calls, jar: fake.jar, sets: fake.sets };
+		} finally {
+			restoreEnv();
+		}
+	}
+
+	test('the layout load passes the version only, no unseen flag', async () => {
+		const { data, calls } = await layoutWith(undefined);
+		assert.deepEqual(data.whatsNew, { version: latest });
+		assert.equal(calls.length, 0);
 	});
 
-	test('the dot is in the server HTML only while unseen', () => {
+	const newest = changelogEntries().slice(0, 5).map((entry) => entry.version);
+
+	test('a cookie naming the newest release marks every release item read once, then goes', async () => {
+		const { calls, jar, sets } = await layoutWith(latest);
+		assert.equal(calls.length, 1);
+		assert.equal(calls[0].method, 'POST');
+		assert.equal(calls[0].url.pathname, '/v1/me/notifications/read');
+		assert.deepEqual(JSON.parse(calls[0].body ?? ''), { keys: newest.map((v) => `release:${v}`) });
+		assert.equal(jar.has(SEEN_VERSION_COOKIE), false);
+		assert.deepEqual(sets.find((op) => op.name === SEEN_VERSION_COOKIE), { op: 'delete', name: SEEN_VERSION_COOKIE, options: { path: '/' } });
+	});
+
+	test('after an upgrade, the releases at or below the seen version are marked, the newer ones stay unread', async () => {
+		const { calls, jar } = await layoutWith(newest[1]);
+		assert.equal(calls.length, 1);
+		assert.deepEqual(JSON.parse(calls[0].body ?? ''), { keys: newest.slice(1).map((v) => `release:${v}`) });
+		assert.equal(jar.has(SEEN_VERSION_COOKIE), false);
+	});
+
+	test('the import is bounded at 2 s; a timeout keeps the cookie', async () => {
+		assert.equal(IMPORT_TIMEOUT_MS, 2000);
+		useApi(API);
+		const calls = installFetch(
+			(call) =>
+				new Promise<Response>((_, reject) => {
+					call.signal?.addEventListener('abort', () => reject(call.signal?.reason));
+				})
+		);
+		const fake = fakeEvent({ url: 'http://console.example/projects', session: TOKEN, user: USER });
+		fake.jar.set(SEEN_VERSION_COOKIE, latest);
+		const started = Date.now();
+		try {
+			await layoutLoad(fake.event as never);
+		} finally {
+			restoreEnv();
+		}
+		const took = Date.now() - started;
+		assert.equal(calls.length, 1);
+		assert.ok(took >= 1900 && took < 5000, `took ${took} ms`);
+		assert.equal(fake.jar.get(SEEN_VERSION_COOKIE), latest);
+	});
+
+	test('an older or odd cookie is dropped without a read mark', async () => {
+		for (const value of ['0.0.1', 'odd']) {
+			const { calls, jar } = await layoutWith(value);
+			assert.equal(calls.length, 0, value);
+			assert.equal(jar.has(SEEN_VERSION_COOKIE), false, value);
+		}
+	});
+
+	test('a failed read mark keeps the cookie for the next load', async () => {
+		const { calls, jar } = await layoutWith(latest, 503);
+		assert.equal(calls.length, 1);
+		assert.equal(jar.get(SEEN_VERSION_COOKIE), latest);
+	});
+
+	test('the account menu has a plain What\'s new item and no dot', () => {
 		setPageUrl('http://console.example/projects');
 		setRouteId('/projects');
 		const children = createRawSnippet(() => ({ render: () => '<p>child</p>' }));
 		const user = { id: USER.id, name: USER.name, avatarUrl: null };
-		const base = { user, orgs: [], theme: 'system' as const, timeZone: 'UTC' };
-		const unseen = render(RootLayout, { props: { children, data: { ...base, whatsNew: { version: latest, unseen: true } } } }).body;
-		assert.equal(unseen.includes('data-unseen-dot'), true);
-		assert.equal(unseen.includes('(new release)'), true);
-		const seen = render(RootLayout, { props: { children, data: { ...base, whatsNew: { version: latest, unseen: false } } } }).body;
-		assert.equal(seen.includes('data-unseen-dot'), false);
-	});
-
-	test('the menu item names the version and the page stores the seen cookie', () => {
+		const html = render(RootLayout, {
+			props: { children, data: { user, orgs: [], projects: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: { version: latest } } }
+		}).body;
+		assert.equal(html.includes('data-unseen-dot'), false);
+		assert.equal(html.includes('(new release)'), false);
 		const layout = readFileSync(new URL('../src/routes/+layout.svelte', import.meta.url), 'utf8');
 		assert.match(layout, /href="\/whats-new"/);
 		assert.match(layout, /What's new/);
 		assert.match(layout, /v\{data\.whatsNew\.version\}/);
-		// The browser check found the menu as narrow as a short name: items wrapped and the version and dot were cut off.
 		assert.match(layout, /<DropdownMenu\.Content align="end" class="w-auto min-w-56 max-w-\[calc\(100vw-2rem\)\]">/);
-		assert.match(layout, /<span data-whats-new-meta class="ml-auto flex shrink-0 items-center[^"]*">/);
-		assert.match(layout, /data-unseen-dot class="size-2 shrink-0 rounded-full bg-primary"/);
+		assert.doesNotMatch(layout, /data-unseen-dot|SEEN_VERSION_COOKIE|unseen/);
+		const server = readFileSync(new URL('../src/routes/+layout.server.ts', import.meta.url), 'utf8');
+		assert.doesNotMatch(server, /hasUnseenRelease|unseen/);
+	});
+
+	test('/whats-new no longer stores a cookie and anchors each release for the bell', () => {
 		const page = readFileSync(new URL('../src/routes/whats-new/+page.svelte', import.meta.url), 'utf8');
-		assert.match(page, /onMount\(\(\) => \{[\s\S]*rememberSeenVersion\(latest\)/);
+		assert.doesNotMatch(page, /rememberSeenVersion|document\.cookie/);
+		assert.match(page, /<section id="v\{entry\.version\}"/);
 	});
 });
 

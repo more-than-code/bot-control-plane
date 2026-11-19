@@ -80,12 +80,14 @@ const projectCols = `p.id::text, p.org_id::text, p.name, p.slug`
 
 // reachSQL lists the projects $1 can reach (api-v1 v1.24 item 1): a
 // membership (via member), or an org owner or admin role (via org, as
-// admin). $2 limits to one org when not null.
+// admin). $2 limits to one org when not null. The last column is the
+// org name (api-v1 v1.37 item 4), read by scanReachProject.
 const reachSQL = `
 SELECT ` + projectCols + `, COALESCE(m.role, 'admin'),
        CASE WHEN m.role IS NULL THEN 'org' ELSE 'member' END,
-       p.created_by::text, p.created_at
+       p.created_by::text, p.created_at, o.name
 FROM app.projects p
+JOIN app.orgs o ON o.id = p.org_id
 LEFT JOIN app.project_members m ON m.project_id = p.id AND m.user_id = $1::uuid
 LEFT JOIN app.org_members om ON om.org_id = p.org_id AND om.user_id = $1::uuid AND om.role IN ('owner', 'admin')
 WHERE p.deleted_at IS NULL
@@ -118,7 +120,7 @@ LIMIT $5
 	defer rows.Close()
 	items := []store.Project{}
 	for rows.Next() {
-		p, err := scanProject(rows)
+		p, err := scanReachProject(rows)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -478,9 +480,25 @@ WHERE project_id = $1::uuid AND user_id = $2::uuid
 }
 
 func scanProject(row pgx.Row) (store.Project, error) {
+	return scanProjectWith(row)
+}
+
+// scanReachProject scans a reachSQL row: the project columns, then the org name.
+func scanReachProject(row pgx.Row) (store.Project, error) {
+	var orgName string
+	p, err := scanProjectWith(row, &orgName)
+	if err != nil {
+		return store.Project{}, err
+	}
+	p.OrgName = orgName
+	return p, nil
+}
+
+func scanProjectWith(row pgx.Row, extra ...any) (store.Project, error) {
 	var p store.Project
 	var id, orgID, createdBy string
-	if err := row.Scan(&id, &orgID, &p.Name, &p.Slug, &p.Role, &p.Via, &createdBy, &p.CreatedAt); err != nil {
+	dest := append([]any{&id, &orgID, &p.Name, &p.Slug, &p.Role, &p.Via, &createdBy, &p.CreatedAt}, extra...)
+	if err := row.Scan(dest...); err != nil {
 		return store.Project{}, mapErr(err)
 	}
 	var err error

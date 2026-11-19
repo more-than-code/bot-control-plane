@@ -322,7 +322,6 @@ const empty = {
 	membersTruncated: false,
 	membersMessage: null as string | null,
 	canOrgAdmin: false,
-	orgName: null as string | null,
 	tokens: [] as JoinToken[],
 	tokensMessage: null as string | null,
 	invites: [] as Invite[],
@@ -369,7 +368,6 @@ export const load: PageServerLoad = async (event) => {
 	// Hosts and join tokens belong to the org: only its owners and admins add hosts or revoke credentials.
 	const orgId = project.org_id;
 	const canOrgAdmin = isOrgAdmin(event.locals.orgs, orgId);
-	const orgName = event.locals.orgs.find((org) => org.id === orgId)?.name ?? null;
 
 	// Each tab loads only what it shows, and independent calls run together.
 	// The copies on the Catalog & services tab wait for the host list and the catalog, because grouping and
@@ -439,7 +437,6 @@ export const load: PageServerLoad = async (event) => {
 			canAdmin,
 			canOwner,
 			canOrgAdmin,
-			orgName,
 			hosts,
 			hostsOmitted,
 			hostsTruncated,

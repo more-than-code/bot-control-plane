@@ -121,7 +121,11 @@ type Project struct {
 	// Via is "member" when Role is the caller's project membership, or "org"
 	// when the caller reaches the project only as an org owner or admin
 	// (Role is then "admin"). Empty when the row was not loaded for a caller.
-	Via       string     `json:"via,omitempty"`
+	Via string `json:"via,omitempty"`
+	// OrgName is the name of the project's org, set by the reach lists
+	// (ListProjects, ListAllProjects, ListOrgProjects). Only GET /v1/me
+	// sends it (api-v1 v1.37 item 4), so it is not marshalled here.
+	OrgName   string     `json:"-"`
 	CreatedBy uuid.UUID  `json:"-"`
 	CreatedAt time.Time  `json:"created_at"`
 	DeletedAt *time.Time `json:"-"`
@@ -524,6 +528,7 @@ type Store interface {
 	FileRequestStore
 	ConnectRequestStore
 	EdgeStore
+	NotificationStore
 	// ListOpenRequests is the user's pending, unexpired value, file and
 	// connect requests at at, newest first, at most max (api-v1 v1.33 item
 	// 8), in projects that are not deleted.

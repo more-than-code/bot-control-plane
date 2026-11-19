@@ -3,7 +3,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import { untrack } from 'svelte';
 	import Notice from '$lib/components/Notice.svelte';
-	import { formDialogOutcome, nextFormDialog, type DialogOutcome } from '$lib/dialog-open';
+	import { focusFallbackAfterClose, formDialogOutcome, nextFormDialog, type DialogOutcome } from '$lib/dialog-open';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -14,7 +14,11 @@
 		action,
 		failed,
 		message = null,
-		orgs = []
+		orgs = [],
+		showTrigger = true,
+		openRequest = 0,
+		fallbackFocusId = null,
+		ownResult = false
 	}: {
 		action: string;
 		failed: boolean;
@@ -24,6 +28,17 @@
 		 * get a choice. None posts no org, and the API picks the caller's only org or asks for one.
 		 */
 		orgs?: Array<{ id: string; name: string }>;
+		/** False: no button of its own (the header's Project ▾ menu opens it). */
+		showTrigger?: boolean;
+		/** A new value (a counter) opens the dialog. */
+		openRequest?: number;
+		/** Where focus goes when the dialog closes and its own trigger is hidden. */
+		fallbackFocusId?: string | null;
+		/**
+		 * True when the action is on another route (the header posts to `/projects`): a failure stays in this dialog
+		 * instead of becoming the current page's `form`. A success still follows the redirect to the new project.
+		 */
+		ownResult?: boolean;
 	} = $props();
 
 	let orgId = $state(untrack(() => (orgs.length === 1 ? orgs[0].id : '')));
@@ -38,6 +53,28 @@
 		sawFailure = next.sawFailure;
 	});
 
+	// The failure message of an `ownResult` post.
+	let ownMessage = $state<string | null>(null);
+	const shownMessage = $derived(ownResult ? ownMessage : failed ? message : null);
+
+	// The header menu opens this by changing `openRequest`; closing returns focus to that menu's trigger.
+	let requestSeen = untrack(() => openRequest);
+	$effect(() => {
+		const request = openRequest;
+		if (request === requestSeen) return;
+		requestSeen = request;
+		untrack(() => {
+			ownMessage = null;
+			open = true;
+		});
+	});
+	let openBefore = untrack(() => open);
+	$effect(() => {
+		const now = open;
+		if (openBefore && !now) focusFallbackAfterClose(untrack(() => fallbackFocusId));
+		openBefore = now;
+	});
+
 	function settle(outcome: DialogOutcome) {
 		const next = nextFormDialog({ open, sawFailure }, outcome);
 		open = next.open;
@@ -46,10 +83,12 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Trigger class={buttonVariants()}>
-		<Plus class="size-4" />
-		New project
-	</Dialog.Trigger>
+	{#if showTrigger}
+		<Dialog.Trigger class={buttonVariants()}>
+			<Plus class="size-4" />
+			New project
+		</Dialog.Trigger>
+	{/if}
 	<Dialog.Content>
 		<Dialog.Header>
 			<Dialog.Title>New project</Dialog.Title>
@@ -61,13 +100,19 @@
 			class="grid gap-3"
 			use:enhance={() => {
 				return async ({ result, update }) => {
+					if (ownResult && result.type === 'failure') {
+						const data = result.data as { message?: unknown } | undefined;
+						ownMessage = typeof data?.message === 'string' ? data.message : 'The project could not be created.';
+						return;
+					}
+					ownMessage = null;
 					await update();
 					settle(formDialogOutcome(result.type));
 				};
 			}}
 		>
-			{#if failed && message}
-				<Notice kind="error">{message}</Notice>
+			{#if shownMessage}
+				<Notice kind="error">{shownMessage}</Notice>
 			{/if}
 			{#if orgs.length === 1}
 				<Input type="hidden" name="org_id" value={orgId} />

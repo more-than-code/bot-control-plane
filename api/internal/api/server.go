@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	changelog "github.com/more-than-code/bot-control-plane"
 	"github.com/more-than-code/bot-control-plane/api/internal/agentversion"
 	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
@@ -59,6 +60,9 @@ type Server struct {
 	// Production leaves it at 0. Tests set it so a timeout does not wait
 	// out the real deploy budget.
 	imageBudget int
+	// releases, when set, replaces the embedded CHANGELOG.md as the source
+	// of release notifications (api-v1 v1.37). Tests only.
+	releases func() []changelog.Entry
 }
 
 // delegatedPolicy says what an api_delegated session may do on a route.
@@ -102,6 +106,9 @@ func contractRoutes() []route {
 		{"POST /v1/oauth/requests/{id}/deny", false, (*Server).handleOAuthRequestDeny, delegatedHandler},
 		// api-v1 v1.33 item 8: the caller's open requests, console only.
 		{"GET /v1/me/requests", false, (*Server).handleMyRequests, delegatedDenyRead},
+		// api-v1 v1.37 items 1 and 2: notifications and read marks, console only.
+		{"GET /v1/me/notifications", false, (*Server).handleNotifications, delegatedDenyRead},
+		{"POST /v1/me/notifications/read", false, (*Server).handleNotificationsRead, delegatedDeny},
 		{"GET /v1/me/grants", false, (*Server).handleGrantList, delegatedAllow},
 		{"DELETE /v1/me/grants/{id}", false, (*Server).handleGrantDelete, delegatedHandler},
 		{"POST /v1/auth/device/code", true, (*Server).handleDeviceCode, delegatedAllow},

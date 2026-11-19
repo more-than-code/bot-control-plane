@@ -4,15 +4,14 @@
 	import { page } from '$app/state';
 	import { onMount, untrack } from 'svelte';
 	import AppWindow from '@lucide/svelte/icons/app-window';
-	import Building2 from '@lucide/svelte/icons/building-2';
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import FolderKanban from '@lucide/svelte/icons/folder-kanban';
 	import Inbox from '@lucide/svelte/icons/inbox';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Toaster } from '$lib/components/ui/sonner';
+	import HeaderNav from '$lib/components/HeaderNav.svelte';
+	import NotificationsBell from '$lib/components/NotificationsBell.svelte';
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
 	import { avatarInitial } from '$lib/avatar';
 	import { browserTimeZone, provideTimeZone, rememberTimeZone } from '$lib/time-zone';
@@ -43,16 +42,12 @@
 
 	// The public site pages ((site) group) bring their own layout, not the app shell.
 	const sitePage = $derived(page.route.id?.startsWith('/(site)') ?? false);
-	const path = $derived(page.url.pathname);
 	// Same link style as the sign-in line and the public site footer.
 	const footerLink =
 		'rounded-sm underline underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring';
-	const onProjects = $derived(
-		path === '/projects' || path.startsWith('/projects/') || path.startsWith('/hosts/')
-	);
-	// The org switcher names the org whose page is open.
-	const currentOrg = $derived(
-		path.startsWith('/orgs/') ? (data.orgs?.find((org) => path.startsWith(`/orgs/${org.id}`)) ?? null) : null
+	// The host page names its org in its own data; the header's Org ▾ follows it there.
+	const pageOrgId = $derived(
+		page.route.id === '/hosts/[id]' ? ((page.data as { org?: { id?: string } | null }).org?.id ?? null) : null
 	);
 </script>
 
@@ -66,47 +61,21 @@
 	<div class="mx-auto w-full min-w-0 max-w-6xl px-4">
 		<header class="flex flex-col gap-y-2 py-3 sm:flex-row sm:items-center sm:gap-x-3">
 			<div class="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:contents">
-				<a class="shrink-0" href="/projects" aria-label="Deploybot">
-					<img src="/brand/lockup-light.svg" alt="" class="h-6 w-auto dark:hidden" />
-					<img src="/brand/lockup-dark.svg" alt="" class="hidden h-6 w-auto dark:block" />
-				</a>
-				<nav class="flex shrink-0 items-center" aria-label="Primary">
-					<a
-						href="/projects"
-						class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm {onProjects
-							? 'bg-muted text-foreground'
-							: 'text-muted-foreground'}"
-						aria-current={onProjects ? 'page' : undefined}><FolderKanban class="size-4" />Projects</a
-					>
-					{#if data.user && (data.orgs?.length ?? 0) > 0}
-						<DropdownMenu.Root>
-							<DropdownMenu.Trigger
-								class={cn(
-									buttonVariants({ variant: 'ghost', size: 'sm' }),
-									'max-w-48 min-w-0 font-normal',
-									currentOrg ? 'bg-muted text-foreground' : 'text-muted-foreground'
-								)}
-							>
-								<Building2 class="size-4" />
-								<!-- The accessible name starts with the visible text's purpose and contains it (WCAG 2.5.3). -->
-								<span class="sr-only">Switch organization:</span>
-								<span class="min-w-0 truncate">{currentOrg?.name ?? 'Organizations'}</span>
-								<ChevronDown class="size-4" />
-							</DropdownMenu.Trigger>
-							<DropdownMenu.Content align="start">
-								{#each data.orgs ?? [] as org (org.id)}
-									<DropdownMenu.Item>
-										{#snippet child({ props })}
-											<a href="/orgs/{org.id}" aria-current={currentOrg?.id === org.id ? 'page' : undefined} {...props}>{org.name}</a>
-										{/snippet}
-									</DropdownMenu.Item>
-								{/each}
-							</DropdownMenu.Content>
-						</DropdownMenu.Root>
+				<!-- Below sm: logo, project menu and bell stay on one row; only the nav shrinks. -->
+				<div data-header-main class="flex w-full min-w-0 flex-nowrap items-center gap-x-3 sm:contents">
+					<a class="shrink-0" href="/projects" aria-label="Deploybot">
+						<img src="/brand/lockup-light.svg" alt="" class="h-6 w-auto dark:hidden" />
+						<img src="/brand/lockup-dark.svg" alt="" class="hidden h-6 w-auto dark:block" />
+					</a>
+					{#if data.user}
+						<HeaderNav orgs={data.orgs ?? []} projects={data.projects ?? []} {pageOrgId} />
+						<div class="ml-auto shrink-0 sm:order-1">
+							<NotificationsBell />
+						</div>
 					{/if}
-				</nav>
+				</div>
 				{#if data.user}
-					<div class="ml-auto flex min-w-0 max-w-full items-center gap-2 sm:order-2 sm:ml-0">
+					<div class="flex min-w-0 max-w-full items-center gap-2 sm:order-2">
 						<DropdownMenu.Root>
 							<DropdownMenu.Trigger
 								class={cn(
@@ -130,10 +99,6 @@
 									>
 								{/if}
 								<span class="min-w-0 truncate">{data.user.name || 'Account'}</span>
-								{#if data.whatsNew?.unseen}
-									<span aria-hidden="true" data-unseen-dot class="size-2 shrink-0 rounded-full bg-primary"></span>
-									<span class="sr-only">(new release)</span>
-								{/if}
 							</DropdownMenu.Trigger>
 							<!-- The content would otherwise take the trigger's width (a short name), wrapping and clipping the items. -->
 							<DropdownMenu.Content align="end" class="w-auto min-w-56 max-w-[calc(100vw-2rem)]">
@@ -152,13 +117,7 @@
 										{#snippet child({ props })}
 											<a href="/whats-new" {...props}
 												><Sparkles class="size-4" /><span class="min-w-0 truncate">What's new</span>
-												<span data-whats-new-meta class="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
-													{#if data.whatsNew?.version}<span class="text-muted-foreground font-mono text-xs">v{data.whatsNew.version}</span>{/if}
-													{#if data.whatsNew?.unseen}
-														<span aria-hidden="true" data-unseen-dot class="size-2 shrink-0 rounded-full bg-primary"></span>
-														<span class="sr-only">(new release)</span>
-													{/if}
-												</span></a
+												{#if data.whatsNew?.version}<span data-whats-new-meta class="text-muted-foreground ml-auto shrink-0 pl-2 font-mono text-xs">v{data.whatsNew.version}</span>{/if}</a
 											>
 										{/snippet}
 									</DropdownMenu.Item>
@@ -172,7 +131,8 @@
 					</div>
 				{/if}
 			</div>
-			<div class="sm:order-1 sm:ml-auto">
+			<!-- Signed out there is no bell, so the theme switch takes the right edge itself. -->
+			<div class={cn('sm:order-1', !data.user && 'sm:ml-auto')}>
 				<ThemeSwitch value={data.theme} />
 			</div>
 		</header>

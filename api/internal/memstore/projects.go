@@ -71,6 +71,7 @@ func (m *Mem) reachableProjectsLocked(userID uuid.UUID, orgID *uuid.UUID) []stor
 			continue
 		}
 		if r, ok := m.reachableLocked(p, userID); ok {
+			r.OrgName = m.orgs[p.OrgID].Name
 			items = append(items, r)
 		}
 	}

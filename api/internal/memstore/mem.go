@@ -93,6 +93,8 @@ type Mem struct {
 	connectRequests map[string]store.ConnectRequest
 	// edge is domains, routes and host edges (api-v1 v1.35); see edge.go.
 	edge *edgeData
+	// notificationReads is user id → key → read_at (api-v1 v1.37 item 3).
+	notificationReads map[uuid.UUID]map[string]time.Time
 }
 
 type sessionRec struct {
@@ -140,6 +142,7 @@ var _ store.Store = (*Mem)(nil)
 func New() *Mem {
 	return &Mem{
 		users:                     map[uuid.UUID]store.User{},
+		notificationReads:         map[uuid.UUID]map[string]time.Time{},
 		byEmail:                   map[string]uuid.UUID{},
 		idents:                    map[uuid.UUID]store.Identity{},
 		bySubject:                 map[string]uuid.UUID{},

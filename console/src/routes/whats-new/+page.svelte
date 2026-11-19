@@ -1,15 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import { rememberSeenVersion } from '$lib/changelog';
 
 	let { data } = $props();
-
-	// Visiting this page marks the newest release as seen, so the account menu dot goes away.
-	onMount(() => {
-		const latest = data.entries[0]?.version;
-		if (latest) rememberSeenVersion(latest);
-	});
 </script>
 
 <svelte:head>
@@ -19,7 +11,7 @@
 <PageHeader title="What's new" subtitle="Changes in each Deploybot release, newest first." />
 <div class="flex flex-col gap-6">
 	{#each data.entries as entry (entry.version)}
-		<section aria-labelledby="release-{entry.version}">
+		<section id="v{entry.version}" class="scroll-mt-4" aria-labelledby="release-{entry.version}">
 			<h2 id="release-{entry.version}" class="text-base font-semibold">
 				v{entry.version} <span class="text-muted-foreground text-sm font-normal"><span aria-hidden="true">·</span> <time datetime={entry.date}>{entry.date}</time></span>
 			</h2>

@@ -48,13 +48,12 @@
 </svelte:head>
 
 {#if !data.org}
-	<PageHeader title="Organization" breadcrumbs={[{ label: 'Projects', href: '/projects' }, { label: 'Organization' }]} />
+	<PageHeader title="Organization" />
 	<Notice kind="error">{data.message ?? 'This organization is not available.'}</Notice>
 {:else}
 	<PageHeader
 		title={data.org.name}
 		subtitle="Organization · your role {data.org.role}"
-		breadcrumbs={[{ label: 'Projects', href: '/projects' }, { label: data.org.name }]}
 	>
 		{#snippet actions()}
 			{#if scope === 'projects' && data.canAdmin}

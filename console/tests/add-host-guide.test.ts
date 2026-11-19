@@ -75,7 +75,6 @@ function renderHosts(
 		canAdmin,
 		canOwner: false,
 		canOrgAdmin: canAdmin,
-		orgName: 'Home Lab',
 		hosts: hasHosts ? [HOST] : [],
 		hostsOmitted: 0,
 		hostsTruncated: false,

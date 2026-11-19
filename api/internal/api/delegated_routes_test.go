@@ -67,6 +67,7 @@ var delegatedDenyPatterns = []string{
 	"PUT /v1/orgs/{id}/domains/{domain_id}/assignments",
 	"DELETE /v1/orgs/{id}/domains/{domain_id}",
 	"PUT /v1/hosts/{id}/edge",
+	"POST /v1/me/notifications/read",
 }
 
 var delegatedAllowPatterns = []string{
@@ -268,6 +269,13 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 				t.Fatal(err)
 			}
 			return fmt.Sprintf("%v %s", e.Enabled, e.Status)
+		}},
+		{"POST /v1/me/notifications/read", http.MethodPost, "/v1/me/notifications/read", `{"keys":["release:0.2.40"]}`, func(t *testing.T) string {
+			reads, err := w.mem.NotificationReads(ctx, owner.ID, []string{"release:0.2.40"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return fmt.Sprint(reads)
 		}},
 	}
 	if len(cases) != len(delegatedDenyPatterns) {

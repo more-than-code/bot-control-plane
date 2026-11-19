@@ -165,7 +165,9 @@ export function parseProject(value: unknown): Project | null {
 	if (org_id !== null && !isUuid(org_id)) return null;
 	if (value.via != null && value.via !== 'member' && value.via !== 'org') return null;
 	const via = value.via === 'org' ? 'org' : 'member';
-	return { id, name, slug, role: value.role, created_at, org_id, via };
+	// api-v1 v1.37 item 4: header text only, so a missing or odd name is no name, not a lost project.
+	const org_name = text(value.org_name, 80) || null;
+	return { id, name, slug, role: value.role, created_at, org_id, via, org_name };
 }
 
 /** The agent slug grammar (api-v1 v1.24 item 1). */

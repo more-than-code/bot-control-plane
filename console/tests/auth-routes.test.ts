@@ -542,17 +542,17 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(containsToken(snapshot), false);
 	});
 
-	test('layout returns the signed-in name and the primary nav is Projects plus the user menu', async () => {
+	test('layout returns the signed-in name and the header nav is Org / Project plus the user menu', async () => {
 		useApi('https://api.test');
 		const data = pageData(await layoutLoad(fakeEvent({ url: 'http://pi.local/projects', user: USER }).event as never));
 		assert.equal(data.user?.name, 'Ada');
 		assert.equal(Object.hasOwn(data, 'authEnabled'), false);
 		const layout = readFileSync(new URL('../src/routes/+layout.svelte', import.meta.url), 'utf8');
-		const navStart = layout.indexOf('aria-label="Primary"');
-		const navEnd = layout.indexOf('</nav>');
-		assert.ok(navStart >= 0 && navEnd > navStart);
-		const nav = layout.slice(navStart, navEnd);
-		assert.match(nav, />Projects</);
+		// spec-header-org-project-bell §3.1: the Projects link and org switcher became HeaderNav.
+		assert.match(layout, /\{#if data\.user\}\s*<HeaderNav /);
+		assert.equal(layout.includes('aria-label="Primary"'), false);
+		const nav = readFileSync(new URL('../src/lib/components/HeaderNav.svelte', import.meta.url), 'utf8');
+		assert.match(nav, /aria-label="Organization and project"/);
 		assert.equal(/\b(Overview|Services|Processes|Databases|Ops)\b/.test(nav), false);
 		assert.match(layout, /Sign out/);
 		assert.match(layout, /data\.user\.name/);
@@ -564,7 +564,7 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.ok(row, 'signed-in header row');
 		assert.match(row[1], /\bflex-wrap\b/);
 		assert.match(row[1], /\bmin-w-0\b/);
-		const account = layout.match(/<div class="([^"]*ml-auto[^"]*)">/);
+		const account = layout.match(/<div class="([^"]*sm:order-2[^"]*)">/);
 		assert.ok(account, 'account cluster');
 		assert.match(account[1], /\bmin-w-0\b/);
 		assert.match(account[1], /\bmax-w-full\b/);

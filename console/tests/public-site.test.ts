@@ -294,20 +294,20 @@ describe('public site pages', () => {
 
 	test('the root layout renders only the child for site routes', () => {
 		const children = createRawSnippet(() => ({ render: () => '<p>child</p>' }));
-		const data = { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null };
+		const data = { user: null, orgs: [], projects: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null };
 		setPageUrl('http://console.example/about');
 		setRouteId('/(site)/about');
 		const site = render(RootLayout, { props: { children, data } }).body;
 		assert.ok(site.includes('<p>child</p>'));
 		assert.equal(site.includes('Skip to content'), false);
-		assert.equal(site.includes('aria-label="Primary"'), false);
+		assert.equal(site.includes('aria-label="Deploybot"'), false);
 		assert.equal(site.includes('aria-label="Legal"'), false);
 
 		setPageUrl('http://console.example/projects');
 		setRouteId('/projects');
 		const app = render(RootLayout, { props: { children, data } }).body;
 		assert.ok(app.includes('Skip to content'));
-		assert.ok(app.includes('aria-label="Primary"'));
+		assert.ok(app.includes('aria-label="Deploybot"'));
 		const footer = app.slice(app.indexOf('</main>'));
 		assert.ok(footer.includes('aria-label="Legal"'), 'legal footer after main');
 		// Spec seo-indexing-fixes §3.3: the console host's copies 301 to the apex, so link there directly.
@@ -482,7 +482,7 @@ describe('public site pages', () => {
 	test('sign-in shows the terms sentence with links, signed out and with an error', () => {
 		const sentence =
 			'By continuing you agree to the Terms of Service and acknowledge the Privacy Policy.';
-		const layout = { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null, next: '/projects' };
+		const layout = { user: null, orgs: [], projects: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null, next: '/projects' };
 		const cases = [
 			{ data: layout, form: null },
 			{

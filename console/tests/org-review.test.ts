@@ -366,15 +366,19 @@ describe('rendered visibility (item 30)', () => {
 		assert.equal(rows.some((label) => label.includes('owner@example.com')), false);
 	});
 
-	test('the header org switcher names the org and starts with its purpose', () => {
+	test('the header Org ▾ names the org on its page (spec-header-org-project-bell §3.1)', () => {
 		setPageUrl(`http://console.example/orgs/${ORG.id}`);
 		setRouteId('/orgs/[id]');
 		const children = createRawSnippet(() => ({ render: () => '<p>child</p>' }));
 		const user = { id: USER.id, name: USER.name, avatarUrl: null };
 		const html = render(RootLayout, {
-			props: { children, data: { user, orgs: [{ id: ORG.id, name: ORG.name }], theme: 'system' as const, timeZone: 'UTC', whatsNew: null } }
+			props: {
+				children,
+				data: { user, orgs: [{ id: ORG.id, name: ORG.name, role: ORG.role }], projects: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null }
+			}
 		}).body;
-		assert.match(html.replace(/<!--[\s\S]*?-->/g, ''), /<span class="sr-only">Switch organization:<\/span>\s*<span class="min-w-0 truncate">Home Lab<\/span>/);
+		assert.match(html, /aria-label="Organization: Home Lab"/);
+		assert.match(html, /aria-label="Project: Select a project"/);
 		// The org links are in the menu content, which mounts only when it opens.
 	});
 });

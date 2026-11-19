@@ -33,6 +33,8 @@ func TestRouteTable(t *testing.T) {
 		"POST /v1/oauth/requests/{id}/approve",
 		"POST /v1/oauth/requests/{id}/deny",
 		"GET /v1/me/requests",
+		"GET /v1/me/notifications",
+		"POST /v1/me/notifications/read",
 		"GET /v1/me/grants",
 		"DELETE /v1/me/grants/{id}",
 		"POST /v1/auth/device/code",

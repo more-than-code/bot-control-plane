@@ -127,13 +127,20 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	for _, idn := range idents {
 		view = append(view, map[string]string{"provider": idn.Provider, "email": idn.Email})
 	}
-	if projects == nil {
-		projects = []store.Project{}
+	// Each project carries its org's name, also when the caller is not in
+	// that org (api-v1 v1.37 item 4).
+	type meProject struct {
+		store.Project
+		OrgName string `json:"org_name"`
+	}
+	projectView := make([]meProject, 0, len(projects))
+	for _, pr := range projects {
+		projectView = append(projectView, meProject{Project: pr, OrgName: pr.OrgName})
 	}
 	writeOK(w, http.StatusOK, map[string]any{
 		"user":       p.User,
 		"identities": view,
-		"projects":   projects,
+		"projects":   projectView,
 		"orgs":       nonNilSlice(orgs),
 	})
 }

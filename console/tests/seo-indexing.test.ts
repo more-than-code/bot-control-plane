@@ -113,7 +113,7 @@ describe('SEO indexing fixes', () => {
 		assert.ok(body.includes('Page not found'));
 		// The root layout hands a (site) route straight to the site layout, not the app shell.
 		setRouteId('/(site)/not-found');
-		const data = { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null };
+		const data = { user: null, orgs: [], projects: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null };
 		const rootBody = render(RootLayout, { props: { children, data } }).body;
 		assert.equal(rootBody.includes('aria-label="Primary"'), false);
 	});
@@ -125,12 +125,12 @@ describe('SEO indexing fixes', () => {
 		setPageUrl('http://console.example/projects');
 		setRouteId('/projects');
 		const app = render(RootLayout, {
-			props: { children, data: { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null } }
+			props: { children, data: { user: null, orgs: [], projects: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null } }
 		}).body;
 		assert.deepEqual(hrefs(app.slice(app.indexOf('</main>'))), legal);
 		const signin = render(SigninPage, {
 			props: {
-				data: { user: null, orgs: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null, next: '/projects' },
+				data: { user: null, orgs: [], projects: [], theme: 'system' as const, timeZone: 'UTC', whatsNew: null, next: '/projects' },
 				form: null
 			}
 		}).body;
