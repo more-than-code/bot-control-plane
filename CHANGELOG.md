@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.40 — 2026-11-19
+- The console header shows your organization and project on every page, and switches project from any page.
+- A bell in the header collects new releases and, for organization owners and admins, hosts whose agent has an update. What you mark read stays read on every device.
+- The "What's new" dot moved from the account menu to the bell.
+
 ## v0.2.39 — 2026-11-18
 - The landing page shows the console's Catalog & services tab again, and the site and llms.txt describe public addresses and routes.
 - Turning the edge on while another program holds port 80 or 443 now says what to do next.
