@@ -1,0 +1,84 @@
+# Deploybot
+
+> Deploybot lets any AI agent that speaks MCP run your own servers, without handing it SSH keys or a cloud token. It can only deploy what your catalog allows, as you, after a confirm step. People use the same controls through a web console.
+
+Deploybot is a control plane for your own hosts: Raspberry Pis, VPSs and cloud VMs. A small agent, bot-agent, runs on each host and dials out to the Deploybot API, so hosts open no inbound ports and can sit behind NAT. Project owners keep a catalog of approved container images and programs. People and AI agents can deploy, run, stop, restart and roll back only those entries, within their role in the project.
+
+Website: https://deploybot.dev/
+
+Hosted service: console at https://console.deploybot.dev, MCP server at https://mcp.deploybot.dev/mcp. Sign-in is with Google. The source is public on GitHub, and you can self-host it.
+
+## How the safety model works
+
+- An MCP client acts as the signed-in user, with that user's role in each project, and no more.
+- Only catalog entries can run. There are no free-form commands, no shell tool and no file tools.
+- Every change made over MCP (deploy, rollback, run, stop, restart, health-check, catalog, env-set and route edits) first returns a plan and a `confirmation_id`. Nothing happens until the `confirm` tool is called with the same `idempotency_key`.
+- Each host has its own root-owned allowlist that the server cannot change: the projects that may run programs and containers on it, the accounts, directories and commands programs may use, and the images containers may use.
+- Secret values (env sets, files and registry logins) are encrypted at rest and write-only for people. MCP tools return env key names, never env values. Logs are redacted.
+- Secrets never pass through the AI. Never ask the user to paste a secret into chat. Use `request_env_value` or `request_file`; the user fills it on a one-time console page, and you poll `get_env_value_request` / `get_file_request`.
+- Changes are recorded in an audit log.
+
+## Instructions for AI agents
+
+- Read before you change: call `list_catalog`, `entry_status` or `get_health_checks` first.
+- Show the user the plan that a change returns, and call `confirm` only after the user agrees. Use the same `idempotency_key` as the call that returned the plan.
+- Do not put secret values in `spec.env` on catalog entries. Never ask the user to paste a secret into chat. Use `request_env_value` or `request_file`; the user fills it on a one-time console page, and you poll `get_env_value_request` / `get_file_request`.
+- Call `whats_new` when a tool you expect is missing or behaves differently.
+- A `forbidden` or `not_found` result means the user's role does not allow the call or cannot see the resource. Do not retry it with other ids.
+
+## Connect an MCP client
+
+- [MCP server README](https://github.com/more-than-code/bot-control-plane/blob/main/mcp/README.md): the full tool reference, the OAuth sign-in, and `deploybot login` for clients without a browser.
+- Claude Code example: `claude mcp add --transport http deploybot https://mcp.deploybot.dev/mcp`. Any client with Streamable HTTP and OAuth can connect the same way; it discovers sign-in from `https://mcp.deploybot.dev/.well-known/oauth-protected-resource`.
+
+## MCP tools
+
+- Read: `list_orgs`, `list_projects`, `list_hosts`, `list_services`, `list_processes`, `query_metrics`, `service_health_history`, `get_health_checks`, `list_catalog`, `list_env_sets`, `list_routes`, `whats_new`.
+- Before a deploy (read only): `check_readiness`, `image_access`, `host_policy_snippet` (the host allowlist lines for an entry), `shared_network_snippet` (the host allowlist lines for a shared network).
+- Contact a host live (read only): `host_snapshot`, `probe_service`, `entry_status`, `entry_logs`.
+- Change, with plan and confirm: `deploy_entry`, `rollback_entry`, `run_entry`, `stop_entry`, `restart_entry`, `set_health_checks`, `create_catalog_entry`, `update_catalog_entry`, `delete_catalog_entry`, `create_env_set`, `update_env_set`, `delete_env_set`, `set_routes`.
+- Ask the user, who answers on a one-time console page: `request_env_value`, `get_env_value_request`, `request_file`, `get_file_request`, `connect_registry` (connect GitHub for private ghcr.io images), `get_registry_connect_request`.
+- `confirm`: carries out a plan after the user agrees.
+
+## Public addresses
+
+- An org owner or admin verifies a domain with a DNS TXT record, assigns it to projects, and turns on the edge for a host, all in the console; there is no MCP tool for domains or for turning the edge on. The edge is a Caddy container that bot-agent runs on that host; it serves HTTPS on ports 80 and 443 with automatic certificates.
+- Then `set_routes` gives a catalog entry its routes (hostname under an assigned domain, path prefix, port), with plan and confirm. Two options: client IPs from Cloudflare (`client_ip_from: "cloudflare"`) and no-store paths. A route is pending until the edge on the entry's host has applied it, then live; `list_routes` shows the state.
+- Turning the edge on is refused while another program holds port 80 or 443, and the message names it and says what to do next. Open WebSockets stay up when routes change.
+
+## Add a host
+
+- The user needs a project in the console first. Hosts belong to the user's organization, and an org owner or admin gives each project metrics or deploy access to a host. Creating a project and creating a join token are console-only; there is no MCP tool for either, so tell the user before you prepare the host.
+- AI agents: follow "Enrol with an AI agent" in the install guide below. The user gives you access to the host (their SSH, a shell on the host, their cloud console, or commands they paste); you run the download, checks and install with the policy flags they agree to, then hand them the enrol command from the install output. The user creates the join token in the console, which gives them instructions for you that include the server URL; put exactly that URL into the enrol command, never a guessed one. The user types the token at the enrol prompt themselves. Never ask for, read or handle the join token.
+- [Install bot-agent](https://github.com/more-than-code/bot-agent/blob/main/docs/install.md): `install.sh`, enrolling with a one-time join token, the optional root runner for catalog entries, and the host allowlist (`/etc/bot-agent/runner.toml`).
+- [bot-agent README](https://github.com/more-than-code/bot-agent/blob/main/README.md): what the agent collects, how it deploys images and programs, and health checks.
+
+## Features
+
+- Safety: Catalog (only approved images and programs run); Plan and confirm (every change waits for the user's yes); Acts as you (the user's role, no more); Host allowlist (each host's own, root-owned); Secret requests (one-time page); Audit log.
+- Deploys: Health-gated deploys (Docker health status or HTTP/TCP checks); Automatic rollback (an unhealthy deploy goes back to the previous container); Digest rollback (to an earlier image digest); Health policy (per service); Run/stop/restart; Persistent programs (systemd units that survive reboot).
+- Configuration: Env sets (for containers and programs); Entry secrets (generate, show once); Managed files (for containers); Registry logins (for private images); Readiness check (before deploy). Secret values are encrypted at rest.
+- Networking: Public addresses (your own domain over HTTPS, from a per-host edge); Route options (client IPs from Cloudflare, no-store paths); Shared networks (between projects on one host, offered by the host's admin).
+- Visibility: Host metrics (with history); Processes and services (running and discovered); Health history (per service); Live logs (redacted, capped at 10 MB × 3 by default).
+- Teams: Organizations (own the hosts, with owner, admin and member roles); Project roles (owner, admin and viewer); Per-entry rights (run, stop, restart or deploy, for a role or a user); Host access per project (metrics or deploy, set by org admins); Invite links (expire, single-use by default); Join tokens (one-time, for adding hosts).
+- For AI agents: MCP server with OAuth; deploybot login (for clients without a browser); llms.txt (this file); whats_new (recent changes, as an MCP tool).
+- Upkeep: What's new page (in the console's account menu); Agent update notice (when a newer bot-agent release exists).
+
+## Components
+
+Console and MCP gateway both go through the API; only the API writes PostgreSQL, where secrets are encrypted. bot-agent runs unprivileged on each host and dials out to the API, so hosts open no ports. A root runner on the host checks the root-owned /etc/bot-agent/runner.toml allowlist before it runs Docker containers or systemd units.
+
+## Self-hosting from source
+
+- [bot-control-plane](https://github.com/more-than-code/bot-control-plane/blob/main/README.md): the server repo, built as one server binary and the console bundle. AGPL-3.0-only.
+- [API (`api/`)](https://github.com/more-than-code/bot-control-plane/blob/main/api/README.md): the only part that writes the Postgres database and decides permissions.
+- [MCP gateway (`mcp/`)](https://github.com/more-than-code/bot-control-plane/blob/main/mcp/README.md): the stateless MCP gateway.
+- [Console (`console/`)](https://github.com/more-than-code/bot-control-plane/blob/main/console/README.md): the SvelteKit web console.
+- [bot-agent](https://github.com/more-than-code/bot-agent/blob/main/README.md): the host agent, in Go. Apache-2.0.
+
+## Optional
+
+- [API contract](https://github.com/more-than-code/bot-control-plane/blob/main/docs/contracts/api-v1.md): every `/v1` endpoint, request and response.
+- [OAuth contract](https://github.com/more-than-code/bot-control-plane/blob/main/docs/contracts/oauth-v1.md): sign-in for the console, the CLI and MCP clients.
+- [Agent protocol](https://github.com/more-than-code/bot-agent/blob/main/docs/contracts/agent-protocol-v1.md): the messages between bot-agent and the API.
+- [API design](https://github.com/more-than-code/bot-control-plane/blob/main/api/docs/design.md): how the API server is built.

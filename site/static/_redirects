@@ -1,0 +1,5 @@
+/about           /                                         301
+/signin          https://console.deploybot.dev/signin      301
+/signin/*        https://console.deploybot.dev/signin/:splat   301
+/projects        https://console.deploybot.dev/projects    301
+/projects/*      https://console.deploybot.dev/projects/:splat 301
