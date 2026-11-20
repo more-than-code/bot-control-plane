@@ -45,6 +45,10 @@ type Config struct {
 	// (Caddy's internal CA, for dev and test hosts that the internet cannot
 	// reach on 80 and 443; api-v1 v1.35 acceptance 3).
 	EdgeTLSIssuer string
+	// ProblemsOff is BOT_API_PROBLEMS=off: the problem detectors (sweep and
+	// hooks) do not run and the problem routes answer empty lists (api-v1
+	// v1.41 item 6). Empty or on runs them.
+	ProblemsOff bool
 }
 
 const defaultIssuer = "https://accounts.google.com"
@@ -77,6 +81,8 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 		LatestAgentVersion:     strings.TrimSpace(getenv("BOT_API_LATEST_AGENT_VERSION")),
 		EdgeTLSIssuer:          strings.TrimSpace(getenv("BOT_API_EDGE_TLS_ISSUER")),
 	}
+	problems := strings.TrimSpace(getenv("BOT_API_PROBLEMS"))
+	cfg.ProblemsOff = problems == "off"
 	if cfg.GoogleIssuer == "" {
 		cfg.GoogleIssuer = defaultIssuer
 	}
@@ -118,6 +124,9 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	}
 	if cfg.EdgeTLSIssuer != "" && cfg.EdgeTLSIssuer != EdgeIssuerInternal {
 		return Config{}, fmt.Errorf("BOT_API_EDGE_TLS_ISSUER must be empty or internal")
+	}
+	if problems != "" && problems != "on" && problems != "off" {
+		return Config{}, fmt.Errorf("BOT_API_PROBLEMS must be empty, on or off")
 	}
 	return cfg, nil
 }

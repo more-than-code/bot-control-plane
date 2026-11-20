@@ -714,8 +714,14 @@ export type Grant = {
 	kind: 'oauth' | 'device';
 };
 
-/** `GET /v1/me/notifications` item (api-v1 v1.37 item 1). Computed by the API on each call. */
-export type NotificationKind = 'release' | 'host_update';
+/** `GET /v1/me/notifications` item (api-v1 v1.37 item 1; `problem` since v1.41). Computed by the API on each call. */
+export type NotificationKind = 'release' | 'host_update' | 'problem';
+
+/** A problem's level (api-v1 v1.41 item 1). */
+export type ProblemLevel = 'needs_action' | 'heads_up';
+
+/** A problem's kind (api-v1 v1.41 item 1). */
+export type ProblemKind = 'host_offline' | 'registry_login' | 'deploy';
 
 export type Notification = {
 	key: string;
@@ -724,8 +730,29 @@ export type Notification = {
 	detail: string;
 	/** A console path, for example `/whats-new#v0.2.40` or `/hosts/<id>`. */
 	href: string;
+	/** For a problem: when it opened while open, when it resolved after. */
 	at: string;
 	read: boolean;
+	/** Problem items only (api-v1 v1.41 item 3). */
+	level?: ProblemLevel;
+	/** Problem items only: `open` or `resolved`. A resolved problem is always read. */
+	state?: 'open' | 'resolved';
+};
+
+/** `GET /v1/orgs/{id}/problems` and `GET /v1/projects/{id}/problems` item (api-v1 v1.41 item 1). */
+export type Problem = {
+	id: string;
+	kind: ProblemKind;
+	level: ProblemLevel;
+	title: string;
+	detail: string;
+	href: string;
+	opened_at: string;
+	updated_at: string;
+	resolved_at: string | null;
+	host_id: string | null;
+	project_id: string | null;
+	entry_id: string | null;
 };
 
 export type NotificationList = { items: Notification[]; unread: number };

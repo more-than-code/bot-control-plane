@@ -726,6 +726,7 @@ func (s *Server) handleRegistryPut(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, err, false)
 		return
 	}
+	s.registryLoginChanged(r.Context(), id, host, false)
 	s.auditOK(r.Context(), p, store.AuditRow{
 		ProjectID: idPtr(id),
 		Action:    audit.ActionRegistryPut,
@@ -763,6 +764,7 @@ func (s *Server) handleRegistryDelete(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, err, false)
 		return
 	}
+	s.registryLoginChanged(r.Context(), id, host, true)
 	s.auditOK(r.Context(), p, store.AuditRow{
 		ProjectID: idPtr(id),
 		Action:    audit.ActionRegistryDelete,

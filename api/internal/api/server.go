@@ -66,6 +66,11 @@ type Server struct {
 	// releases, when set, replaces the embedded CHANGELOG.md as the source
 	// of release notifications (api-v1 v1.37). Tests only.
 	releases func() []changelog.Entry
+	// ProblemsOff is BOT_API_PROBLEMS=off (api-v1 v1.41 item 6): no
+	// detector runs and the problem routes answer empty lists.
+	ProblemsOff bool
+	// sweep is the problems sweep clock (start grace, hourly work).
+	sweep problemSweep
 }
 
 // delegatedPolicy says what an api_delegated session may do on a route.
@@ -135,6 +140,8 @@ func contractRoutes() []route {
 		{"GET /v1/orgs/{id}/join-tokens", false, (*Server).handleOrgJoinList, delegatedDenyRead},
 		{"DELETE /v1/orgs/{id}/join-tokens/{token_id}", false, (*Server).handleOrgJoinRevoke, delegatedDeny},
 		{"GET /v1/orgs/{id}/audit", false, (*Server).handleOrgAudit, delegatedDenyRead},
+		// api-v1 v1.41 item 4: problems, console or delegated.
+		{"GET /v1/orgs/{id}/problems", false, (*Server).handleOrgProblems, delegatedAllow},
 		// api-v1 v1.35 item 1: org domains, console only.
 		{"GET /v1/orgs/{id}/domains", false, (*Server).handleDomainList, delegatedDenyRead},
 		{"POST /v1/orgs/{id}/domains", false, (*Server).handleDomainCreate, delegatedDeny},
@@ -262,6 +269,7 @@ func contractRoutes() []route {
 		{"POST /v1/services/{id}/probe", false, (*Server).handleProbe, delegatedAllow},
 		{"POST /v1/confirmations/{confirmation_id}", false, (*Server).handleConfirmation, delegatedAllow},
 		{"GET /v1/projects/{id}/audit", false, (*Server).handleAudit, delegatedAllow},
+		{"GET /v1/projects/{id}/problems", false, (*Server).handleProjectProblems, delegatedAllow},
 	}
 }
 

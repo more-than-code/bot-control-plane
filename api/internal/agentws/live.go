@@ -76,6 +76,37 @@ func (h *Hub) SetEdgeHook(fn func(hostID uuid.UUID, hello bool)) {
 	h.mu.Unlock()
 }
 
+// DeployHook is called after a stored agent auto action, with the entry's
+// project, id and name and the host.
+type DeployHook func(ctx context.Context, projectID, entryID uuid.UUID, entry string, hostID uuid.UUID)
+
+// SetDeployHook sets the function that evaluates the deploy problem after
+// an auto action is stored (api-v1 v1.41). It runs in its own goroutine so
+// a slow store never holds up the agent's read loop.
+func (h *Hub) SetDeployHook(fn DeployHook) {
+	h.mu.Lock()
+	h.deployHook = fn
+	h.mu.Unlock()
+}
+
+func (h *Hub) notifyDeploy(ctx context.Context, projectID, entryID uuid.UUID, entry string, hostID uuid.UUID) {
+	h.mu.Lock()
+	fn := h.deployHook
+	h.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	h.hooks.Add(1)
+	go func() {
+		defer h.hooks.Done()
+		fn(ctx, projectID, entryID, entry, hostID)
+	}()
+}
+
+// WaitHooks waits for the deploy hook calls already started (tests).
+func (h *Hub) WaitHooks() { h.hooks.Wait() }
+
 func (h *Hub) notifyEdge(hostID uuid.UUID, hello bool) {
 	h.mu.Lock()
 	fn := h.edgeHook

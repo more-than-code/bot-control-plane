@@ -137,6 +137,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		// api-v1 v1.34: the agent update hint on host reads.
 		LatestAgentVersion: cfg.LatestAgentVersion,
 		EdgeTLSIssuer:      cfg.EdgeTLSIssuer,
+		ProblemsOff:        cfg.ProblemsOff,
 	}
 	if gh != nil {
 		srv.GitHub = gh
@@ -163,7 +164,19 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	// verified domains are re-checked daily.
 	hub.SetEdgeHook(srv.EdgeHook)
 	go srv.RunDomainChecks(ctx)
+	startProblems(ctx, cfg.ProblemsOff, log, func() { hub.SetDeployHook(srv.DeployHook) }, srv.RunProblems)
 	return d.serve(cfg.Listen, root, hub.CloseAll)
+}
+
+// startProblems wires the problem detectors (api-v1 v1.41): the hub's
+// deploy hook and the minute sweep. BOT_API_PROBLEMS=off starts neither.
+func startProblems(ctx context.Context, off bool, log *slog.Logger, setDeployHook func(), sweep func(context.Context)) {
+	if off {
+		log.Warn("problem detectors are off (BOT_API_PROBLEMS=off)")
+		return
+	}
+	setDeployHook()
+	go sweep(ctx)
 }
 
 // githubClient is the Connect GitHub client (api-v1 v1.29 item 1), or nil

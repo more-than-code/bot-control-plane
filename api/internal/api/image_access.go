@@ -82,6 +82,13 @@ func (s *Server) handleImageAccess(w http.ResponseWriter, r *http.Request) {
 // other than unknown is cached for 60 s under the project, the reference
 // and the stored login, so a new login is looked up again at once.
 func (s *Server) lookupImageAccess(ctx context.Context, p principal, projectID uuid.UUID, ref catalog.ImageRef) (imageAccess, error) {
+	return s.lookupImageAccessAs(ctx, p.User.ID.String(), projectID, ref)
+}
+
+// lookupImageAccessAs is lookupImageAccess with the per-user limiter key; an
+// empty key skips that limit (the hourly registry check, api-v1 v1.41). An
+// answer that used a stored login feeds the registry_login problem.
+func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, projectID uuid.UUID, ref catalog.ImageRef) (imageAccess, error) {
 	out := imageAccess{Registry: ref.Host, Access: accessUnknown, Login: loginNone}
 	mat, err := s.Store.GetRegistryMaterial(ctx, projectID, ref.Host)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -110,6 +117,9 @@ func (s *Server) lookupImageAccess(ctx context.Context, p principal, projectID u
 		if access, ok := v.(string); ok {
 			out.Access = access
 			s.logLookup("access", ref, "cache", 0, "cache")
+			if stored {
+				s.noteRegistryAccess(ctx, projectID, ref.Host, out.Access)
+			}
 			return out, nil
 		}
 	}
@@ -118,8 +128,10 @@ func (s *Server) lookupImageAccess(ctx context.Context, p principal, projectID u
 		return out, &accessLimited{retry: 1}
 	}
 	defer release()
-	if ok, wait := svc.Limiter.Allow(p.User.ID.String(), s.now()); !ok {
-		return out, &accessLimited{retry: max(1, int(math.Ceil(wait.Seconds())))}
+	if limitKey != "" {
+		if ok, wait := svc.Limiter.Allow(limitKey, s.now()); !ok {
+			return out, &accessLimited{retry: max(1, int(math.Ceil(wait.Seconds())))}
+		}
 	}
 	start := time.Now()
 	out.Access = s.probeAccess(ctx, projectID, ref, reference, stored, mat)
@@ -130,6 +142,9 @@ func (s *Server) lookupImageAccess(ctx context.Context, p principal, projectID u
 	s.logLookup("access", ref, out.Access, time.Since(start), auth)
 	if out.Access != accessUnknown {
 		svc.Cache.Put(key, out.Access, s.now())
+	}
+	if stored {
+		s.noteRegistryAccess(ctx, projectID, ref.Host, out.Access)
 	}
 	return out, nil
 }

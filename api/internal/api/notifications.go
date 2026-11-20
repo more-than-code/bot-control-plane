@@ -31,6 +31,9 @@ type notification struct {
 	Href   string    `json:"href"`
 	At     time.Time `json:"at"`
 	Read   bool      `json:"read"`
+	// Level and State are on problem items only (api-v1 v1.41 item 3).
+	Level string `json:"level,omitempty"`
+	State string `json:"state,omitempty"`
 }
 
 // releaseEntries is the server's own CHANGELOG.md, newest first, unless a
@@ -114,24 +117,30 @@ func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]not
 	return out, nil
 }
 
-// notifications is the caller's items, newest first, at most 20, without
-// read flags.
+// notifications is the caller's items without read flags: open problems
+// first and never cut (api-v1 v1.41 item 3), then the rest newest first,
+// filling up to 20 items.
 func (s *Server) notifications(ctx context.Context, userID uuid.UUID) ([]notification, error) {
 	hosts, err := s.hostUpdateNotices(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	items := append(s.releaseNotices(s.now()), hosts...)
+	open, resolved, err := s.problemNotices(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	rest := append(s.releaseNotices(s.now()), hosts...)
+	rest = append(rest, resolved...)
 	// Stable on equal at: releases dated the same day keep the CHANGELOG
 	// order (newest first; key order would put 0.2.37 above 0.2.38), then
 	// hosts in their list order.
-	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].At.After(items[j].At)
+	sort.SliceStable(rest, func(i, j int) bool {
+		return rest[i].At.After(rest[j].At)
 	})
-	if len(items) > maxNotifications {
-		items = items[:maxNotifications]
+	if room := max(0, maxNotifications-len(open)); len(rest) > room {
+		rest = rest[:room]
 	}
-	return items, nil
+	return append(open, rest...), nil
 }
 
 func notificationKeys(items []notification) []string {
@@ -165,7 +174,8 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	unread := 0
 	for i := range items {
-		items[i].Read = reads[items[i].Key]
+		// A resolved problem is never unread (api-v1 v1.41 item 3).
+		items[i].Read = reads[items[i].Key] || items[i].State == "resolved"
 		if !items[i].Read {
 			unread++
 		}

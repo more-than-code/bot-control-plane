@@ -3,7 +3,7 @@
  * a stub fetch and goto. `NotificationsBell.svelte` holds the state this reports through `update` and stays thin.
  */
 import type { Notification, NotificationList } from './api-types';
-import { NOTIFICATIONS_ROUTE, readBody, readNotificationList } from './notifications';
+import { BELL_POLL_MS, needActionCount, NOTIFICATIONS_ROUTE, readBody, readNotificationList } from './notifications';
 
 export const MARK_ERROR = 'Could not mark as read.';
 
@@ -27,9 +27,43 @@ export function bellUnread(state: BellState): number | null {
 	return state.list?.unread ?? null;
 }
 
+/** Unread open problems that need action: the dot turns red and the label says so (api-v1 v1.41). */
+export function bellNeedAction(state: BellState): number {
+	return needActionCount(state.list);
+}
+
 /** "Mark all read" is off while it runs and when nothing is unread. */
 export function canMarkAll(state: BellState): boolean {
 	return !state.marking && (state.list?.unread ?? 0) > 0;
+}
+
+/** The timer, page visibility and popover state the bell polls with (`browserPoll` builds them in the browser). */
+export type PollDeps = {
+	/** Calls fn every ms until the returned stop runs. */
+	every: (fn: () => void, ms: number) => () => void;
+	/** The tab is visible (`document.visibilityState === 'visible'`). */
+	visible: () => boolean;
+	/** The popover is open: a tick then skips, so the list does not change under the reader. */
+	open: () => boolean;
+};
+
+/** What `browserPoll` uses from the page; tests pass a stand-in. */
+export type PollEnv = {
+	setInterval: (fn: () => void, ms: number) => unknown;
+	clearInterval: (id: never) => void;
+	document: { visibilityState: string };
+};
+
+/** The bell's poll deps in the browser: `setInterval`, `document.visibilityState` and the popover's open state. */
+export function browserPoll(open: () => boolean, env: PollEnv = globalThis as unknown as PollEnv): PollDeps {
+	return {
+		every: (fn, ms) => {
+			const id = env.setInterval(fn, ms);
+			return () => env.clearInterval(id as never);
+		},
+		visible: () => env.document.visibilityState === 'visible',
+		open
+	};
 }
 
 export type BellDeps = {
@@ -80,6 +114,16 @@ export function createBell(deps: BellDeps, initial: BellState = initialBellState
 			return state;
 		},
 		refresh,
+		/**
+		 * Reads again every 2 minutes while the tab is visible, so a problem that opens while the page is open shows
+		 * (spec-bell-problems §3.3). A hidden tab or an open popover skips the tick (opening already read the list).
+		 * Returns the stop for the component's destroy.
+		 */
+		poll(env: PollDeps): () => void {
+			return env.every(() => {
+				if (env.visible() && !env.open()) void refresh();
+			}, BELL_POLL_MS);
+		},
 		/** After mount: the first read, so no page load waits on it. */
 		start(): Promise<void> {
 			return refresh();

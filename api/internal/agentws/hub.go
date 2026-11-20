@@ -53,6 +53,11 @@ type Hub struct {
 	autoWarned map[string]*warnCount
 	// edgeHook re-applies a host's edge config (api-v1 v1.35); nil when unset.
 	edgeHook func(hostID uuid.UUID, hello bool)
+	// deployHook evaluates the deploy problem after an auto action row
+	// (api-v1 v1.41); nil when unset.
+	deployHook DeployHook
+	// hooks counts deploy hook calls still running off the read loop.
+	hooks sync.WaitGroup
 }
 
 type waiter struct {

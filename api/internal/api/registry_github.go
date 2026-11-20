@@ -195,6 +195,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	if oldToken != "" && oldToken != token {
 		s.revokeGitHub(r.Context(), oldToken)
 	}
+	s.registryLoginChanged(r.Context(), projectID, host, false)
 	detail := map[string]any{"host": host, "login": login, "via": viaKind(p.Session.Kind)}
 	out := map[string]any{
 		"project_id": projectID,
@@ -278,6 +279,7 @@ func (s *Server) deleteGitHubRegistry(w http.ResponseWriter, r *http.Request, p 
 		s.writeErr(w, err, false)
 		return
 	}
+	s.registryLoginChanged(r.Context(), projectID, mat.Host, true)
 	revoked := false
 	if openErr == nil {
 		revoked = s.revokeGitHub(r.Context(), token)

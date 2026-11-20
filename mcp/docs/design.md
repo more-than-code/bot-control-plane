@@ -30,6 +30,7 @@ internal/tools/       one file per tool; schemas and handlers
 | `list_orgs` | — | GET `/v1/me` (orgs only) |
 | `list_projects` | — | GET `/v1/me` (projects with `org_id`, `via`) |
 | `list_hosts` | `project_id` or `org_id` (exactly one) | GET `/v1/projects/{id}/hosts` or GET `/v1/orgs/{id}/hosts`; removed (archived) hosts are not listed (api-v1 v1.40) |
+| `list_problems` | `project_id` or `org_id` (exactly one) | GET `/v1/projects/{id}/problems` or GET `/v1/orgs/{id}/problems` (api-v1 v1.41): open problems; the summary names each problem's usual fix |
 | `list_services` | `host_id` | GET `/v1/hosts/{id}/services` |
 | `query_metrics` | `host_id`, `metric`, `from?`, `to?`, `step?` | GET `/v1/hosts/{id}/metrics` |
 | `list_processes` | `host_id`, `sort?`, `limit?` | GET `/v1/hosts/{id}/processes` |

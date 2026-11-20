@@ -121,6 +121,7 @@ TRUNCATE TABLE
     app.oauth_codes,
     app.oauth_requests,
     app.oauth_grants,
+    app.problems,
     app.notification_reads,
     app.hosts,
     app.project_members,

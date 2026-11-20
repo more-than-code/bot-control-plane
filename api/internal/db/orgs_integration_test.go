@@ -492,6 +492,8 @@ func runDown(t *testing.T, ctx context.Context, url string) {
 	// 0023 references app.orgs, which the 0015 down drops: take 0023 down
 	// first (its rows, then its down script). Migrate re-applies it.
 	dropEdgeSchema(t, ctx, conn)
+	// 0027 (app.problems) references app.orgs too.
+	dropProblemsSchema(t, ctx, conn)
 	if _, err := conn.Exec(ctx, fillHostMirrorSQL); err != nil {
 		t.Fatal(err)
 	}

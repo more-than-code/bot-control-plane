@@ -520,6 +520,7 @@ func (m *Mem) deleteEntryLocked(id uuid.UUID) {
 	delete(m.grants, id)
 	m.dropEntryEdgeLocked(id)
 	m.deleteDeploysLocked(id)
+	m.dropEntryProblemsLocked(id)
 	for key, rec := range m.confirmations {
 		if rec.row.EntryID == id {
 			delete(m.confirmations, key)

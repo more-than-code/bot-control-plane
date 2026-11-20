@@ -3,11 +3,14 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/more-than-code/bot-control-plane/api/internal/config"
 	"github.com/more-than-code/bot-control-plane/api/internal/db"
@@ -246,5 +249,61 @@ func TestGitHubClientConfig(t *testing.T) {
 	cfg.GitHubClientSecretFile = loose
 	if _, err := githubClient(cfg); err == nil || strings.Contains(err.Error(), "gh-secret-value") {
 		t.Fatalf("loose file %v", err)
+	}
+}
+
+// TestStartProblemsOff is spec-bell-problems L8: with BOT_API_PROBLEMS=off
+// the API sets no deploy hook on the hub and starts no sweep; otherwise it
+// does both.
+func TestStartProblemsOff(t *testing.T) {
+	for _, value := range []string{"off", "on", ""} {
+		getenv := func(k string) string {
+			switch k {
+			case "BOT_API_LISTEN":
+				return "127.0.0.1:0"
+			case "DATABASE_URL":
+				return "postgres://example.invalid/deploybot"
+			case "BOT_API_GOOGLE_CLIENT_ID":
+				return "dummy-google-client-id"
+			case "BOT_API_GOOGLE_CLIENT_SECRET":
+				return "dummy-google-client-secret"
+			case "BOT_API_DEVICE_VERIFICATION_URI":
+				return "http://127.0.0.1/device"
+			case "BOT_API_AGENT_WS_URL":
+				return "ws://127.0.0.1/agent/v1/ws"
+			case "BOT_API_OAUTH_REDIRECT_URIS":
+				return "http://127.0.0.1/callback"
+			case "BOT_API_PROBLEMS":
+				return value
+			}
+			return ""
+		}
+		cfg, err := config.FromEnv(getenv, false)
+		if err != nil {
+			t.Fatalf("%q: %v", value, err)
+		}
+		hooked := false
+		swept := make(chan struct{}, 1)
+		startProblems(context.Background(), cfg.ProblemsOff, slog.New(slog.NewTextHandler(io.Discard, nil)),
+			func() { hooked = true }, func(context.Context) { swept <- struct{}{} })
+		if value == "off" {
+			select {
+			case <-swept:
+				t.Fatal("off: the sweep started")
+			case <-time.After(50 * time.Millisecond):
+			}
+			if hooked {
+				t.Fatal("off: the deploy hook was set")
+			}
+			continue
+		}
+		select {
+		case <-swept:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%q: no sweep", value)
+		}
+		if !hooked {
+			t.Fatalf("%q: no deploy hook", value)
+		}
 	}
 }

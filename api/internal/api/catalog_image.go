@@ -502,6 +502,9 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 			return s.Store.ReleaseImageOp(c, opID)
 		})
 		s.auditImageOK(ctx, p, projectID, host, entry.Name, action, got.outcome, nil, forms)
+		if got.outcome == "succeeded" {
+			s.entryRemoved(ctx, entry, host)
+		}
 		s.imageDone(w, p.User.ID, key, map[string]any{"status": got.status})
 		return
 	}
@@ -517,6 +520,7 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 	}
 	hold = false
 	s.auditImageOK(ctx, p, projectID, host, entry.Name, action, finished.Outcome, finished.Digest, forms)
+	s.DeployHook(ctx, projectID, entry.ID, entry.Name, host.ID)
 	s.imageDone(w, p.User.ID, key, map[string]any{
 		"deploy": redactImageDeploy(finished, forms),
 		"status": got.status,

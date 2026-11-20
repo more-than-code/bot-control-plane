@@ -58,6 +58,7 @@ func TestRouteTable(t *testing.T) {
 		"GET /v1/orgs/{id}/join-tokens",
 		"DELETE /v1/orgs/{id}/join-tokens/{token_id}",
 		"GET /v1/orgs/{id}/audit",
+		"GET /v1/orgs/{id}/problems",
 		"GET /v1/orgs/{id}/domains",
 		"POST /v1/orgs/{id}/domains",
 		"POST /v1/orgs/{id}/domains/{domain_id}/verify",
@@ -172,6 +173,7 @@ func TestRouteTable(t *testing.T) {
 		"POST /v1/services/{id}/probe",
 		"POST /v1/confirmations/{confirmation_id}",
 		"GET /v1/projects/{id}/audit",
+		"GET /v1/projects/{id}/problems",
 	}
 	got := Patterns()
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

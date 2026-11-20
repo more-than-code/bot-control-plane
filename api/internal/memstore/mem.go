@@ -95,6 +95,8 @@ type Mem struct {
 	edge *edgeData
 	// notificationReads is user id → key → read_at (api-v1 v1.37 item 3).
 	notificationReads map[uuid.UUID]map[string]time.Time
+	// problems is id → problem (api-v1 v1.41); see problems.go.
+	problems map[uuid.UUID]store.Problem
 }
 
 type sessionRec struct {
@@ -143,6 +145,7 @@ func New() *Mem {
 	return &Mem{
 		users:                     map[uuid.UUID]store.User{},
 		notificationReads:         map[uuid.UUID]map[string]time.Time{},
+		problems:                  map[uuid.UUID]store.Problem{},
 		byEmail:                   map[string]uuid.UUID{},
 		idents:                    map[uuid.UUID]store.Identity{},
 		bySubject:                 map[string]uuid.UUID{},

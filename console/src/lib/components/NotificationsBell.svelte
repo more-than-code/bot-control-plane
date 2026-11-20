@@ -7,13 +7,23 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import type { NotificationList } from '$lib/api-types';
 	import { bellLabel } from '$lib/notifications';
-	import { bellUnread, canMarkAll, createBell, initialBellState, MARK_ERROR, type BellState } from '$lib/notifications-bell';
+	import {
+		bellNeedAction,
+		bellUnread,
+		browserPoll,
+		canMarkAll,
+		createBell,
+		initialBellState,
+		MARK_ERROR,
+		type BellState
+	} from '$lib/notifications-bell';
 	import { cn } from '$lib/utils';
 
 	/**
-	 * The header bell (spec-header-org-project-bell §3.2). It reads the console route after the page has loaded and
-	 * again whenever the popover opens, so no page load waits on it. Opening marks nothing read. The behaviour is
-	 * `$lib/notifications-bell.ts`; this component only holds its state.
+	 * The header bell (spec-header-org-project-bell §3.2). It reads the console route after the page has loaded, again
+	 * whenever the popover opens, and every 2 minutes while the tab is visible and the popover is closed
+	 * (spec-bell-problems §3.3), so no page load waits on it. Opening marks nothing read. The dot is red while an unread open problem needs action. The
+	 * behaviour is `$lib/notifications-bell.ts`; this component only holds its state.
 	 */
 	let {
 		initial = null
@@ -38,20 +48,26 @@
 
 	const TITLE_ID = 'notifications-title';
 	const unread = $derived(bellUnread(bell));
+	const needAction = $derived(bellNeedAction(bell));
 
 	onMount(() => {
 		void controller.start();
+		return controller.poll(browserPoll(() => open));
 	});
 </script>
 
 <Popover.Root bind:open onOpenChange={(next) => void controller.openChanged(next)}>
 	<Popover.Trigger
 		class={cn(buttonVariants({ variant: 'ghost', size: 'icon' }), 'relative shrink-0 max-sm:size-11')}
-		aria-label={bellLabel(unread)}
+		aria-label={bellLabel(unread, needAction)}
 	>
 		<Bell class="size-4" />
 		{#if unread}
-			<span aria-hidden="true" data-bell-dot class="bg-primary absolute top-1.5 right-1.5 size-2 rounded-full"></span>
+			<span
+				aria-hidden="true"
+				data-bell-dot={needAction > 0 ? 'needs-action' : 'unread'}
+				class={cn('absolute top-1.5 right-1.5 size-2 rounded-full', needAction > 0 ? 'bg-destructive' : 'bg-primary')}
+			></span>
 		{/if}
 	</Popover.Trigger>
 	<Popover.Content align="end" class="w-80 max-w-[calc(100vw-2rem)]" aria-labelledby={TITLE_ID}>

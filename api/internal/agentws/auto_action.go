@@ -116,6 +116,7 @@ func (h *Hub) onAutoAction(ac *agentConn, f frame) error {
 	}
 	if inserted {
 		h.recordAutoAudit(ac, target, in)
+		h.notifyDeploy(ac.parent, target.ProjectID, target.EntryID, in.Entry, ac.hostID)
 	}
 	return ack()
 }

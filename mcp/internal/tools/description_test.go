@@ -122,3 +122,13 @@ func TestRequestToolsLinkFirst(t *testing.T) {
 		}
 	}
 }
+
+// api-v1 v1.41 item 5: list_problems names its scope, kinds and fixes.
+func TestListProblemsDescription(t *testing.T) {
+	d := listToolDescriptions(t)["list_problems"]
+	for _, phrase := range []string{"exactly one of project_id or org_id", "host_offline", "registry_login", "deploy", "needs_action", "connect_registry", "entry_logs", "Does not contact"} {
+		if !strings.Contains(d, phrase) {
+			t.Errorf("list_problems description lacks %q: %q", phrase, d)
+		}
+	}
+}

@@ -8,7 +8,11 @@ import { compareVersions, SEEN_VERSION_COOKIE } from '../changelog';
 import { apiFetch } from './api';
 import { isRecord } from './shape';
 
-const MAX_ITEMS = 20;
+/**
+ * The API sends at most 20 items plus every open problem (api-v1 v1.41 item 3: open problems are never cut). This
+ * cap only bounds a broken answer.
+ */
+const MAX_ITEMS = 200;
 const MAX_KEYS = 50;
 const MAX_KEY = 200;
 const CONTROL = /[\u0000-\u001F\u007F]/;
@@ -29,9 +33,16 @@ export function parseNotification(value: unknown): Notification | null {
 	const href = line(value.href, 500);
 	const at = line(value.at, 64);
 	if (!key || !title || !href || !CONSOLE_PATH.test(href) || !at || Number.isNaN(Date.parse(at))) return null;
-	if (value.kind !== 'release' && value.kind !== 'host_update') return null;
 	if (typeof value.read !== 'boolean') return null;
-	return { key, kind: value.kind, title, detail, href, at, read: value.read };
+	if (value.kind === 'release' || value.kind === 'host_update') {
+		return { key, kind: value.kind, title, detail, href, at, read: value.read };
+	}
+	if (value.kind !== 'problem') return null;
+	// api-v1 v1.41: a problem carries its level and state; a resolved one is never unread.
+	if (value.level !== 'needs_action' && value.level !== 'heads_up') return null;
+	if (value.state !== 'open' && value.state !== 'resolved') return null;
+	const read = value.state === 'resolved' ? true : value.read;
+	return { key, kind: 'problem', title, detail, href, at, read, level: value.level, state: value.state };
 }
 
 /** `unread` is recounted from the items kept, so the dot never disagrees with the rows. */

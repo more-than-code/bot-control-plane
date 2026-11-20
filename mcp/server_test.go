@@ -173,8 +173,9 @@ func TestTools(t *testing.T) {
 		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
 		"get_registry_connect_request": true,
 		"check_readiness":              true, "image_access": true, "host_policy_snippet": true, "shared_network_snippet": true,
-		"whats_new":   true,
-		"list_routes": true,
+		"whats_new":     true,
+		"list_routes":   true,
+		"list_problems": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -372,14 +373,15 @@ func TestTools(t *testing.T) {
 		"connect_registry", "get_registry_connect_request",
 		"check_readiness", "image_access", "host_policy_snippet",
 		"update_env_set", "delete_env_set", "shared_network_snippet", "whats_new",
-		"set_routes", "list_routes",
+		"set_routes", "list_routes", "list_problems",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
 		}
 	}
-	// 37 before api-v1 v1.34 and v1.35, plus whats_new, set_routes and list_routes.
-	if len(seen) != 40 {
+	// 37 before api-v1 v1.34 and v1.35, plus whats_new, set_routes and
+	// list_routes, plus list_problems (v1.41).
+	if len(seen) != 41 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -1824,6 +1826,17 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 			},
 			"next_cursor": nil,
 		}
+	case r.Method == http.MethodGet && (r.URL.Path == "/v1/orgs/"+orgID+"/problems" || r.URL.Path == "/v1/projects/"+projectID+"/problems"):
+		return http.StatusOK, "ok", "", map[string]any{
+			"items": []any{
+				map[string]any{
+					"id": "00000000-0000-4000-8000-0000000000e1", "kind": "registry_login", "level": "needs_action",
+					"title": "ghcr.io login was refused", "detail": "Token expired or revoked. Reconnect it in Settings.",
+					"href": "/projects/" + projectID + "?tab=settings#registries", "opened_at": "2026-11-21T08:12:00Z",
+					"updated_at": "2026-11-21T09:00:00Z", "resolved_at": nil, "host_id": nil, "project_id": projectID, "entry_id": nil,
+				},
+			},
+		}
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/orgs/"+orgID+"/hosts":
 		return http.StatusOK, "ok", "", map[string]any{
 			"items": []any{
@@ -2576,5 +2589,33 @@ func TestOrgReadsOnlyGet(t *testing.T) {
 	}
 	if len(paths) != 4 {
 		t.Fatalf("v1 calls %v", paths)
+	}
+}
+
+// api-v1 v1.41 item 5: list_problems reads the org or project problem route
+// (exactly one id) and the summary names the fix.
+func TestListProblems(t *testing.T) {
+	fake := &fakeAPI{token: userToken}
+	mcpSrv, _ := newTestServer(t, fake)
+	cs, _ := connectMCP(t, mcpSrv, userToken)
+	want := "1 open problem: ghcr.io login was refused since 2026-11-21 08:12 UTC (needs_action) — ask the person to reconnect it (connect_registry sends a connect request)."
+	res := mustCall(t, cs, "list_problems", map[string]any{"org_id": orgID})
+	assertLast(t, fake, http.MethodGet, "/v1/orgs/"+orgID+"/problems", "", "")
+	if res.IsError || textOf(t, res) != want {
+		t.Fatalf("org text %q", textOf(t, res))
+	}
+	res = mustCall(t, cs, "list_problems", map[string]any{"project_id": projectID})
+	assertLast(t, fake, http.MethodGet, "/v1/projects/"+projectID+"/problems", "", "")
+	if res.IsError || textOf(t, res) != want {
+		t.Fatalf("project text %q", textOf(t, res))
+	}
+	before := fake.count()
+	for _, args := range []map[string]any{{}, {"org_id": orgID, "project_id": projectID}, {"org_id": "nope"}} {
+		if res := mustCall(t, cs, "list_problems", args); !res.IsError {
+			t.Fatalf("%v accepted", args)
+		}
+	}
+	if fake.count() != before {
+		t.Fatal("a refused call reached the API")
 	}
 }
