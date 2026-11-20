@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.41 — 2026-11-21
+- Rename a host from the organization's Hosts table. A revoked host no longer keeps its name, so a re-enrolled machine can take it back.
+- Remove a revoked host from every host list. Its history and audit records stay.
+- Connecting GitHub now says why an attempt failed, in the console and over MCP.
+- The page for filling in a requested value says when the value has a line break.
+- Keys ending in `_FILE`, `_PATH` or `_DIR` are no longer treated as secrets because of their name, and the Secret box is no longer ticked for you; a hint says when a key looks secret.
+
 ## v0.2.40 — 2026-11-19
 - The console header shows your organization and project on every page, and switches project from any page.
 - A bell in the header collects new releases and, for organization owners and admins, hosts whose agent has an update. What you mark read stays read on every device.
