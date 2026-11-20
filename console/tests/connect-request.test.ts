@@ -246,6 +246,25 @@ describe('connect request page', () => {
 		return { err, sets };
 	}
 
+	test('the GitHub callback sends the connect cookie as connect_request_id (api-v1 v1.39)', async () => {
+		for (const [cookies, want] of [
+			[{ bot_github_return: PROJECT.id, bot_github_connect: ID }, { code: 'abc', state: STATE, connect_request_id: ID }],
+			[{ bot_github_return: PROJECT.id, bot_github_connect: '../evil' }, { code: 'abc', state: STATE }],
+			[{ bot_github_return: PROJECT.id }, { code: 'abc', state: STATE }]
+		] as const) {
+			const calls = installFetch(() => envelope(null, 400, 'bad_request', 'GitHub did not grant read:packages'));
+			const { event, jar } = fakeEvent({ url: `http://console.example/auth/github/callback?code=abc&state=${STATE}`, user: USER, session: TOKEN });
+			for (const [name, value] of Object.entries(cookies)) jar.set(name, value);
+			await (githubCallback(event as never) as Promise<Response>).then(
+				() => assert.fail('no redirect'),
+				(e: unknown) => e
+			);
+			assert.equal(calls.length, 1);
+			assert.equal(calls[0].url.pathname, '/v1/auth/github/callback');
+			assert.deepEqual(JSON.parse(calls[0].body ?? ''), want);
+		}
+	});
+
 	test('the GitHub callback returns to /connect/<id> for a request, and to Settings without one', async () => {
 		const ok = () => envelope({ project_id: PROJECT.id, host: 'ghcr.io', username: 'octo', source: 'github', connect_request_id: ID });
 		const both = { bot_github_return: PROJECT.id, bot_github_connect: ID };

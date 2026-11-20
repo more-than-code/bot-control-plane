@@ -30,6 +30,8 @@ export const STILL_RUNNING = 'Still running on the host. Check the history in a 
 
 const LINE_BREAK = /[\u0000\n\r]/;
 const SECRET_KEY = /password|passwd|token|secret|credential|api[_-]?key|private[_-]?key/i;
+/** A key whose name ends in _FILE, _PATH or _DIR holds a path, not a secret (api-v1 v1.39 item 4). */
+const PATH_KEY = /_(FILE|PATH|DIR)$/i;
 const RESERVED_ENV = new Set(['PATH', 'HOME']);
 const DENY_EXACT = new Set([
 	'NODE_OPTIONS',
@@ -274,7 +276,7 @@ function cleanInlineEnv(rows: ImageDraft['env']): { ok: true; env: Record<string
 		if (key === '') return fail('env', 'An environment value needs a key.');
 		if (!ENV_KEY.test(key)) return fail('env', 'Environment keys use A-Z, digits, and underscore.');
 		if (RESERVED_ENV.has(key)) return fail('env', `${key} is reserved.`);
-		if (SECRET_KEY.test(key)) return fail('env', `${key}: use secret_env.`);
+		if (refusedInlineKey(key)) return fail('env', `${key} looks like a secret: put it in secret_env or in a secret env-set key.`);
 		if (deniedEnvKey(key)) return fail('env', 'This variable changes what the program runs.');
 		if (LINE_BREAK.test(row.value) || byteLength(row.value) > 4096) {
 			return fail('env', 'An environment value is too long or contains a newline.');
@@ -1283,11 +1285,19 @@ export function isSecretLookingKey(key: string): boolean {
 	return SECRET_KEY.test(key);
 }
 
-/** Blank secret-looking inline values before a draft is sent back to the browser. */
+/** The inline-env refusal, as the API's (api-v1 v1.6 rule 8, v1.39 item 4): secret-looking, unless a path name. */
+export function refusedInlineKey(key: string): boolean {
+	return SECRET_KEY.test(key) && !PATH_KEY.test(key);
+}
+
+/**
+ * Blank secret-looking inline values before a draft is sent back to the browser.
+ * A path-named key (_FILE, _PATH, _DIR; api-v1 v1.39 item 4) keeps its value, as the API saves it.
+ */
 export function draftForBrowser(draft: ImageDraft): ImageDraft {
 	return {
 		...draft,
-		env: draft.env.map((row) => (isSecretLookingKey(row.key.trim()) ? { key: row.key, value: '' } : row))
+		env: draft.env.map((row) => (refusedInlineKey(row.key.trim()) ? { key: row.key, value: '' } : row))
 	};
 }
 

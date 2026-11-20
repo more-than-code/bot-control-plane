@@ -191,7 +191,7 @@ func TestGetRegistryConnectRequest(t *testing.T) {
 		if calls := seen(); len(calls) != 1 || calls[0].Path != "/v1/registry-connect-requests/"+crID {
 			t.Fatalf("calls %#v", calls)
 		}
-		if out["state"] != state || out["registry"] != "ghcr.io" || len(out) != 6 {
+		if out["state"] != state || out["registry"] != "ghcr.io" || out["last_failure"] != nil || len(out) != 7 {
 			t.Fatalf("structured %v", out)
 		}
 		if _, ok := out["reason"]; ok {
@@ -209,6 +209,55 @@ func TestGetRegistryConnectRequest(t *testing.T) {
 	})
 	if res, _, _ := callVR(t, cs, "get_registry_connect_request", map[string]any{"request_id": crID}); !res.IsError {
 		t.Fatal("a wrong registry was accepted")
+	}
+}
+
+// TestGetRegistryConnectRequestLastFailure: api-v1 v1.39 item 2 in plain
+// words, and an unknown reason is refused as a shape error.
+func TestGetRegistryConnectRequestLastFailure(t *testing.T) {
+	reply := func(state, reason string) func(*http.Request) (int, string) {
+		return func(*http.Request) (int, string) {
+			return http.StatusOK, `{"code":"ok","msg":"ok","payload":{"request_id":"` + crID + `","project_id":"` + vrProject + `","registry":"ghcr.io","state":"` + state + `","expires_at":"2026-11-16T10:15:00Z","created_at":"2026-11-16T10:00:00Z","last_failure":{"reason":"` + reason + `","at":"2026-11-16T10:05:00Z"}}}`
+		}
+	}
+	for reason, words := range map[string]string{
+		"expired_sign_in": "the GitHub sign-in expired or was already used",
+		"scope_missing":   "GitHub did not grant read:packages",
+		"github_error":    "GitHub sign-in failed",
+		"forbidden":       "the person is no longer owner or admin of the project",
+		"save_failed":     "Deploybot could not save the GitHub login",
+	} {
+		cs, _ := vrSession(t, nil, reply("pending", reason))
+		res, text, out := callVR(t, cs, "get_registry_connect_request", map[string]any{"request_id": crID})
+		want := "ghcr.io: pending. The last attempt failed: " + words + " (at 2026-11-16T10:05:00Z). The request is still open: tell the person why and ask them to open the link again and start over."
+		if res.IsError || text != want {
+			t.Fatalf("%s: %s", reason, text)
+		}
+		lf, _ := out["last_failure"].(map[string]any)
+		if lf["reason"] != reason || lf["at"] != "2026-11-16T10:05:00Z" || len(lf) != 2 {
+			t.Fatalf("%s: structured %v", reason, out)
+		}
+	}
+	cs, _ := vrSession(t, nil, reply("expired", "scope_missing"))
+	if _, text, _ := callVR(t, cs, "get_registry_connect_request", map[string]any{"request_id": crID}); !strings.HasPrefix(text, "ghcr.io: expired without a connection. The last attempt failed: GitHub did not grant read:packages") {
+		t.Fatalf("expired: %s", text)
+	}
+	cs, _ = vrSession(t, nil, reply("pending", "other"))
+	if res, _, _ := callVR(t, cs, "get_registry_connect_request", map[string]any{"request_id": crID}); !res.IsError {
+		t.Fatal("an unknown reason was accepted")
+	}
+	listed, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tool := range listed.Tools {
+		if tool.Name == "get_registry_connect_request" {
+			found = strings.Contains(tool.Description, "last_failure") && strings.Contains(tool.Description, "ask them to open the link again and start over")
+		}
+	}
+	if !found {
+		t.Fatal("the description does not say what to do after a failure")
 	}
 }
 

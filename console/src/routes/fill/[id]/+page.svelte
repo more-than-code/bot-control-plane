@@ -11,7 +11,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import ValueSourceFields from '$lib/components/ValueSourceFields.svelte';
 	import type { GenerateKind } from '$lib/env-generate';
-	import { FILL_TEXT, fillSubject, type FillSource } from '$lib/fill-request';
+	import { FILL_TEXT, fillSubject, lineBreakCheck, type FillSource } from '$lib/fill-request';
 	import EnvRevealDialog from '../../projects/[id]/EnvRevealDialog.svelte';
 	import { PASSWORD_MANAGER_IGNORE, secretInput, supportsTextMask } from '$lib/secret-input';
 
@@ -26,6 +26,8 @@
 	let source = $state<FillSource>('value');
 	let kind = $state<GenerateKind>('password');
 	let shown = $state(false);
+	// Pasted or dropped text with line breaks: stopped before it reaches the field, so nothing broken is posted (api-v1 v1.39 item 3).
+	let lineBreak = $state(false);
 	const valueInput = $derived(secretInput(!shown, canMask));
 	// The key whose generated value the show-once dialog shows, or null.
 	let revealKey = $state<string | null>(null);
@@ -61,6 +63,18 @@
 	$effect(() => {
 		if ((saved && !generated) || declined || closed) void focusResult();
 	});
+
+	/** A one-line input drops line breaks from inserted text; stop such a paste or drop and say why instead. */
+	function onValueInsert(event: Event, text: string | undefined) {
+		lineBreak = lineBreakCheck(text).block;
+		if (lineBreak) event.preventDefault();
+	}
+
+	/** Switching the value source remounts the field, so a stale line-break error is dropped. */
+	function onSource(next: FillSource) {
+		source = next;
+		lineBreak = false;
+	}
 
 	function afterReveal() {
 		revealKey = null;
@@ -122,7 +136,7 @@
 			idOf={(part) => `fill-${part}`}
 			{source}
 			{kind}
-			onSource={(next) => (source = next)}
+			{onSource}
 			onKind={(next) => (kind = next)}
 			typeLabel="Type or paste"
 		/>
@@ -140,6 +154,11 @@
 						spellcheck="false"
 						required
 						class="min-w-0 flex-1 font-mono {valueInput.maskClass}"
+						aria-describedby={lineBreak ? 'fill-value-hint fill-value-error' : 'fill-value-hint'}
+						aria-invalid={lineBreak || undefined}
+						onpaste={(event) => onValueInsert(event, event.clipboardData?.getData('text'))}
+						ondrop={(event) => onValueInsert(event, event.dataTransfer?.getData('text'))}
+						oninput={() => (lineBreak = false)}
 						{...PASSWORD_MANAGER_IGNORE}
 					/>
 					<Button
@@ -153,6 +172,10 @@
 						{#if shown}<EyeOff />{:else}<Eye />{/if}
 					</Button>
 				</div>
+				<p id="fill-value-hint" class="text-muted-foreground text-sm">{FILL_TEXT.lineBreakHint}</p>
+				{#if lineBreak}
+					<div id="fill-value-error"><Notice kind="error">{FILL_TEXT.lineBreak}</Notice></div>
+				{/if}
 			</div>
 		{/if}
 		<div class="flex flex-wrap gap-2">

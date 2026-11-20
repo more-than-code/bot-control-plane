@@ -198,8 +198,13 @@ VALUES ($1::uuid, $2::uuid, $3, 'approved', $4::uuid, now(), $4::uuid, now())`, 
 	if n := count(t, d, ctx, `SELECT count(*) FROM pg_constraint WHERE conname = 'hosts_project_name_unique'`); n != 0 {
 		t.Fatal("hosts_project_name_unique kept")
 	}
-	if n := count(t, d, ctx, `SELECT count(*) FROM pg_constraint WHERE conname = 'hosts_org_name_unique'`); n != 1 {
-		t.Fatal("hosts_org_name_unique dropped")
+	// The per-org name rule survives 0016. Since 0025 (api-v1 v1.38) it is
+	// the partial index over live hosts, not the plain constraint.
+	if n := count(t, d, ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname = 'app' AND indexname = 'hosts_org_name_live_uidx'`); n != 1 {
+		t.Fatal("hosts_org_name_live_uidx missing")
+	}
+	if n := count(t, d, ctx, `SELECT count(*) FROM pg_constraint WHERE conname = 'hosts_org_name_unique'`); n != 0 {
+		t.Fatal("hosts_org_name_unique still there after 0025")
 	}
 	if n := count(t, d, ctx, `SELECT count(*) FROM app.host_access`); n != accessBefore {
 		t.Fatalf("host_access rows %d, was %d", n, accessBefore)

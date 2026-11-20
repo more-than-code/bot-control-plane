@@ -134,7 +134,7 @@ func TestDelegatedCatalogValidation(t *testing.T) {
 		{`{"kind":"service","image":"nginx","env_sets":["missing"]}`, "bad-set", "unknown env set"},
 		{`{"kind":"service","image":"nginx","files":[{"file":"note.txt","target":"/etc/note"}]}`, "bad-file", "unknown file"},
 		{`{"kind":"service","image":"nginx","volumes":[{"name":"Bad","target":"/data"}]}`, "bad-vol", "invalid volumes"},
-		{`{"kind":"service","image":"nginx","env":{"API_KEY":"x"}}`, "bad-env", "use secret_env"},
+		{`{"kind":"service","image":"nginx","env":{"API_KEY":"x"}}`, "bad-env", "API_KEY looks like a secret: put it in secret_env or in a secret env-set key"},
 	}
 	for _, tc := range cases {
 		status, env := c.w.do(c.tok, http.MethodPost, path, catalogImageBody("web", tc.spec, tc.key))

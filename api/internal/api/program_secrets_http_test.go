@@ -54,7 +54,7 @@ func runReply(lines ...string) func(map[string]any) map[string]any {
 }
 
 // api-v1 v1.22 items 1 and 2: the write body takes env_sets and secret_env;
-// inline env keeps "use secret_env"; the stored spec and the hash.
+// inline env refuses a secret-looking key (v1.39 item 4 message); the stored spec and the hash.
 func TestProgramSecretsWrite(t *testing.T) {
 	w := newWorld(t)
 	w.srv.Secrets = testBox(t)
@@ -67,7 +67,7 @@ func TestProgramSecretsWrite(t *testing.T) {
 	putEnvFlag(t, w, tok, project, "cfg", "GH_HOST=github.com\n", false)
 
 	status, env := w.do(tok, http.MethodPost, path, progBody("bad", map[string]any{"env": map[string]string{"GH_TOKEN": "x"}}))
-	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "use secret_env")
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "GH_TOKEN looks like a secret: put it in secret_env or in a secret env-set key")
 	status, env = w.do(tok, http.MethodPost, path, progBody("bad", map[string]any{"env_sets": []string{"nope"}}))
 	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "unknown env set")
 	status, env = w.do(tok, http.MethodPost, path, progBody("bad", map[string]any{"secret_env": map[string]string{"T": "gh.NOPE"}}))

@@ -22,6 +22,9 @@ import {
 	imagePortText,
 	imageRequestBody,
 	imageSpecFromDraft,
+	refusedInlineKey,
+	draftForBrowser,
+	isSecretLookingKey,
 	setPortPublic,
 	nextHistory,
 	nextIdempotencyKey,
@@ -346,6 +349,57 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(token.ok, false);
 		if (token.ok) return;
 		assert.equal(token.field, 'env');
+		assert.equal(token.message, 'API_TOKEN looks like a secret: put it in secret_env or in a secret env-set key.');
+	});
+
+	// The path-exemption case table. The same table is in the API's
+	// api/internal/catalog/path_keys_test.go (pathKeyCases); keep both in step.
+	const PATH_KEY_CASES: Array<{ key: string; want: 'refused' | 'exempt' | 'plain' }> = [
+		{ key: 'API_KEY', want: 'refused' },
+		{ key: 'API_KEY_FILE', want: 'exempt' },
+		{ key: 'X_PRIVATE_KEY_FILE', want: 'exempt' },
+		{ key: 'GITHUB_TOKEN_PATH', want: 'exempt' },
+		{ key: 'SECRETS_DIR', want: 'exempt' },
+		{ key: 'PASSWORD_DIR', want: 'exempt' },
+		{ key: 'FILE_TOKEN', want: 'refused' },
+		{ key: 'PASSWORD_DIRECTORY', want: 'refused' },
+		{ key: 'TOKEN_FILENAME', want: 'refused' },
+		{ key: 'SECRET_FILE_X', want: 'refused' },
+		{ key: '_FILE', want: 'plain' },
+		{ key: 'PATH_ONLY_FILE', want: 'plain' }
+	];
+
+	test('a secret-looking key named _FILE, _PATH or _DIR holds a path and saves (api-v1 v1.39 item 4)', () => {
+		for (const { key, want } of PATH_KEY_CASES) {
+			assert.equal(isSecretLookingKey(key), want !== 'plain', key);
+			assert.equal(refusedInlineKey(key), want === 'refused', key);
+			const draft = blankImageDraft();
+			draft.name = 'web';
+			draft.image = 'ghcr.io/acme/web:1';
+			draft.env = [{ key, value: '/etc/x.pem' }];
+			const check = imageSpecFromDraft(draft, undefined, true);
+			if (want === 'refused') {
+				assert.equal(check.ok, false, key);
+				if (!check.ok) assert.equal(check.message, `${key} looks like a secret: put it in secret_env or in a secret env-set key.`);
+			} else {
+				assert.equal(check.ok, true, key);
+				if (check.ok) assert.deepEqual(check.spec.env, { [key]: '/etc/x.pem' });
+			}
+		}
+	});
+
+	test('a redisplayed draft keeps a path-named value and blanks a secret one', () => {
+		const draft = blankImageDraft();
+		draft.env = [
+			{ key: 'X_PRIVATE_KEY_FILE', value: '/etc/x.pem' },
+			{ key: 'API_KEY', value: 'abc' },
+			{ key: 'HOST', value: 'db' }
+		];
+		assert.deepEqual(draftForBrowser(draft).env, [
+			{ key: 'X_PRIVATE_KEY_FILE', value: '/etc/x.pem' },
+			{ key: 'API_KEY', value: '' },
+			{ key: 'HOST', value: 'db' }
+		]);
 	});
 
 	test('docker run preview shows env keys and not values', () => {
@@ -2929,7 +2983,7 @@ describe('catalog images', { concurrency: false }, () => {
 			render(ProjectFileForm, { props: { action: '?/saveProjectFile', error, onSaved: () => {}, onSettled: () => {} } }).body;
 		const formHtml = fileForm();
 		const secretInput = [...formHtml.matchAll(/<input\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('name="secret"'));
-		assert.equal(secretInput?.includes('value="1"'), true);
+		assert.equal(secretInput?.includes('value="0"'), true, 'Add file starts with Secret unticked (Joe 2026-11-20)');
 		assert.equal(formHtml.includes('aria-label="Secret file"'), true);
 		const area = formHtml.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
 		assert.equal(area != null, true);
@@ -3222,14 +3276,14 @@ describe('catalog images', { concurrency: false }, () => {
 				secret = next.secret;
 				saved = next.saved;
 			},
-			{ name: 'key.json', secret: false },
+			{ name: 'key.json', secret: true },
 			'key.json',
 			async () => undefined,
 			'redirect'
 		);
 		assert.equal(content, '');
 		assert.equal(name, '');
-		assert.equal(secret, true);
+		assert.equal(secret, false, 'the next file starts unticked (Joe 2026-11-20)');
 		assert.equal(saved, 'key.json');
 	});
 

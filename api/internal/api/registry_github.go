@@ -82,6 +82,8 @@ func (s *Server) handleGitHubStart(w http.ResponseWriter, r *http.Request) {
 
 // handleGitHubCallback is api-v1 v1.29 item 3. The token is sealed and
 // stored; it is never written to a response, a log line or an audit row.
+// Every failure logs one line with its step and is recorded on the connect
+// request it belongs to (api-v1 v1.39 items 1 and 2).
 func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.require(w, r)
 	if !ok {
@@ -97,6 +99,9 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Code  string `json:"code"`
 		State string `json:"state"`
+		// ConnectRequestID is the console's connect cookie (api-v1 v1.39
+		// item 1): the request a failed state belonged to.
+		ConnectRequestID string `json:"connect_request_id"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -113,33 +118,42 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	taken, err := s.GitHubStates.TakeState(body.State, p.User.ID, s.now())
 	if err != nil {
+		s.githubFailed(r.Context(), p, body.ConnectRequestID, "state", github.ReasonExpiredSignIn)
 		writeCode(w, "bad_request", msgGitHubState)
 		return
+	}
+	// From here the state names the request (or none, for a start from Settings).
+	failed := func(step, reason string) {
+		s.githubFailed(r.Context(), p, taken.Request, step, reason)
 	}
 	projectID, verifier := taken.Project, taken.Verifier
 	if err := authz.Authorize(r.Context(), p.User.ID, projectID, authz.CapMembers); err != nil {
 		var denied *authz.Denied
 		if errors.As(err, &denied) {
+			failed("forbidden", github.ReasonForbidden)
 			writeCode(w, "forbidden", "forbidden")
 			return
 		}
+		// Not a callback failure: authz could not be checked (a store error),
+		// which s.fail logs and answers as any internal error.
 		s.fail(w, err)
 		return
 	}
 	token, err := s.GitHub.Exchange(r.Context(), body.Code, verifier, s.githubRedirect())
 	if err != nil {
-		s.logger().Warn("github sign-in failed", "step", "exchange")
+		failed("exchange", github.ReasonGitHubError)
 		writeCode(w, "bad_gateway", msgGitHubFailed)
 		return
 	}
 	login, scopes, err := s.GitHub.User(r.Context(), token)
 	if err != nil {
-		s.logger().Warn("github sign-in failed", "step", "user")
+		failed("user", github.ReasonGitHubError)
 		s.revokeGitHub(r.Context(), token)
 		writeCode(w, "bad_gateway", msgGitHubFailed)
 		return
 	}
 	if !github.HasScope(scopes) {
+		failed("scope", github.ReasonScopeMissing)
 		s.revokeGitHub(r.Context(), token)
 		writeCode(w, "bad_request", msgGitHubScope)
 		return
@@ -147,7 +161,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	host := store.GitHubRegistry
 	nonce, ciphertext, err := s.Secrets.Seal(seal.RegistryAAD(projectID.String(), host), []byte(token))
 	if err != nil {
-		s.logger().Error("encrypt failed")
+		failed("store", github.ReasonSaveFailed)
 		writeCode(w, "error", "internal error")
 		return
 	}
@@ -172,6 +186,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		reg, err = s.Store.ConnectRegistry(r.Context(), projectID, host, write, p.User.ID, s.now(), takenRequestHash(taken.Request))
 	}
 	if err != nil {
+		failed("store", github.ReasonSaveFailed)
 		// Nothing stores the new token: revoke it so it does not linger at GitHub.
 		s.revokeGitHub(r.Context(), token)
 		s.writeErr(w, err, false)
@@ -188,6 +203,8 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		"source":     reg.Source,
 	}
 	if taken.Request != "" {
+		// v1.39 item 2: a success clears the last failure.
+		s.GitHubFailures.Clear(takenRequestHash(taken.Request))
 		detail["request"] = auditRequestRef(takenRequestHash(taken.Request))
 		out["connect_request_id"] = taken.Request
 	}
@@ -197,6 +214,29 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		Detail:    detail,
 	})
 	writeOK(w, http.StatusOK, out)
+}
+
+// githubFailed is a callback failure (api-v1 v1.39 items 1 and 2): one Warn
+// line with step, never a token, code, state or GitHub body, and reason
+// recorded on the connect request requestID names when that request is the
+// caller's and still pending. Any other id, malformed or not, is ignored.
+func (s *Server) githubFailed(ctx context.Context, p principal, requestID, step, reason string) {
+	s.logger().Warn("github sign-in failed", "step", step)
+	if requestID == "" {
+		return
+	}
+	hash, ok := requestHash(requestID, true)
+	if !ok {
+		return
+	}
+	// WithoutCancel: the failure is still recorded when the browser has gone
+	// away, so the connect page shows it on the next load.
+	req, err := s.Store.GetConnectRequest(context.WithoutCancel(ctx), hash)
+	now := s.now()
+	if err != nil || req.UserID != p.User.ID || req.StateAt(now) != store.RequestPending {
+		return
+	}
+	s.GitHubFailures.Record(hash, reason, now, req.ExpiresAt)
 }
 
 // githubTokenOf is the stored token of a github-source row for host, or ""

@@ -22,5 +22,5 @@ export async function settleFileSave(
 	await clearSecretField((value) => {
 		assign({ content: value, name: current.name, secret: current.secret, saved: null });
 	}, update);
-	if (resultType === 'redirect') assign({ content: '', name: '', secret: true, saved: submittedName });
+	if (resultType === 'redirect') assign({ content: '', name: '', secret: false, saved: submittedName });
 }

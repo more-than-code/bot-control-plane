@@ -62,7 +62,7 @@ func TestCatalogValidation(t *testing.T) {
 		{"args", programBody("c18", "pnpm "+strings.Repeat("a ", 33), false), "too many args"},
 		{"dir", programBodyDir("c19", "pnpm", "tmp/app"), "invalid dir"},
 		{"run_as", programBodyRun("c20", "root"), "invalid run_as"},
-		{"secret", programBodyEnv("c21", "API_KEY", "x"), "use secret_env"},
+		{"secret", programBodyEnv("c21", "API_KEY", "x"), "API_KEY looks like a secret: put it in secret_env or in a secret env-set key"},
 		{"path", programBodyEnv("c22", "PATH", "/bin"), "PATH is reserved"},
 		{"home", programBodyEnv("c23", "HOME", "/home/joe"), "HOME is reserved"},
 		{"envkey", programBodyEnv("c24", "node", "1"), "invalid env key"},

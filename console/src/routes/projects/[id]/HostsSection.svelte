@@ -10,6 +10,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { Host } from '$lib/api-types';
 	import type { AccessActionData } from '$lib/host-access';
+	import { hostLabel, revokedLast } from '$lib/host-name';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import { Badge } from '$lib/components/ui/badge';
@@ -56,6 +57,8 @@
 		accessFailure?.accessConflict ? (hosts.find((host) => host.id === accessFailure.accessConflict?.hostId) ?? null) : null
 	);
 	const leaveFailureId = 'leave-host-error';
+	// Revoked hosts after live ones (api-v1 v1.38: a revoked host keeps its name, which a live one may share).
+	const rows = $derived(revokedLast(hosts));
 </script>
 
 {#if message}
@@ -95,7 +98,7 @@
 	<p class="text-muted-foreground mb-2 text-sm">More items not shown</p>
 {/if}
 <h2 id="hosts-heading" class="sr-only">Hosts</h2>
-<DataTable rows={hosts} {columns} id="hosts" labelledBy="hosts-heading" empty="No hosts yet." rowKey={(host) => host.id}>
+<DataTable {rows} {columns} id="hosts" labelledBy="hosts-heading" empty="No hosts yet." rowKey={(host) => host.id}>
 	{#snippet emptyExtra()}
 		{#if !hostsMessage}
 			{#if canOrgAdmin}
@@ -107,7 +110,7 @@
 	{/snippet}
 	{#snippet row(host)}
 		<tr>
-			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{host.id}">{host.name}</a></td>
+			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{host.id}" aria-label={host.status === 'revoked' ? hostLabel(host) : undefined}>{host.name}</a></td>
 			<td class="p-2 align-middle">
 				{#if host.access_level}
 					<Badge variant="outline">{host.access_level}</Badge>
@@ -132,7 +135,7 @@
 									{ name: 'host_id', value: host.id },
 									{ name: 'project_id', value: projectId }
 								]}
-								rowLabel="Leave {host.name}"
+								rowLabel="Leave {hostLabel(host)}"
 								icon={LogOut}
 								closeOnFailure
 								failureFocusId={leaveFailureId}

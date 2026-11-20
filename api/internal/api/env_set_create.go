@@ -262,7 +262,7 @@ func envSetCreateRequestHash(projectID uuid.UUID, name string, plan []byte) []by
 }
 
 // plainSecretWarning is the plan reminder for a plain value whose key name
-// looks secret (catalog.LooksSecret, the inline env rule). It is a reminder,
+// looks secret (catalog.LooksSecretNotPath, the inline env rule). It is a reminder,
 // not a refusal (Joe 2026-11-16), and names the key only.
 const plainSecretWarning = " looks like a secret but will be stored as plain text, visible in the console; use a placeholder and request_env_value instead."
 
@@ -288,7 +288,7 @@ func envKeysPhrase(keys []envCreateKey) (string, []string) {
 	for _, k := range keys {
 		if k.Value != nil {
 			parts = append(parts, k.Key+" (plain, value given)")
-			if catalog.LooksSecret(k.Key) {
+			if catalog.LooksSecretNotPath(k.Key) {
 				warnings = append(warnings, k.Key+plainSecretWarning)
 			}
 			continue

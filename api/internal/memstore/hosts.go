@@ -105,9 +105,10 @@ func (m *Mem) ConsumeJoinToken(_ context.Context, tokenHash []byte, in store.Enr
 			grant = tok.Grant
 		}
 	}
+	// Only live hosts hold a name (api-v1 v1.38).
 	name, err := store.Unique(in.Name, 63, func(candidate string) bool {
 		for _, h := range m.hosts {
-			if h.OrgID == tok.OrgID && h.Name == candidate {
+			if h.OrgID == tok.OrgID && h.Name == candidate && h.RevokedAt == nil {
 				return true
 			}
 		}
@@ -248,6 +249,31 @@ func hostAfter(h store.Host, cursor *store.Cursor) bool {
 		return h.Name > cursor.Name
 	}
 	return h.ID.String() > cursor.ID
+}
+
+func (m *Mem) RenameHost(_ context.Context, hostID uuid.UUID, name string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h, ok := m.hosts[hostID]
+	if !ok {
+		return "", store.ErrNotFound
+	}
+	if h.RevokedAt != nil {
+		return "", store.ErrState
+	}
+	from := h.Name
+	if from == name {
+		return from, nil
+	}
+	// Only live hosts hold a name (api-v1 v1.38).
+	for id, other := range m.hosts {
+		if id != hostID && other.OrgID == h.OrgID && other.Name == name && other.RevokedAt == nil {
+			return "", store.ErrConflict
+		}
+	}
+	h.Name = name
+	m.hosts[hostID] = h
+	return from, nil
 }
 
 func (m *Mem) RevokeHost(_ context.Context, hostID uuid.UUID, at time.Time) error {

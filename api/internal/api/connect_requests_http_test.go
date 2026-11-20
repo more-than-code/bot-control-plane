@@ -138,7 +138,7 @@ func TestConnectRequestCreate(t *testing.T) {
 
 	got := f.read(t, f.owner, id)
 	if got["request_id"] != id || got["project_id"] != f.project || got["registry"] != "ghcr.io" || got["state"] != "pending" ||
-		got["expires_at"] != f.w.now.Add(15*time.Minute).Format(time.RFC3339) || got["created_at"] != f.w.now.Format(time.RFC3339) || len(got) != 6 {
+		got["expires_at"] != f.w.now.Add(15*time.Minute).Format(time.RFC3339) || got["created_at"] != f.w.now.Format(time.RFC3339) || got["last_failure"] != nil || len(got) != 7 {
 		t.Fatalf("read %v", got)
 	}
 
@@ -220,7 +220,7 @@ func TestConnectRequestPage(t *testing.T) {
 	}
 	got := page(f.owner)
 	if got["project_name"] != "Proj" || got["reason"] != crReason || got["state"] != "pending" || got["registry"] != "ghcr.io" ||
-		got["current_login"] != nil || len(got) != 9 {
+		got["current_login"] != nil || got["last_failure"] != nil || len(got) != 10 {
 		t.Fatalf("page %v", got)
 	}
 	if _, ok := got["current_login"]; !ok {

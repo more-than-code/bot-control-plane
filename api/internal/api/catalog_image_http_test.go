@@ -48,7 +48,7 @@ func TestImageCatalogShape(t *testing.T) {
 		t.Fatal("error echoes the name")
 	}
 	status, env, _ = mustCall(t, w, tok, http.MethodPost, path, `{"name":"web","kind":"image","spec":{"kind":"service","image":"nginx","env":{"DB_PASSWORD":"x"}}}`)
-	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "use secret_env")
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "DB_PASSWORD looks like a secret: put it in secret_env or in a secret env-set key")
 	status, env, _ = mustCall(t, w, tok, http.MethodPost, path, `{"name":"web","kind":"image","spec":{"kind":"service","image":"nginx"},"shell":true}`)
 	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "invalid json")
 

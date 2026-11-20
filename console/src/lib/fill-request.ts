@@ -41,6 +41,10 @@ export const FILL_TEXT = {
 	declined: 'Declined. The agent will see that you declined. You can close this tab.',
 	unexpected: 'The API returned an unexpected response.',
 	noValue: 'Enter a value, or choose Generate.',
+	// api-v1 v1.39 item 3: env values refuse line breaks (v1.6 item 8), so a key file goes through a file request.
+	lineBreak:
+		'This value has line breaks, which env values cannot hold. For a key file such as a PEM, ask the agent to use a file request (request_file) instead.',
+	lineBreakHint: 'One line only.',
 	safety: "The value goes straight to Deploybot and is stored encrypted. The agent never sees it."
 } as const;
 
@@ -94,7 +98,17 @@ export function fillBody(source: string, value: string, kind: string): { ok: tru
 		return { ok: true, body: { generate: kind === 'password' ? { kind, length: PASSWORD_LENGTH } : { kind } } };
 	}
 	if (value === '') return { ok: false, message: FILL_TEXT.noValue };
+	if (lineBreakCheck(value).block) return { ok: false, message: FILL_TEXT.lineBreak };
 	return { ok: true, body: { value } };
+}
+
+/**
+ * The one line-break decision for the value field (api-v1 v1.6 item 8, v1.39 item 3): `block` when the text has a
+ * line break (\n, \r\n or a lone \r). fillBody checks a posted value with it, and the page checks pasted and
+ * dropped text before it reaches the field, because a one-line input would drop the breaks and post a broken value.
+ */
+export function lineBreakCheck(text: string | null | undefined): { block: boolean } {
+	return { block: /[\r\n]/.test(text ?? '') };
 }
 
 /** Replace a typed value in a message, should one ever come back. */

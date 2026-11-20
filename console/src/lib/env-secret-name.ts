@@ -2,8 +2,8 @@ import { dotenvPairs } from '$lib/env-lint';
 
 /**
  * Secret suggestion by name (spec-env-generate rev 3 §3.4, phase B): a key that ends in _KEY, _SECRET, _TOKEN or
- * _PASSWORD, or contains PASSWORD, looks secret. Case-insensitive on the key as typed. It only pre-ticks a visible
- * checkbox the user can change; it is never a silent rule.
+ * _PASSWORD, or contains PASSWORD, looks secret. Case-insensitive on the key as typed. It only shows the muted
+ * "Looks secret: …" line; no Secret box ever ticks itself (Joe 2026-11-20).
  */
 export function looksSecret(key: string): boolean {
 	const upper = key.trim().toUpperCase();
@@ -23,12 +23,4 @@ export function secretLookingKeys(dotenv: string, existing: readonly string[] = 
 /** The muted line under a paste box, or '' when no new key looks secret. */
 export function looksSecretLine(keys: readonly string[]): string {
 	return keys.length > 0 ? `Looks secret: ${keys.join(', ')}` : '';
-}
-
-/**
- * The checkbox after an input change: follows the suggestion until the user has set it themself (touched), and
- * then stays as they left it.
- */
-export function suggestedSecret(current: boolean, touched: boolean, suggested: boolean): boolean {
-	return touched ? current : suggested;
 }

@@ -73,7 +73,8 @@ func registerConnectRequests(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name: "get_registry_connect_request",
 		Description: connectRule + " Read the state of a connect request you made with connect_registry: pending, connected, declined or expired. " +
-			"Only the person who asked can read it. Reads stored API data. Does not contact any host.",
+			"Only the person who asked can read it. last_failure, when set, says why the person's last attempt failed (for example GitHub did not grant read:packages); " +
+			"the request stays pending, so tell the person the reason and ask them to open the link again and start over. Reads stored API data. Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(getRegistryConnectRequestSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -232,49 +233,83 @@ func connectSummary(created createdRequest, state, elicitation string) string {
 const connectEndedHint = "If the person finished on GitHub anyway, check_readiness shows whether ghcr.io is now connected."
 
 type connectRequestView struct {
-	raw       json.RawMessage
-	projectID string
-	state     string
-	expiresAt string
+	raw         json.RawMessage
+	projectID   string
+	state       string
+	expiresAt   string
+	lastFailure *connectFailure
 }
 
-// projectConnectRequest allowlists the ConnectRequest object (api-v1 v1.31 item 1).
+// connectFailure is ConnectRequest.last_failure (api-v1 v1.39 item 2).
+type connectFailure struct {
+	Reason string `json:"reason"`
+	At     string `json:"at"`
+}
+
+// connectFailureText says each last_failure reason in plain words.
+var connectFailureText = map[string]string{
+	"expired_sign_in": "the GitHub sign-in expired or was already used",
+	"scope_missing":   "GitHub did not grant read:packages",
+	"github_error":    "GitHub sign-in failed",
+	"forbidden":       "the person is no longer owner or admin of the project",
+	"save_failed":     "Deploybot could not save the GitHub login",
+}
+
+// projectConnectRequest allowlists the ConnectRequest object (api-v1 v1.31
+// item 1, v1.39 item 2).
 func projectConnectRequest(payload json.RawMessage) (connectRequestView, error) {
 	var body struct {
-		RequestID string `json:"request_id"`
-		ProjectID string `json:"project_id"`
-		Registry  string `json:"registry"`
-		State     string `json:"state"`
-		ExpiresAt string `json:"expires_at"`
-		CreatedAt string `json:"created_at"`
+		RequestID   string          `json:"request_id"`
+		ProjectID   string          `json:"project_id"`
+		Registry    string          `json:"registry"`
+		State       string          `json:"state"`
+		ExpiresAt   string          `json:"expires_at"`
+		CreatedAt   string          `json:"created_at"`
+		LastFailure *connectFailure `json:"last_failure"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil || !connectRequestKind.stateOK(body.State) ||
 		body.Registry != connectRegistryHost || !uuidPattern.MatchString(body.ProjectID) {
 		return connectRequestView{}, errStatusShape
 	}
+	var lastFailure any
+	if f := body.LastFailure; f != nil {
+		if _, ok := connectFailureText[f.Reason]; !ok {
+			return connectRequestView{}, errStatusShape
+		}
+		f.At = publicString(f.At)
+		lastFailure = f
+	}
 	out, err := json.Marshal(map[string]any{
-		"request_id": publicString(body.RequestID),
-		"project_id": body.ProjectID,
-		"registry":   body.Registry,
-		"state":      body.State,
-		"expires_at": publicString(body.ExpiresAt),
-		"created_at": publicString(body.CreatedAt),
+		"request_id":   publicString(body.RequestID),
+		"project_id":   body.ProjectID,
+		"registry":     body.Registry,
+		"state":        body.State,
+		"expires_at":   publicString(body.ExpiresAt),
+		"created_at":   publicString(body.CreatedAt),
+		"last_failure": lastFailure,
 	})
 	if err != nil {
 		return connectRequestView{}, errStatusShape
 	}
-	return connectRequestView{raw: out, projectID: body.ProjectID, state: body.State, expiresAt: body.ExpiresAt}, nil
+	return connectRequestView{raw: out, projectID: body.ProjectID, state: body.State, expiresAt: body.ExpiresAt, lastFailure: body.LastFailure}, nil
 }
 
 func (v connectRequestView) summary() string {
+	failed := ""
+	if v.lastFailure != nil {
+		failed = " The last attempt failed: " + connectFailureText[v.lastFailure.Reason] + " (at " + summaryField(v.lastFailure.At) + ")."
+	}
 	switch v.state {
 	case "connected":
 		return "ghcr.io: connected. The project pulls ghcr.io images with the GitHub login; you will not see the token."
 	case "declined":
-		return "ghcr.io: declined by the person.\n" + connectEndedHint
+		return "ghcr.io: declined by the person." + failed + "\n" + connectEndedHint
 	case "expired":
-		return "ghcr.io: expired without a connection. Ask again with connect_registry if it is still needed.\n" + connectEndedHint
+		return "ghcr.io: expired without a connection." + failed + " Ask again with connect_registry if it is still needed.\n" + connectEndedHint
 	default:
+		if failed != "" {
+			return "ghcr.io: pending." + failed + " The request is still open: tell the person why and ask them to open the link again and start over."
+		}
 		return "ghcr.io: pending. The person has not connected GitHub yet."
 	}
 }

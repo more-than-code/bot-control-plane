@@ -15,20 +15,18 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import ValueSourceFields from '$lib/components/ValueSourceFields.svelte';
 	import { dotenvWarnings, envValueWarnings } from '$lib/env-lint';
-	import { looksSecretLine, secretLookingKeys } from '$lib/env-secret-name';
+	import { looksSecret, looksSecretLine, secretLookingKeys } from '$lib/env-secret-name';
 	import {
 		addErrorText,
 		addIsSecret,
 		addKeyError,
 		addKeyRefused,
-		addKeyTyped,
 		placeholderRule,
 		addTabFailed,
 		addValueTyped,
 		closeAddVariables,
 		initialAddVariables,
 		pasteTabFailed,
-		pasteTyped,
 		setAddSecret,
 		setAddSource,
 		settleAdd,
@@ -95,9 +93,9 @@
 	const valueField = $derived(secretInput(secretShown, canMask));
 	// Every key already in the set, placeholders included: the paste suggestion names new keys only.
 	const allKeys = $derived([...existingKeys, ...secretPlaceholders, ...plainPlaceholders]);
-	/** Typing a key: the name suggestion, and back to Type a value when the key is a plain placeholder. */
+	/** Typing a key: back to Type a value when the key is a plain placeholder. No Secret box ticks itself. */
 	function keyTyped() {
-		let draft = addKeyTyped(view.draft);
+		let draft = view.draft;
 		if (!placeholderRule(draft.key, secretPlaceholders, plainPlaceholders).canGenerate) draft = setAddSource(draft, 'value');
 		view = { ...view, draft };
 	}
@@ -106,6 +104,8 @@
 	const pasteWarnings = $derived(dotenvWarnings(view.paste));
 	// Secret suggestion by name (spec rev 3 §3.4): a visible hint, never a silent rule.
 	const pasteLooksSecret = $derived(looksSecretLine(secretLookingKeys(view.paste, allKeys)));
+	/** One variable's reminder while Secret is off; the box never ticks itself (Joe 2026-11-20). */
+	const keyLooksSecret = $derived(!secretShown && looksSecret(view.draft.key) ? looksSecretLine([view.draft.key.trim()]) : '');
 
 	// A new form-result failure opens the dialog on Paste several. Closing it stays closed while it is current.
 	$effect(() => {
@@ -271,11 +271,14 @@
 								id={id('add-secret')}
 								checked={secretShown}
 								disabled={generating || placeholder.secret !== null}
-								aria-describedby={placeholder.note ? id('add-placeholder') : undefined}
+								aria-describedby={[placeholder.note ? id('add-placeholder') : null, keyLooksSecret ? id('add-looks-secret') : null].filter(Boolean).join(' ') || undefined}
 								onCheckedChange={(value) => (view = { ...view, draft: setAddSecret(view.draft, value === true) })}
 							/>
 							Secret
 						</Label>
+						{#if keyLooksSecret}
+							<p id={id('add-looks-secret')} class="text-muted-foreground text-sm break-words">{keyLooksSecret}</p>
+						{/if}
 						{#if placeholder.note}
 							<p id={id('add-placeholder')} class="text-muted-foreground text-sm break-words">{placeholder.note}</p>
 						{/if}
@@ -298,7 +301,6 @@
 								id={id('merge-dotenv')}
 								name="dotenv"
 								bind:value={view.paste}
-								oninput={() => (view = pasteTyped(view, allKeys))}
 								rows={6}
 								spellcheck="false"
 								autocomplete="off"
@@ -313,7 +315,7 @@
 								id={id('merge-new-secret')}
 								checked={view.pasteSecret}
 								aria-describedby={pasteLooksSecret ? id('merge-looks-secret') : undefined}
-								onCheckedChange={(value) => (view = { ...view, pasteSecret: value === true, pasteSecretTouched: true })}
+								onCheckedChange={(value) => (view = { ...view, pasteSecret: value === true })}
 							/>
 							New keys are secret
 						</Label>

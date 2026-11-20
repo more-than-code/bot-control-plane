@@ -16,6 +16,7 @@ const STATE = /^[A-Za-z0-9_-]{43}$/;
  * state is this user's and unused; the browser then returns to the project's Settings → Registries with a short
  * `?github=` code. The token never reaches the console. A Connect GitHub started from chat (api-v1 v1.31) returns to
  * its connect page `/connect/<id>` instead: the id comes from the API answer, or from the connect cookie on a failure.
+ * The cookie's id also rides in the callback body (api-v1 v1.39 item 1), so the API can record a failure on that request.
  */
 export const GET: RequestHandler = async (event) => {
 	requireApi();
@@ -39,7 +40,8 @@ export const GET: RequestHandler = async (event) => {
 
 	let payload: unknown;
 	try {
-		payload = await apiFetch(event, '/v1/auth/github/callback', { method: 'POST', body: JSON.stringify({ code, state }) });
+		const body = connect !== '' ? { code, state, connect_request_id: connect } : { code, state };
+		payload = await apiFetch(event, '/v1/auth/github/callback', { method: 'POST', body: JSON.stringify(body) });
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
 		if (err instanceof ApiError) back(githubFailureCode(err.code, err.msg));

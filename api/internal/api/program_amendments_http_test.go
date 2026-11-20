@@ -66,7 +66,7 @@ func TestProgramSecretValueGates(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
 	// A plain set key in the extended list is allowed (its value is approved).
 	status, env = w.do(tok, http.MethodPost, path, progBody("proxy", map[string]any{"env_sets": []string{"plain"}, "env": map[string]string{"API_TOKEN_ID": "1"}}))
-	if status != http.StatusBadRequest || env.Msg != "use secret_env" {
+	if status != http.StatusBadRequest || env.Msg != "API_TOKEN_ID looks like a secret: put it in secret_env or in a secret env-set key" {
 		t.Fatalf("inline secret-looking key %d %s", status, env.Msg)
 	}
 	putEnvFlag(t, w, tok, project, "proxyonly", "HTTPS_PROXY=http://plain:3128\n", false)
@@ -110,5 +110,15 @@ func TestProgramSecretValueGates(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	if log.count() != 2 {
 		t.Fatalf("tasks %d after marking the key secret", log.count())
+	}
+
+	// v1.39 item 4 (amended): a plain set key named like a path is not refused.
+	putEnvFlag(t, w, tok, project, "paths", "X_PRIVATE_KEY_FILE=/etc/x.pem\n", false)
+	status, env = w.do(tok, http.MethodPost, path, progBody("pathy", map[string]any{"env_sets": []string{"paths"}}))
+	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
+	status, env, _ = postImageLike(t, w, tok, project, "pathy", "run", host, "g-4")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if log.count() != 3 {
+		t.Fatalf("tasks %d after the path-named key run", log.count())
 	}
 }

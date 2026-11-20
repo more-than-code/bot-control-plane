@@ -177,6 +177,8 @@ SELECT EXISTS (SELECT 1 FROM app.projects WHERE id = $1::uuid AND org_id = $2::u
 			grant = &store.TokenGrant{ProjectID: pid, Level: *grantLevel}
 		}
 	}
+	// Only live hosts hold a name (api-v1 v1.38): the partial unique index
+	// hosts_org_name_live_uidx backs this probe against races.
 	var takenErr error
 	name, err := store.Unique(in.Name, 63, func(candidate string) bool {
 		if takenErr != nil {
@@ -184,7 +186,7 @@ SELECT EXISTS (SELECT 1 FROM app.projects WHERE id = $1::uuid AND org_id = $2::u
 		}
 		var exists bool
 		qerr := tx.QueryRow(ctx, `
-SELECT EXISTS (SELECT 1 FROM app.hosts WHERE org_id = $1::uuid AND name = $2)
+SELECT EXISTS (SELECT 1 FROM app.hosts WHERE org_id = $1::uuid AND name = $2 AND revoked_at IS NULL)
 `, tok.OrgID.String(), candidate).Scan(&exists)
 		if qerr != nil {
 			takenErr = qerr
@@ -377,6 +379,36 @@ func scanListedHost(row pgx.Row) (store.Host, error) {
 	}
 	h.AccessLevel = level
 	return h, nil
+}
+
+func (d *DB) RenameHost(ctx context.Context, hostID uuid.UUID, name string) (string, error) {
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return "", mapErr(err)
+	}
+	defer tx.Rollback(ctx)
+	var from string
+	var revoked *time.Time
+	if err := tx.QueryRow(ctx, `
+SELECT name, revoked_at FROM app.hosts WHERE id = $1::uuid FOR UPDATE
+`, hostID.String()).Scan(&from, &revoked); err != nil {
+		return "", mapErr(err)
+	}
+	if revoked != nil {
+		return "", store.ErrState
+	}
+	if from == name {
+		return from, nil
+	}
+	// hosts_org_name_live_uidx refuses a name a live host of the org holds:
+	// mapErr turns that into ErrConflict.
+	if err := exec(ctx, tx, `UPDATE app.hosts SET name = $2 WHERE id = $1::uuid`, hostID.String(), name); err != nil {
+		return "", mapErr(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", mapErr(err)
+	}
+	return from, nil
 }
 
 func (d *DB) RevokeHost(ctx context.Context, hostID uuid.UUID, at time.Time) error {

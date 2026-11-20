@@ -141,6 +141,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	if gh != nil {
 		srv.GitHub = gh
 		srv.GitHubStates = github.NewStates()
+		srv.GitHubFailures = github.NewFailures()
 		log.Info("connect github ready")
 	} else if cfg.GitHubClientID != "" || cfg.GitHubClientSecretFile != "" {
 		log.Warn("connect github is off: it needs BOT_API_GITHUB_CLIENT_ID, BOT_API_GITHUB_CLIENT_SECRET_FILE and BOT_API_CONSOLE_ORIGIN")

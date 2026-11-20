@@ -29,7 +29,7 @@
 	// The paste is cleared on every result, and dropped when the dialog closes.
 	let fileContent = $state('');
 	let fileName = $state('');
-	let fileSecret = $state(true);
+	let fileSecret = $state(false);
 
 	function clearFile({ formData }: { formData: FormData }) {
 		const submittedName = String(formData.get('name') ?? '');

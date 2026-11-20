@@ -177,6 +177,8 @@ func TestEnvRefusalUnredacted(t *testing.T) {
 		"env SECRET_URL has a reference that is not set for this entry",
 		"env API_TOKEN has an unterminated ${",
 		"env DB_PASSWORD is longer than 4096 bytes after references",
+		"API_KEY looks like a secret: put it in secret_env or in a secret env-set key",
+		"AWS_SECRET_ACCESS_KEY looks like a secret: put it in secret_env or in a secret env-set key",
 	} {
 		if !envRefusal(msg) {
 			t.Fatalf("not recognized: %q", msg)
@@ -186,6 +188,8 @@ func TestEnvRefusalUnredacted(t *testing.T) {
 		"env SMTP_PASSWORD in set mail has no value yet; set it in the console token=abc",
 		"password=hunter2",
 		"env lower in set mail has no value yet; set it in the console",
+		"API_KEY=abc looks like a secret: put it in secret_env or in a secret env-set key",
+		"API_KEY looks like a secret: put it in secret_env or in a secret env-set key token=abc",
 	} {
 		if envRefusal(msg) {
 			t.Fatalf("accepted %q", msg)

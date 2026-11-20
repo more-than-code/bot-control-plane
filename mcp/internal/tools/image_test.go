@@ -337,6 +337,15 @@ func TestFromAPIRedactsMsg(t *testing.T) {
 	}
 }
 
+// TestFromAPIKeepsSecretKeyRefusal: the api-v1 v1.39 item 4 refusal names
+// the key and reaches the agent intact.
+func TestFromAPIKeepsSecretKeyRefusal(t *testing.T) {
+	const msg = "API_KEY looks like a secret: put it in secret_env or in a secret env-set key"
+	if text := toolText(t, fromAPI(&apiclient.Error{Code: "bad_request", Msg: msg})); text != "bad_request: "+msg {
+		t.Fatalf("text %q", text)
+	}
+}
+
 func TestProjectHistoryKeepsThree(t *testing.T) {
 	const leak = "img-history-do-not-leak"
 	ab := "sha256:" + strings.Repeat("ab", 32)

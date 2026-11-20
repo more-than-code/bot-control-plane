@@ -142,7 +142,8 @@ func linesEqual(a, b []any) bool {
 	return true
 }
 
-// envRefusalPatterns are the api-v1 v1.27 env refusals (items 6 and 7). They
+// envRefusalPatterns are the api-v1 v1.27 env refusals (items 6 and 7) and
+// the v1.39 item 4 inline-env refusal of a secret-looking key. They
 // hold validated key and set names and fixed text only, never a value, so
 // they pass unredacted: the keyword rule would read "SMTP_PASSWORD in" as a
 // secret pair and hide the key the user has to fix.
@@ -152,6 +153,7 @@ var envRefusalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} has a reference that is not set for this entry$`),
 	regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} has an unterminated \$\{$`),
 	regexp.MustCompile(`^env [A-Z_][A-Z0-9_]{0,63} is longer than 4096 bytes after references$`),
+	regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63} looks like a secret: put it in secret_env or in a secret env-set key$`),
 }
 
 // envRefusal reports whether msg is exactly one of those refusals.

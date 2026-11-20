@@ -116,7 +116,7 @@ func TestBuildImageRules(t *testing.T) {
 		{"too many args", `{"kind":"service","image":"nginx","command":` + manyArgs(33) + `}`, "invalid command"},
 		{"ports", `{"kind":"service","image":"nginx","ports":[{"host":1,"container":1},{"host":1,"container":2}]}`, "invalid ports"},
 		{"port range", `{"kind":"service","image":"nginx","ports":[{"host":0,"container":1}]}`, "invalid ports"},
-		{"env secret", `{"kind":"service","image":"nginx","env":{"DB_PASSWORD":"x"}}`, "use secret_env"},
+		{"env secret", `{"kind":"service","image":"nginx","env":{"DB_PASSWORD":"x"}}`, "DB_PASSWORD looks like a secret: put it in secret_env or in a secret env-set key"},
 		{"env path", `{"kind":"service","image":"nginx","env":{"PATH":"/tmp"}}`, "PATH is reserved"},
 		{"env deny", `{"kind":"service","image":"nginx","env":{"NODE_OPTIONS":"x"}}`, "this variable changes what the program runs"},
 		{"env sets dup", `{"kind":"service","image":"nginx","env_sets":["services","services"]}`, "invalid env_sets"},

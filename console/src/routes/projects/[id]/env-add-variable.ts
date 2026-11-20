@@ -1,6 +1,5 @@
 import { ENV_KEY } from '$lib/catalog';
 import type { GenerateKind } from '$lib/env-generate';
-import { looksSecret, secretLookingKeys, suggestedSecret } from '$lib/env-secret-name';
 import { RETYPE_VALUE } from './env-set-panel';
 
 /** Draft of the One variable tab. Secret is off by default (Joe 2026-10-25). */
@@ -16,12 +15,10 @@ export type AddDraft = {
 	/** `generate`: the API makes the value (api-v1 v1.27 item 1); the key is secret and no value is sent. */
 	source: 'value' | 'generate';
 	kind: GenerateKind;
-	/** The user set Secret themself, so the name suggestion no longer changes it (spec rev 3 §3.4). */
-	secretTouched: boolean;
 };
 
 export function initialAddDraft(): AddDraft {
-	return { key: '', value: '', secret: false, error: '', errorField: null, retype: false, source: 'value', kind: 'password', secretTouched: false };
+	return { key: '', value: '', secret: false, error: '', errorField: null, retype: false, source: 'value', kind: 'password' };
 }
 
 /** Switch between typing a value and generating one. Generate drops a typed value so it is never sent. */
@@ -37,13 +34,7 @@ export function addIsSecret(draft: AddDraft): boolean {
 
 /** Flip Secret. The typed value stays; the paste-again hint no longer applies. */
 export function setAddSecret(draft: AddDraft, secret: boolean): AddDraft {
-	return { ...draft, secret, retype: false, secretTouched: true };
-}
-
-/** Typing a key pre-ticks Secret when the name looks secret, until the user sets Secret themself. */
-export function addKeyTyped(draft: AddDraft): AddDraft {
-	const secret = suggestedSecret(draft.secret, draft.secretTouched, looksSecret(draft.key));
-	return secret === draft.secret ? draft : { ...draft, secret };
+	return { ...draft, secret, retype: false };
 }
 
 /** Typing a value ends the paste-again hint. */
@@ -128,21 +119,14 @@ export type AddVariablesView = {
 	draft: AddDraft;
 	paste: string;
 	pasteSecret: boolean;
-	/** The user set New keys are secret themself (see AddDraft.secretTouched). */
-	pasteSecretTouched: boolean;
 	pasteError: string;
 };
 
 /** Every open starts here: the One variable tab, both inputs empty, both Secret boxes unticked. */
 export function initialAddVariables(): AddVariablesView {
-	return { tab: 'one', draft: initialAddDraft(), paste: '', pasteSecret: false, pasteSecretTouched: false, pasteError: '' };
+	return { tab: 'one', draft: initialAddDraft(), paste: '', pasteSecret: false, pasteError: '' };
 }
 
-/** Editing the paste pre-ticks New keys are secret when a new key looks secret, until the user sets the box. */
-export function pasteTyped(view: AddVariablesView, existing: readonly string[]): AddVariablesView {
-	const pasteSecret = suggestedSecret(view.pasteSecret, view.pasteSecretTouched, secretLookingKeys(view.paste, existing).length > 0);
-	return pasteSecret === view.pasteSecret ? view : { ...view, pasteSecret };
-}
 
 /** Closing (Cancel, Escape, the X, or after a save) drops the key, the value and the paste, and goes back to One variable. */
 export function closeAddVariables(_view: AddVariablesView): AddVariablesView {

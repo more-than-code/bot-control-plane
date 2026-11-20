@@ -32,6 +32,7 @@ type fakeGitHub struct {
 
 	mu        sync.Mutex
 	tokenFail bool
+	userFail  bool
 	issued    int
 	scopes    string
 	login     string
@@ -59,6 +60,10 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 			f.issued++
 			_, _ = io.WriteString(w, `{"access_token":"`+fakeGitHubToken+strconv.Itoa(f.issued)+`","token_type":"bearer","scope":"`+f.scopes+`"}`)
 		case r.URL.Path == "/user":
+			if f.userFail {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer "+fakeGitHubToken) {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
@@ -102,6 +107,7 @@ func wireGitHub(w *world, f *fakeGitHub) {
 		TokenURL: f.srv.URL + "/login/oauth/access_token", APIURL: f.srv.URL, HTTP: f.srv.Client(),
 	})
 	w.srv.GitHubStates = github.NewStates()
+	w.srv.GitHubFailures = github.NewFailures()
 }
 
 func githubStartPath(project string) string {

@@ -1,11 +1,21 @@
 package store
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
+
+// hostNameRe is the host-name rule (agent-protocol-v1 enroll, api-v1 v1.38).
+var hostNameRe = regexp.MustCompile(`^[a-z0-9-]{1,63}$`)
+
+// ValidHostName reports whether name is 1 to 63 of [a-z0-9-]: the rule for
+// an enroll hostname, a join-token host hint and a host rename.
+func ValidHostName(name string) bool {
+	return hostNameRe.MatchString(name)
+}
 
 // Slug derives a project slug: lowercase, [a-z0-9-], dashes collapsed.
 // An empty result becomes "project". The slug does not change when the

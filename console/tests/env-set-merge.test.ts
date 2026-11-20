@@ -161,13 +161,12 @@ describe('Env set paste modes (api-v1 v1.19)', () => {
 
 	test('One variable is the default tab on every open, and close resets the key, the value, the paste and the tab', () => {
 		const start = initialAddVariables();
-		assert.deepEqual(start, { tab: 'one', draft: initialAddDraft(), paste: '', pasteSecret: false, pasteSecretTouched: false, pasteError: '' });
+		assert.deepEqual(start, { tab: 'one', draft: initialAddDraft(), paste: '', pasteSecret: false, pasteError: '' });
 		const dirty = {
 			tab: 'paste' as const,
 			draft: { ...initialAddDraft(), key: 'API_TOKEN', value: SECRET, secret: true, error: 'refused', errorField: 'form' as const, retype: true },
 			paste,
 			pasteSecret: true,
-			pasteSecretTouched: true,
 			pasteError: 'no env set app'
 		};
 		assert.deepEqual(closeAddVariables(dirty), start);

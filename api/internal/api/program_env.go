@@ -114,7 +114,7 @@ func (s *Server) originReason(ctx context.Context, projectID uuid.UUID, refs cat
 		if o.secret && catalog.ChangesWhatRunsSecret(key) {
 			return "this variable changes what the program runs", nil
 		}
-		if !o.secret && catalog.LooksSecret(key) {
+		if !o.secret && catalog.LooksSecretNotPath(key) {
 			return key + " looks like a secret but is not marked secret in set " + o.set + "; mark it secret", nil
 		}
 	}

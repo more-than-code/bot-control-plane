@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"regexp"
 	"slices"
 	"time"
 
@@ -13,8 +12,6 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/secret"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
-
-var hostHint = regexp.MustCompile(`^[a-z0-9-]{1,63}$`)
 
 // projectOrgAdmin is the v1.24 rule for the project-scoped join-token routes
 // (item 3): the caller must be an org owner or admin of the project's org.
@@ -52,7 +49,7 @@ type joinTokenBody struct {
 func (s *Server) newJoinToken(w http.ResponseWriter, r *http.Request, p principal, orgID uuid.UUID, body joinTokenBody) (store.JoinToken, string, bool) {
 	var hint *string
 	if body.Hint != nil && *body.Hint != "" {
-		if !hostHint.MatchString(*body.Hint) {
+		if !store.ValidHostName(*body.Hint) {
 			writeCode(w, "bad_request", "invalid host_name_hint")
 			return store.JoinToken{}, "", false
 		}
@@ -259,6 +256,17 @@ func (s *Server) handleHostGet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	view, err := s.hostRead(r, p, rel, host)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, view)
+}
+
+// hostRead is the Host object GET /v1/hosts/{id} answers, for a caller
+// already past the host gate with relation rel.
+func (s *Server) hostRead(r *http.Request, p principal, rel authz.Relation, host store.Host) (hostView, error) {
 	host = withAccessLevel(host, authz.HighestLevel(rel.Access))
 	host.Status = s.hostStatus(host)
 	// A delegated (MCP) session never gets access or the allowlist (review A5).
@@ -266,22 +274,72 @@ func (s *Server) handleHostGet(w http.ResponseWriter, r *http.Request) {
 	if orgView {
 		access, err := s.Store.ListHostAccess(r.Context(), host.ID)
 		if err != nil {
-			s.fail(w, err)
-			return
+			return hostView{}, err
 		}
 		host.Access = &access
 	}
 	viewer, slug, err := s.hostViewer(r, rel)
 	if err != nil {
+		return hostView{}, err
+	}
+	host, err = s.withEdge(r.Context(), projectsView(host, viewer, slug, orgView))
+	if err != nil {
+		return hostView{}, err
+	}
+	return s.withUpdateHint(host), nil
+}
+
+// handleHostPatch renames a host (api-v1 v1.38 item 2): org owners and
+// admins, live hosts only, names unique among the org's live hosts. The
+// same name answers 200 with no audit row.
+func (s *Server) handleHostPatch(w http.ResponseWriter, r *http.Request) {
+	p, host, ok := s.fetchHost(w, r)
+	if !ok {
+		return
+	}
+	rel, ok := s.gateHost(w, r, p, host, authz.CapHostAdmin, nil, nil, audit.ActionHostRename)
+	if !ok {
+		return
+	}
+	var body struct {
+		Name *string `json:"name"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Name == nil || !store.ValidHostName(*body.Name) {
+		writeCode(w, "bad_request", "name must be 1–63 characters: lowercase letters, digits and -")
+		return
+	}
+	name := *body.Name
+	from, err := s.Store.RenameHost(r.Context(), host.ID, name)
+	switch {
+	case errors.Is(err, store.ErrState):
+		writeCode(w, "conflict", "this host is revoked")
+		return
+	case errors.Is(err, store.ErrConflict):
+		writeCode(w, "conflict", "a host named "+name+" already exists in this organization")
+		return
+	case err != nil:
 		s.fail(w, err)
 		return
 	}
-	host, err = s.withEdge(r.Context(), projectsView(host, viewer, slug, orgView))
+	if from != name {
+		row := hostAuditRow(host, nil, audit.ActionHostRename)
+		row.Detail = map[string]any{"from": from, "to": name}
+		s.auditOK(r.Context(), p, row)
+	}
+	host, err = s.Store.GetHost(r.Context(), host.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeOK(w, http.StatusOK, s.withUpdateHint(host))
+	view, err := s.hostRead(r, p, rel, host)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, view)
 }
 
 // hostViewer is the project whose view GET /v1/hosts/{id} shows: the

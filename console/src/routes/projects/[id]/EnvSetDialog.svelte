@@ -11,7 +11,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { dotenvWarnings } from '$lib/env-lint';
-	import { looksSecretLine, secretLookingKeys, suggestedSecret } from '$lib/env-secret-name';
+	import { looksSecretLine, secretLookingKeys } from '$lib/env-secret-name';
 	import { ENV_SET_STATUS_ID, savedEnvSetNote, settleEnvSetSave } from './env-set-panel';
 
 	let {
@@ -36,7 +36,6 @@
 	let setName = $state('');
 	let newKeysSecret = $state(false);
 	// Secret suggestion by name (spec rev 3 §3.4): pre-ticks the box until the user sets it, with a visible line.
-	let newKeysSecretTouched = $state(false);
 	const looksSecretText = $derived(looksSecretLine(secretLookingKeys(dotenv)));
 	// Set when a success closes the dialog: focus moves to the status line after the reload, not on close.
 	let closingAfterSave = false;
@@ -80,7 +79,6 @@
 					// The next set starts empty and with the safe default.
 					setName = '';
 					newKeysSecret = false;
-					newKeysSecretTouched = false;
 				},
 				close: () => {
 					if (!open) return;
@@ -117,7 +115,6 @@
 					id="env-set-dotenv"
 					name="dotenv"
 					bind:value={dotenv}
-					oninput={() => (newKeysSecret = suggestedSecret(newKeysSecret, newKeysSecretTouched, secretLookingKeys(dotenv).length > 0))}
 					rows={6}
 					spellcheck="false"
 					autocomplete="off"
@@ -141,7 +138,6 @@
 					aria-describedby={looksSecretText ? 'env-set-looks-secret' : undefined}
 					onCheckedChange={(value) => {
 						newKeysSecret = value === true;
-						newKeysSecretTouched = true;
 					}}
 				/>
 				New keys are secret

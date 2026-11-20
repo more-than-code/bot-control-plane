@@ -45,6 +45,9 @@ type Server struct {
 	// Nil makes start and callback unavailable.
 	GitHub       *github.Client
 	GitHubStates *github.States
+	// GitHubFailures is the last failed connect per connect request, in
+	// memory (api-v1 v1.39 item 2). Nil records and shows none.
+	GitHubFailures *github.Failures
 	// LatestAgentVersion is BOT_API_LATEST_AGENT_VERSION (X.Y.Z, checked at
 	// start), or empty for no update hint (api-v1 v1.34).
 	LatestAgentVersion string
@@ -231,6 +234,7 @@ func contractRoutes() []route {
 		{"GET /v1/projects/{id}/hosts", false, (*Server).handleHostList, delegatedAllow},
 		{"GET /v1/projects/{id}/services", false, (*Server).handleProjectServices, delegatedAllow},
 		{"GET /v1/hosts/{id}", false, (*Server).handleHostGet, delegatedAllow},
+		{"PATCH /v1/hosts/{id}", false, (*Server).handleHostPatch, delegatedDeny},
 		{"DELETE /v1/hosts/{id}/credential", false, (*Server).handleHostRevoke, delegatedDeny},
 		{"GET /v1/hosts/{id}/access", false, (*Server).handleAccessList, delegatedDenyRead},
 		{"PUT /v1/hosts/{id}/access/{project_id}", false, (*Server).handleAccessPut, delegatedDeny},

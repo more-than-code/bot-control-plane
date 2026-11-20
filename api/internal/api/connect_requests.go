@@ -29,10 +29,21 @@ type connectRequestView struct {
 	State     string    `json:"state"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
+	// LastFailure is the last failed connect, or null (api-v1 v1.39 item 2).
+	LastFailure *connectFailureView `json:"last_failure"`
 }
 
-func viewConnectRequest(id string, req store.ConnectRequest, at time.Time) connectRequestView {
-	return connectRequestView{
+// connectFailureView is ConnectRequest.last_failure (api-v1 v1.39 item 2).
+type connectFailureView struct {
+	Reason string    `json:"reason"`
+	At     time.Time `json:"at"`
+}
+
+// viewConnectRequest is the ConnectRequest object of the request with hash,
+// with its in-memory last failure.
+func (s *Server) viewConnectRequest(id string, hash []byte, req store.ConnectRequest) connectRequestView {
+	at := s.now()
+	view := connectRequestView{
 		RequestID: id,
 		ProjectID: req.ProjectID,
 		Registry:  store.GitHubRegistry,
@@ -40,6 +51,16 @@ func viewConnectRequest(id string, req store.ConnectRequest, at time.Time) conne
 		ExpiresAt: req.ExpiresAt.UTC(),
 		CreatedAt: req.CreatedAt.UTC(),
 	}
+	// Only a pending request shows a failure, so a late failure write after a
+	// success, or a declined or expired request, never shows a stale reason
+	// (spec-v0241-small-fixes §8 item 2).
+	if view.State != store.RequestPending {
+		return view
+	}
+	if f := s.GitHubFailures.Last(hash, at); f != nil {
+		view.LastFailure = &connectFailureView{Reason: f.Reason, At: f.At.UTC()}
+	}
+	return view
 }
 
 // handleConnectRequestCreate is item 2. It decides in its handler (v1.12.1
@@ -117,7 +138,7 @@ func (s *Server) handleConnectRequestGet(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	writeOK(w, http.StatusOK, viewConnectRequest(own.id, own.req, s.now()))
+	writeOK(w, http.StatusOK, s.viewConnectRequest(own.id, own.hash, own.req))
 }
 
 // connectLogin is the project's current ghcr.io login on the page data.
@@ -156,7 +177,7 @@ func (s *Server) handleConnectRequestPage(w http.ResponseWriter, r *http.Request
 		ProjectName  string        `json:"project_name"`
 		Reason       string        `json:"reason"`
 		CurrentLogin *connectLogin `json:"current_login"`
-	}{viewConnectRequest(id, req, s.now()), proj.Name, req.Reason, login})
+	}{s.viewConnectRequest(id, own.hash, req), proj.Name, req.Reason, login})
 }
 
 // handleConnectRequestDecline is item 7. The route refuses delegated sessions.

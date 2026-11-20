@@ -13,6 +13,9 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { Host } from '$lib/api-types';
 	import { accessSummary, type AccessActionData, type AccessProject } from '$lib/host-access';
+	import { canRenameHost, hostLabel, nextRenameToast, revokedLast, type HostRename } from '$lib/host-name';
+	import { toastHostRenamed } from '$lib/success-toast';
+	import RenameHost from './RenameHost.svelte';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -24,6 +27,7 @@
 		projects,
 		message,
 		accessFailure = null,
+		renameFailure = null,
 		children
 	}: {
 		hosts: Host[];
@@ -34,9 +38,14 @@
 		message: string | null;
 		/** The last failed access write; its host's dialog opens again on it. */
 		accessFailure?: AccessActionData | null;
+		/** The last failed rename: that host's Rename dialog opens again with the message. */
+		renameFailure?: { hostId: string; message: string | null } | null;
 		/** The Add a host card, above the list. */
 		children?: Snippet;
 	} = $props();
+
+	// Revoked hosts after live ones (api-v1 v1.38: a revoked host keeps its name, which a live one may share).
+	const rows = $derived(revokedLast(hosts));
 
 	const columns: Column<Host>[] = [
 		{ key: 'name', label: 'Name', sortable: true, searchable: true, value: (host) => host.name },
@@ -52,6 +61,14 @@
 	$effect(() => {
 		if (accessFailure?.accessHostId) openHostId = accessFailure.accessHostId;
 	});
+
+	// The rename toast lives here, not in the dialog: the reload after a rename can unmount the row.
+	let pendingRename: HostRename | null = null;
+	function renameToast(event: Parameters<typeof nextRenameToast>[1]) {
+		const next = nextRenameToast(pendingRename, event);
+		pendingRename = next.pending;
+		if (next.fire) toastHostRenamed(next.fire.from, next.fire.to);
+	}
 </script>
 
 {#if message}
@@ -68,7 +85,7 @@
 {/if}
 <h2 id="org-hosts-heading" class="sr-only">Hosts</h2>
 <DataTable
-	rows={hosts}
+	{rows}
 	{columns}
 	id="hosts"
 	labelledBy="org-hosts-heading"
@@ -83,7 +100,7 @@
 	{/snippet}
 	{#snippet row(host)}
 		<tr>
-			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{host.id}">{host.name}</a></td>
+			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{host.id}" aria-label={host.status === 'revoked' ? hostLabel(host) : undefined}>{host.name}</a></td>
 			<td class="p-2 align-middle"><StatusBadge status={host.status} /></td>
 			<td class="p-2 align-middle whitespace-normal">{accessSummary(host.access)}</td>
 			<td class="p-2 align-middle"><LocalTime iso={host.last_seen_at} /></td>
@@ -93,7 +110,7 @@
 					<Dialog.Root
 						bind:open={() => openHostId === host.id, (next) => (openHostId = next ? host.id : openHostId === host.id ? null : openHostId)}
 					>
-						<RowAction label="Manage access {host.name}" icon={ShieldCheck}>
+						<RowAction label="Manage access {hostLabel(host)}" icon={ShieldCheck}>
 							{#snippet trigger(props)}
 								<Dialog.Trigger {...props}>
 									<ShieldCheck class="size-4" />
@@ -102,7 +119,7 @@
 						</RowAction>
 						<Dialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
 							<Dialog.Header>
-								<Dialog.Title>Access to {host.name}</Dialog.Title>
+								<Dialog.Title>Access to {hostLabel(host)}</Dialog.Title>
 								<Dialog.Description>Which projects of this organization may use the host, and at what level.</Dialog.Description>
 							</Dialog.Header>
 							<HostAccessEditor
@@ -119,6 +136,17 @@
 							/>
 						</Dialog.Content>
 					</Dialog.Root>
+					{#if canRenameHost(host)}
+						<RenameHost
+							action={actionUrlFrom(page.url, 'renameHost')}
+							hostId={host.id}
+							name={host.name}
+							failed={renameFailure?.hostId === host.id}
+							message={renameFailure?.hostId === host.id ? renameFailure.message : null}
+							onRenamed={(rename, dialogOpen) => renameToast({ kind: 'succeeded', rename, dialogOpen })}
+							onClosed={() => renameToast({ kind: 'closed', hostId: host.id })}
+						/>
+					{/if}
 					{#if host.status !== 'revoked'}
 						<ConfirmAction
 							closeOnFailure

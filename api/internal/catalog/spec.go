@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -287,15 +289,17 @@ func validateEnv(env map[string]string) error {
 	if len(env) > MaxProgramEnv {
 		return fieldErr("too many env keys")
 	}
-	for k, v := range env {
+	// In key order, so the refusal names the same key every time.
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		v := env[k]
 		if !envKeyRe.MatchString(k) {
 			return fieldErr("invalid env key")
 		}
 		if k == "PATH" || k == "HOME" {
 			return fieldErr(k + " is reserved")
 		}
-		if LooksSecret(k) {
-			return fieldErr("use secret_env")
+		if LooksSecretNotPath(k) {
+			return fieldErr(k + " looks like a secret: put it in secret_env or in a secret env-set key")
 		}
 		if changesWhatRuns(k) {
 			return fieldErr("this variable changes what the program runs")
@@ -329,11 +333,32 @@ func ChangesWhatRunsSecret(key string) bool {
 	return false
 }
 
-// LooksSecret is the inline-env secret-looking rule ("use secret_env",
-// api-v1 v1.6 rule 8). The Run gate for plain set keys (v1.22 amendment 3)
-// uses the same rule.
+// LooksSecret is the secret-looking key rule (api-v1 v1.6 rule 8). Plain
+// values are checked with LooksSecretNotPath, which exempts path names.
 func LooksSecret(key string) bool {
 	return secretKey.MatchString(key)
+}
+
+// pathKeySuffixes name a key whose value is a path, not a secret (api-v1
+// v1.39 item 4), such as APP_PRIVATE_KEY_FILE=/etc/app/key.pem.
+var pathKeySuffixes = []string{"_FILE", "_PATH", "_DIR"}
+
+// LooksSecretNotPath is the one rule for a plain value under a
+// secret-looking name (api-v1 v1.39 item 4, amended): a LooksSecret key,
+// unless its name ends in _FILE, _PATH or _DIR (in any case). Inline env
+// refuses it, the env-set plan reminder warns about it, and the program run
+// gate refuses it for a plain env-set key.
+func LooksSecretNotPath(key string) bool {
+	if !LooksSecret(key) {
+		return false
+	}
+	upper := strings.ToUpper(key)
+	for _, suffix := range pathKeySuffixes {
+		if strings.HasSuffix(upper, suffix) {
+			return false
+		}
+	}
+	return true
 }
 
 // changesWhatRuns is api-v1 v1.6.1 item 2. The same keys are refused when

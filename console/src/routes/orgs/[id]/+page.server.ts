@@ -1,5 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Host, JoinToken, OrgDomain, OrgMember, Project } from '$lib/api-types';
+import { HOST_NAME_MESSAGE, validHostName } from '$lib/host-name';
 import { cleanOrgMemberRole, orgTabOf, type OrgScope } from '$lib/org-view';
 import { buildJoinTokenBody, cleanAccessLevel, removeAccessAction, revokeCredentialAction, setAccessAction, type JoinGrantBody } from '$lib/server/access-actions';
 import { addDomain, confirmDomainDelete, deleteDomain, setDomainAssignments, verifyDomain } from '$lib/server/edge-actions';
@@ -91,6 +92,24 @@ export const actions: Actions = {
 	setAccess: setAccessAction('hosts'),
 	removeAccess: removeAccessAction('hosts'),
 	revokeCredential: revokeCredentialAction('hosts'),
+
+	/** PATCH /v1/hosts/{id} (api-v1 v1.38). A failure, the rule's or the API's, shows in that host's dialog. */
+	renameHost: async (event) => {
+		requireUser(event);
+		orgIdOf(event.params);
+		const form = await event.request.formData();
+		const hostId = formText(form, 'host_id');
+		const name = formText(form, 'name');
+		if (!isUuid(hostId)) return invalid(event, 'hosts', 'That host is not valid.');
+		if (!validHostName(name)) return fail(400, present(event, { scope: 'hosts' as const, field: 'renameHost' as const, hostId, message: HOST_NAME_MESSAGE }));
+		try {
+			await apiFetch(event, `/v1/hosts/${hostId}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+			redirect(303, backTo(event.url));
+		} catch (err) {
+			const failure = actionFailure(event, err, 'hosts', 'renameHost');
+			return fail(failure.status, { ...failure.data, hostId });
+		}
+	},
 	addDomain,
 	verifyDomain,
 	setDomainAssignments,

@@ -351,7 +351,7 @@ func envSetUpdatePlan(name string, plan envChangePlanBody) string {
 		keys := make([]string, 0, len(plan.Set))
 		for key := range plan.Set {
 			keys = append(keys, key)
-			if catalog.LooksSecret(key) {
+			if catalog.LooksSecretNotPath(key) {
 				warnings = append(warnings, key+plainSecretWarning)
 			}
 		}

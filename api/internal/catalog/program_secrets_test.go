@@ -49,7 +49,7 @@ func TestProgramEnvSetRules(t *testing.T) {
 		in   ProgramInput
 		msg  string
 	}{
-		{"inline secret key", programIn(map[string]string{"GH_TOKEN": "x"}, nil, nil, known), "use secret_env"},
+		{"inline secret key", programIn(map[string]string{"GH_TOKEN": "x"}, nil, nil, known), "GH_TOKEN looks like a secret: put it in secret_env or in a secret env-set key"},
 		{"unknown set", programIn(nil, []string{"nope"}, nil, known), "unknown env set"},
 		{"duplicate set", programIn(nil, []string{"gh", "gh"}, nil, known), "invalid env_sets"},
 		{"bad set name", programIn(nil, []string{"Gh"}, nil, known), "invalid env_sets"},
@@ -161,7 +161,7 @@ func TestSecretValueRules(t *testing.T) {
 		t.Fatal("LooksSecret")
 	}
 	// Inline env and validateEnv use the same rule.
-	if _, err := BuildProgram(ProgramInput{Command: "x", Dir: "/srv", RunAs: "joe", Env: map[string]string{"API_TOKEN": "v"}}); err == nil || err.Error() != "use secret_env" {
+	if _, err := BuildProgram(ProgramInput{Command: "x", Dir: "/srv", RunAs: "joe", Env: map[string]string{"API_TOKEN": "v"}}); err == nil || err.Error() != "API_TOKEN looks like a secret: put it in secret_env or in a secret env-set key" {
 		t.Fatalf("inline %v", err)
 	}
 	// The extended list is refused for secret_env on write; inline env keeps v1.6.1.

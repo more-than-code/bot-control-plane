@@ -29,7 +29,7 @@ Server → agent:
 
 Then the server closes the socket (normal close 1000). The agent atomically rewrites its env file (removing `BOT_AGENT_JOIN_TOKEN`, adding `BOT_AGENT_HOST_ID`, `BOT_AGENT_CREDENTIAL_ID`, and `BOT_AGENT_CREDENTIAL`) and reconnects with Bearer.
 
-- `hostname` is 1–63 characters `[a-z0-9-]`. If the project already has a host with that name, the server appends `-2`, `-3`, ….
+- `hostname` is 1–63 characters `[a-z0-9-]`. If a live (not revoked) host in the organization already has that name, the server appends `-2`, `-3`, … (wording updated 2026-11-20 with api-v1 v1.38; the rule was per org since v1.24, and revoked hosts no longer count since v1.38).
 - The join token must be unexpired, unused, and unrevoked. On success the server marks it used in the same transaction that creates the host and the credential. Credential: 32 random bytes as base64url (43 characters); only its SHA-256 is stored.
 - A bad token gets `{"v":1,"type":"error","error_code":"unauthenticated","message":"..."}` and then a close.
 

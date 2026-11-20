@@ -498,6 +498,12 @@ func runDown(t *testing.T, ctx context.Context, url string) {
 	if _, err := conn.PgConn().Exec(ctx, string(body)).ReadAll(); err != nil {
 		t.Fatalf("down script: %v", err)
 	}
+	// Dropping hosts.org_id dropped the 0025 partial index, and the 0015
+	// re-up adds hosts_org_name_unique back: forget 0025 so Migrate applies
+	// it again.
+	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+hostNamesMigration+`'`); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // dropEdgeSchema clears the 0023 rows and runs its down script on conn

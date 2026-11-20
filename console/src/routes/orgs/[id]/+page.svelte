@@ -19,6 +19,7 @@
 
 	const action = $derived((form ?? null) as OrgActionData | null);
 	const accessFailure = $derived(accessFailureOf(form));
+	const renameFailure = $derived(action?.field === 'renameHost' && action.hostId ? { hostId: action.hostId, message: action.message ?? null } : null);
 	const scope = $derived<OrgScope>(action?.scope ?? data.tab ?? 'projects');
 	// A dialog form's message shows in its dialog, not on the page.
 	const sectionMessage = $derived(action?.scope === scope && !action.field && !accessFailure ? (action.message ?? null) : null);
@@ -83,6 +84,7 @@
 			projects={accessProjects}
 			message={sectionMessage ?? data.hosts.message ?? data.projects.message}
 			{accessFailure}
+			{renameFailure}
 		>
 			<AddHostSection
 				tokens={data.tokens.items}

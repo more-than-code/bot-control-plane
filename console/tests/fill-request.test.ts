@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
-import { FILL_TEXT, fillBody, fillView, isValueRequestId, parseFillRequest, withoutValue } from '../src/lib/fill-request.ts';
+import { FILL_TEXT, fillBody, fillView, isValueRequestId, lineBreakCheck, parseFillRequest, withoutValue } from '../src/lib/fill-request.ts';
 import { safeNext } from '../src/lib/server/session.ts';
 import { actions, load } from '../src/routes/fill/[id]/+page.server.ts';
 import FillPage from '../src/routes/fill/[id]/+page.svelte';
@@ -191,6 +191,42 @@ describe('value request fill page', () => {
 		const empty = await actions.save(fillEvent({ form: { source: 'value', value: '' } }) as never);
 		assert.ok(isActionFailure(empty));
 		assert.equal(calls.length, 0);
+	});
+
+	test('a value with a line break is stopped with the file-request hint, and a one-line value is unchanged (api-v1 v1.39)', async () => {
+		assert.equal(
+			FILL_TEXT.lineBreak,
+			'This value has line breaks, which env values cannot hold. For a key file such as a PEM, ask the agent to use a file request (request_file) instead.'
+		);
+		for (const value of ['-----BEGIN KEY-----\nabc\n-----END KEY-----', 'a\rb', 'a\r\nb', 'trailing\n']) {
+			assert.equal(lineBreakCheck(value).block, true);
+			assert.deepEqual(fillBody('value', value, ''), { ok: false, message: FILL_TEXT.lineBreak });
+			const calls = installFetch(() => assert.fail('a value with a line break is not sent'));
+			const result = await actions.save(fillEvent({ form: { source: 'value', value } }) as never);
+			assert.ok(isActionFailure(result));
+			assert.equal((result.data as unknown as { message: string }).message, FILL_TEXT.lineBreak);
+			assert.equal(calls.length, 0);
+		}
+		assert.equal(lineBreakCheck('one line with spaces\t and tabs').block, false);
+		assert.deepEqual(fillBody('value', 'one line', ''), { ok: true, body: { value: 'one line' } });
+		// Generate ignores the value field.
+		assert.equal(fillBody('generate', 'a\nb', 'hex').ok, true);
+	});
+
+	test('the line-break check blocks \\n, \\r\\n and a lone \\r, and lets empty and one-line text through (paste and drop)', async () => {
+		for (const text of ['\n', 'a\nb', 'a\r\nb', 'a\rb', '\r']) assert.deepEqual(lineBreakCheck(text), { block: true }, JSON.stringify(text));
+		for (const text of ['', 'one line', undefined, null]) assert.deepEqual(lineBreakCheck(text), { block: false }, JSON.stringify(text));
+		// The hint is short; the file-request advice is only in the error.
+		assert.equal(FILL_TEXT.lineBreakHint, 'One line only.');
+		assert.match(FILL_TEXT.lineBreak, /request_file/);
+		// The form shows the short hint, and no error or aria-invalid before any paste or drop.
+		installFetch(() => envelope(page({})));
+		const html = htmlOf(data(await load(fillEvent() as never)));
+		assert.ok(html.includes(`id="fill-value-hint" class="text-muted-foreground text-sm">${FILL_TEXT.lineBreakHint}</p>`));
+		assert.equal(html.includes('fill-value-error'), false);
+		const input = html.slice(html.indexOf('id="fill-value"'), html.indexOf('>', html.indexOf('id="fill-value"')));
+		assert.match(input, /aria-describedby="fill-value-hint"/);
+		assert.equal(input.includes('aria-invalid="'), false);
 	});
 
 	test('generate fills, then the show-once dialog reveals through this page only', async () => {

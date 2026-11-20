@@ -147,9 +147,9 @@ describe('env-set inline edit and Add variable dialog', () => {
 
 	test('a failed add keeps the key, clears a secret value and asks for it again', () => {
 		const secret = addFailed({ ...initialAddDraft(), key: 'TOKEN', value: TYPED, secret: true }, 'refused [redacted]');
-		assert.deepEqual(secret, { key: 'TOKEN', value: '', secret: true, error: 'refused [redacted]', errorField: 'form', retype: true, source: 'value', kind: 'password', secretTouched: false });
+		assert.deepEqual(secret, { key: 'TOKEN', value: '', secret: true, error: 'refused [redacted]', errorField: 'form', retype: true, source: 'value', kind: 'password' });
 		const plain = addFailed({ ...initialAddDraft(), key: 'LOG', value: 'debug', secret: false }, 'refused');
-		assert.deepEqual(plain, { key: 'LOG', value: 'debug', secret: false, error: 'refused', errorField: 'form', retype: false, source: 'value', kind: 'password', secretTouched: false });
+		assert.deepEqual(plain, { key: 'LOG', value: 'debug', secret: false, error: 'refused', errorField: 'form', retype: false, source: 'value', kind: 'password' });
 		assert.equal(addFailed({ ...initialAddDraft(), key: 'TOKEN' }, 'bad key').retype, false);
 		assert.equal(addKeyError('API_TOKEN'), null);
 		assert.equal(addKeyError('bad key'), ADD_KEY_MESSAGE);
@@ -167,8 +167,7 @@ describe('env-set inline edit and Add variable dialog', () => {
 			errorField: 'key',
 			retype: false,
 			source: 'value',
-			kind: 'password',
-			secretTouched: false
+			kind: 'password'
 		});
 		const dialog = source('EnvAddVariablesDialog.svelte');
 		assert.match(dialog, /draft: addKeyRefused\(view\.draft, invalid\)/);

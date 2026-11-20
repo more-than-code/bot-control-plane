@@ -644,6 +644,11 @@ type Store interface {
 	// (project_id null) in the same transaction. It returns the removed row.
 	DeleteHostAccess(ctx context.Context, hostID, projectID uuid.UUID, reassignOrg bool) (HostAccess, error)
 	RevokeHost(ctx context.Context, hostID uuid.UUID, at time.Time) error
+	// RenameHost sets a live host's name (api-v1 v1.38 item 2) and returns
+	// the name it had. The same name changes nothing. ErrNotFound for an
+	// unknown host, ErrState for a revoked one, ErrConflict when a live host
+	// of the org already has the name.
+	RenameHost(ctx context.Context, hostID uuid.UUID, name string) (string, error)
 	TouchHost(ctx context.Context, hostID uuid.UUID, at time.Time, version, osName, arch string) error
 
 	// LookupCredential finds the credential by digest. Revoked rows are returned

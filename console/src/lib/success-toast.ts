@@ -24,3 +24,8 @@ export function toastMemberAdded(email: string): void {
 export function toastRoutesSaved(): void {
 	toast.success('Saved public addresses.');
 }
+
+/** "Renamed {old} to {new}." after a host rename (api-v1 v1.38). */
+export function toastHostRenamed(from: string, to: string): void {
+	toast.success(`Renamed ${from} to ${to}.`);
+}

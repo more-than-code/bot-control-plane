@@ -20,10 +20,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-var (
-	hostnameRe = regexp.MustCompile(`^[a-z0-9-]{1,63}$`)
-	serviceRe  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
-)
+var serviceRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
 // ServeHTTP accepts one agent socket and blocks until it ends.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +145,7 @@ func bearerToken(r *http.Request) (string, bool) {
 }
 
 func (h *Hub) enroll(ac *agentConn, f frame) {
-	if !hostnameRe.MatchString(f.Hostname) {
+	if !store.ValidHostName(f.Hostname) {
 		ac.fail(websocket.StatusPolicyViolation, "bad_request", "invalid hostname")
 		return
 	}

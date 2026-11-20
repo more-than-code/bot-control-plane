@@ -1033,3 +1033,31 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
 3. **Storage:** migration `0024_notification_reads.sql` creates `app.notification_reads (user_id uuid REFERENCES app.users ON DELETE CASCADE, key text, read_at timestamptz, PRIMARY KEY (user_id, key))`, with `0024_notification_reads.down.sql`. When marks are written, the caller's marks older than 90 days are pruned unless their key is still among the caller's current items (so a long-standing item never turns unread again). A caller keeps at most 500 marks: beyond that the oldest are dropped (by `read_at`), never a key among the caller's current items. The down script never refuses: read marks are harmless to lose.
 4. **`GET /v1/me`:** each project gains `org_name` (the name of the project's org), also when the caller is not a member of that org. Additive; `org_id` and `via` are unchanged.
 5. MCP has no tool for these routes; `whats_new` and `list_hosts` already carry the same information.
+
+## v1.38 Host names: a revoked host's name is free, and hosts can be renamed (2026-11-20, approved spec `docs/spec-host-names.md` rev 1; migration 0025)
+
+1. **Host names** are unique per org **among hosts that are not revoked** (before: among all hosts of the org, revoked ones included; v1.24). Enrolment appends `-2`, `-3`, … only when a live host in the org already has the name. A revoked host keeps its name and still lists with status `revoked`, so an org can list two hosts with one name when one of them is revoked. Migration `0025_host_names_live.sql` replaces the constraint `hosts_org_name_unique` with the partial unique index `hosts_org_name_live_uidx ON app.hosts (org_id, name) WHERE revoked_at IS NULL`. Its down script refuses, changing nothing, while any `(org_id, name)` pair is held by more than one host.
+2. **`PATCH /v1/hosts/{id}`** with the strict body `{"name": "<name>"}` (no other field; an unknown field, a non-string `name` or trailing data is `bad_request` `invalid json`), for owners and admins of the host's org. Others get `forbidden`; delegated (MCP) sessions get `forbidden`. The host is found by id as for `GET /v1/hosts/{id}` (`not_found` when the caller cannot see it).
+   - `name` must match `^[a-z0-9-]{1,63}$`, otherwise `bad_request` `name must be 1–63 characters: lowercase letters, digits and -`.
+   - A live host in the org already named `name` → `conflict` `a host named <name> already exists in this organization`.
+   - A revoked host → `conflict` `this host is revoked`.
+   - The same name as a live host has now → `200` with the host, no change, no audit.
+   - Checks run in this order: authorization, body and name rule (a missing or null `name` gets the name-rule message), revoked host, live duplicate, same name.
+   - Otherwise `200` with the `Host` object, as `GET /v1/hosts/{id}` answers it. The agent is not told and needs nothing: it never uses the name after enrolment. Stored confirmation plans and earlier audit rows keep the old name as text.
+3. **Audit:** `host.rename` with detail `{"from": "<old>", "to": "<new>"}` on a successful rename. A request refused for its name, a duplicate, a revoked host or an unchanged name writes no row. An authorization denial is audited as on every mutating route (decision `denied`, action `host.rename`).
+
+## v1.39 Connect GitHub failures, the fill page hint, and path-named env keys (2026-11-20, approved spec `docs/spec-v0241-small-fixes.md` rev 1: A, B1, C1; no migration)
+
+1. **Connect GitHub callback** (v1.29 item 3, v1.31 item 6):
+   - Every failure logs one server line `github sign-in failed` with a `step` (`state`, `scope`, `exchange`, `user`, `forbidden`, `store`). It never logs a token, code, state or GitHub body. Responses and messages are unchanged.
+   - The callback body gains an optional `connect_request_id`, which the console sends from its connect cookie. On any failure, the API records the failure against that request when the request belongs to the caller and is still `pending`. Otherwise the field is ignored. A malformed id is ignored, not refused.
+2. **ConnectRequest** (v1.31 item 1) gains `last_failure`.
+   - Shape: `null`, or `{"reason": "expired_sign_in"|"scope_missing"|"github_error"|"forbidden"|"save_failed", "at": "<RFC3339>"}`.
+   - Steps map to reasons: `state` → `expired_sign_in`; `scope` → `scope_missing`; `exchange` and `user` → `github_error`; `forbidden` → `forbidden`; seal and store failures → `save_failed`.
+   - It is kept in the API's memory until the request expires, so a restart clears it. The request stays `pending`, and a later success moves it to `connected` with `last_failure` `null`.
+   - It appears in `GET /v1/registry-connect-requests/{id}`, the page data, and MCP `get_registry_connect_request`.
+3. **Fill page** (v1.28 item 5): no API change. Env values still refuse line breaks (v1.6 item 8). The console stops a value with a line break before posting (typed, pasted or dropped), and points to a file request (`request_file`) for key files. A short hint under the field says it is one line only.
+4. **Secret-looking plain env keys** (v1.6 item 8, v1.8 item 5, programs and images):
+   - A key whose name ends in `_FILE`, `_PATH` or `_DIR` (case-insensitive) is not refused, because its value is a path.
+   - Any other key matching the secret-name rule is refused with `bad_request` `<KEY> looks like a secret: put it in secret_env or in a secret env-set key`. That message replaces `use secret_env`.
+   - The same exemption applies wherever the secret-name rule is used for plain values (amended 2026-11-20, Joe "Apply everywhere"). The env-set plan reminder (v1.32 item 2, update plan) gives no warning for such a key. The program run gate for plain env-set keys ("looks like a secret but is not marked secret") does not refuse such a key. One rule serves all three: catalog `LooksSecret` minus the path suffixes.

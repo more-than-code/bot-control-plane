@@ -23,10 +23,10 @@ import {
 } from '../src/lib/env-generate.ts';
 import { dotenvPairs, dotenvWarnings, envValueWarnings } from '../src/lib/env-lint.ts';
 import { envRefHints, scanEnvRefs } from '../src/lib/env-references.ts';
-import { looksSecret, looksSecretLine, secretLookingKeys, suggestedSecret } from '../src/lib/env-secret-name.ts';
+import { looksSecret, looksSecretLine, secretLookingKeys } from '../src/lib/env-secret-name.ts';
 import { envSource } from '../src/lib/env-precedence.ts';
 import { parseEnvSet, parseEnvSetList, parseHostPrograms } from '../src/lib/server/shape.ts';
-import { addFailed, addIsSecret, addKeyError, addKeyExistsMessage, addKeyTyped, addTabFailed, initialAddDraft, initialAddVariables, pasteTyped, placeholderRule, setAddSecret, setAddSource } from '../src/routes/projects/[id]/env-add-variable.ts';
+import { addFailed, addIsSecret, addKeyError, addKeyExistsMessage, addTabFailed, initialAddDraft, initialAddVariables, placeholderRule, setAddSecret, setAddSource } from '../src/routes/projects/[id]/env-add-variable.ts';
 import EnvSetTable from '../src/routes/projects/[id]/EnvSetTable.svelte';
 import { actions as projectActions } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
@@ -509,30 +509,22 @@ describe('secret suggestion by name (spec rev 3 §3.4)', () => {
 		assert.equal(looksSecretLine([]), '');
 	});
 
-	test('the box follows the suggestion until the user sets it', () => {
-		assert.equal(suggestedSecret(false, false, true), true);
-		assert.equal(suggestedSecret(true, false, false), false);
-		assert.equal(suggestedSecret(false, true, true), false);
-		assert.equal(suggestedSecret(true, true, false), true);
-		let draft = addKeyTyped({ ...initialAddDraft(), key: 'DB_PASSWORD' });
-		assert.equal(draft.secret, true);
-		draft = addKeyTyped({ ...draft, key: 'DB_HOST' });
-		assert.equal(draft.secret, false);
-		draft = setAddSecret({ ...draft, key: 'DB_PASSWORD' }, false);
-		assert.equal(addKeyTyped(draft).secret, false, 'an unticked box stays unticked');
-		let view = pasteTyped({ ...initialAddVariables(), paste: 'API_KEY=x\n' }, []);
-		assert.equal(view.pasteSecret, true);
-		view = pasteTyped({ ...view, paste: 'HOST=x\n' }, []);
-		assert.equal(view.pasteSecret, false);
-		view = pasteTyped({ ...view, pasteSecret: false, pasteSecretTouched: true, paste: 'API_KEY=x\n' }, []);
-		assert.equal(view.pasteSecret, false);
+	test('no Secret box ticks itself, whatever the key name (Joe 2026-11-20)', () => {
 		assert.equal(initialAddDraft().secret, false);
+		assert.equal(initialAddVariables().pasteSecret, false);
+		assert.equal(setAddSecret({ ...initialAddDraft(), key: 'DB_PASSWORD' }, true).secret, true, 'the user can still tick it');
+		const add = source('EnvAddVariablesDialog.svelte');
+		assert.doesNotMatch(add, /suggestedSecret|addKeyTyped|pasteTyped|Touched/);
+		const set = source('EnvSetDialog.svelte');
+		assert.doesNotMatch(set, /suggestedSecret|Touched/);
+		assert.match(set, /let newKeysSecret = \$state\(false\);/);
+		assert.match(add, /const keyLooksSecret = \$derived\(!secretShown && looksSecret\(view\.draft\.key\)/);
+		assert.match(add, /<p id=\{id\('add-looks-secret'\)\}/);
 	});
 
 	test('the dialogs show the line under the box and link it', () => {
 		const add = source('EnvAddVariablesDialog.svelte');
 		assert.match(add, /oninput=\{keyTyped\}/);
-		assert.match(add, /let draft = addKeyTyped\(view\.draft\);/);
 		assert.match(add, /aria-describedby=\{pasteLooksSecret \? id\('merge-looks-secret'\) : undefined\}/);
 		const set = source('EnvSetDialog.svelte');
 		assert.match(set, /aria-describedby=\{looksSecretText \? 'env-set-looks-secret' : undefined\}/);
