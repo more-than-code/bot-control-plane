@@ -239,6 +239,9 @@ type Host struct {
 	LastSeenAt   *time.Time `json:"last_seen_at"`
 	EnrolledAt   time.Time  `json:"enrolled_at"`
 	RevokedAt    *time.Time `json:"revoked_at"`
+	// ArchivedAt is when an org owner or admin removed the revoked host
+	// from the lists (api-v1 v1.40). Null otherwise.
+	ArchivedAt *time.Time `json:"archived_at"`
 	// AccessLevel is the level of the project in whose list the host appears
 	// (metrics or deploy). Null in org-scoped views.
 	AccessLevel *string `json:"access_level"`
@@ -649,6 +652,11 @@ type Store interface {
 	// unknown host, ErrState for a revoked one, ErrConflict when a live host
 	// of the org already has the name.
 	RenameHost(ctx context.Context, hostID uuid.UUID, name string) (string, error)
+	// ArchiveHost removes a revoked host from the lists (api-v1 v1.40) and
+	// returns its archived_at. changed is true only when this call wrote it;
+	// an already archived host keeps its time and nothing is written.
+	// ErrNotFound for an unknown host, ErrState for a live one.
+	ArchiveHost(ctx context.Context, hostID uuid.UUID, at time.Time) (archivedAt time.Time, changed bool, err error)
 	TouchHost(ctx context.Context, hostID uuid.UUID, at time.Time, version, osName, arch string) error
 
 	// LookupCredential finds the credential by digest. Revoked rows are returned

@@ -70,7 +70,7 @@ func TestOrgToolDescriptions(t *testing.T) {
 	for name, phrases := range map[string][]string{
 		"list_orgs":     {"organizations", "Read-only", "in the console"},
 		"list_projects": {"organization", "org_id", "via"},
-		"list_hosts":    {"exactly one of project_id or org_id", "access_level", "owners and admins only"},
+		"list_hosts":    {"exactly one of project_id or org_id", "access_level", "owners and admins only", "removed (archived) hosts are not listed"},
 	} {
 		d, ok := desc[name]
 		if !ok {

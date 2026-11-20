@@ -231,12 +231,14 @@ export function parseHost(value: unknown): Host | null {
 	const agent_version = optionalText(value.agent_version, 80);
 	const last_seen_at = optionalText(value.last_seen_at, 64);
 	const revoked_at = optionalText(value.revoked_at, 64);
+	// api-v1 v1.40. Absent (an older API) is null.
+	const archived_at = optionalText(value.archived_at, 64);
 	const org_id = optionalUuid(value.org_id);
 	if (!id || !isUuid(id) || !name || !enrolled_at || org_id === undefined) return null;
 	if (node_type === null || os === null || arch === null) return null;
 	if (typeof value.always_on !== 'boolean') return null;
 	if (typeof value.status !== 'string' || !HOST_STATUS.has(value.status as HostStatus)) return null;
-	if (agent_version === undefined || last_seen_at === undefined || revoked_at === undefined) return null;
+	if (agent_version === undefined || last_seen_at === undefined || revoked_at === undefined || archived_at === undefined) return null;
 	const access_level = hostAccessLevel(value);
 	if (access_level === undefined) return null;
 	const access = hostAccessList(value.access);
@@ -258,6 +260,7 @@ export function parseHost(value: unknown): Host | null {
 		last_seen_at,
 		enrolled_at,
 		revoked_at,
+		archived_at,
 		access_level,
 		access,
 		programs,

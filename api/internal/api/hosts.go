@@ -430,6 +430,44 @@ func (s *Server) handleHostRevoke(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, http.StatusOK, nil)
 }
 
+// handleHostArchive removes a revoked host from the lists (api-v1 v1.40):
+// org owners and admins, revoked hosts only. An already archived host
+// answers 200 with no audit row.
+func (s *Server) handleHostArchive(w http.ResponseWriter, r *http.Request) {
+	p, host, ok := s.fetchHost(w, r)
+	if !ok {
+		return
+	}
+	rel, ok := s.gateHost(w, r, p, host, authz.CapHostAdmin, nil, nil, audit.ActionHostArchive)
+	if !ok {
+		return
+	}
+	_, changed, err := s.Store.ArchiveHost(r.Context(), host.ID, s.now())
+	switch {
+	case errors.Is(err, store.ErrState):
+		writeCode(w, "conflict", "revoke this host first")
+		return
+	case err != nil:
+		s.fail(w, err)
+		return
+	}
+	// Only the call that wrote archived_at is audited.
+	if changed {
+		s.auditOK(r.Context(), p, hostAuditRow(host, nil, audit.ActionHostArchive))
+	}
+	host, err = s.Store.GetHost(r.Context(), host.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	view, err := s.hostRead(r, p, rel, host)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeOK(w, http.StatusOK, view)
+}
+
 func (s *Server) fetchHost(w http.ResponseWriter, r *http.Request) (principal, store.Host, bool) {
 	p, ok := s.require(w, r)
 	if !ok {

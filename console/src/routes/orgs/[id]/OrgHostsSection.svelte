@@ -3,6 +3,7 @@
 	import { ORG_ERROR_ID } from '$lib/org-view';
 	import type { Snippet } from 'svelte';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { page } from '$app/state';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
@@ -13,8 +14,8 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { Host } from '$lib/api-types';
 	import { accessSummary, type AccessActionData, type AccessProject } from '$lib/host-access';
-	import { canRenameHost, hostLabel, nextRenameToast, revokedLast, type HostRename } from '$lib/host-name';
-	import { toastHostRenamed } from '$lib/success-toast';
+	import { afterHostRemoved, canRenameHost, hostLabel, nextRenameToast, ORG_HOSTS_HEADING_ID, revokedLast, type HostRename } from '$lib/host-name';
+	import { toastHostRemoved, toastHostRenamed } from '$lib/success-toast';
 	import RenameHost from './RenameHost.svelte';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
@@ -69,6 +70,11 @@
 		pendingRename = next.pending;
 		if (next.fire) toastHostRenamed(next.fire.from, next.fire.to);
 	}
+
+	// Remove (api-v1 v1.40): the reload drops the row, so the dialog is gone by the time this runs.
+	function removed(label: string) {
+		afterHostRemoved(label, toastHostRemoved, (id) => document.getElementById(id)?.focus());
+	}
 </script>
 
 {#if message}
@@ -83,12 +89,12 @@
 {#if truncated}
 	<p class="text-muted-foreground mb-2 text-sm">More items not shown</p>
 {/if}
-<h2 id="org-hosts-heading" class="sr-only">Hosts</h2>
+<h2 id={ORG_HOSTS_HEADING_ID} tabindex="-1" class="sr-only">Hosts</h2>
 <DataTable
 	{rows}
 	{columns}
 	id="hosts"
-	labelledBy="org-hosts-heading"
+	labelledBy={ORG_HOSTS_HEADING_ID}
 	empty="No hosts in this organization."
 	rowKey={(host) => host.id}
 	searchLabel="Search host or project"
@@ -158,6 +164,22 @@
 							message="Revoke the credential for {host.name}? The agent connection closes for every project that uses it."
 							hidden={[{ name: 'host_id', value: host.id }]}
 							rowLabel="Revoke credential {host.name}"
+						/>
+					{:else}
+						{@const removedLabel = hostLabel(host)}
+						<ConfirmAction
+							closeOnFailure
+							failureFocusId={ORG_ERROR_ID}
+							id="remove-host-{host.id}"
+							action={actionUrlFrom(page.url, 'removeHost')}
+							label="Remove"
+							confirmLabel="Remove"
+							message="Remove {removedLabel} from all host lists? Its history and audit records stay. The console cannot bring it back."
+							hidden={[{ name: 'host_id', value: host.id }]}
+							rowLabel="Remove {hostLabel(host)}"
+							icon={Trash2}
+							destructive
+							onSuccess={() => removed(removedLabel)}
 						/>
 					{/if}
 				</div>

@@ -110,6 +110,19 @@ export const actions: Actions = {
 			return fail(failure.status, { ...failure.data, hostId });
 		}
 	},
+	/** POST /v1/hosts/{id}/archive (api-v1 v1.40): remove a revoked host from the lists. A failure shows as the section Notice. */
+	removeHost: async (event) => {
+		requireUser(event);
+		orgIdOf(event.params);
+		const hostId = formText(await event.request.formData(), 'host_id');
+		if (!isUuid(hostId)) return invalid(event, 'hosts', 'That host is not valid.');
+		try {
+			await apiFetch(event, `/v1/hosts/${hostId}/archive`, { method: 'POST' });
+		} catch (err) {
+			return actionFailure(event, err, 'hosts');
+		}
+		redirect(303, backTo(event.url));
+	},
 	addDomain,
 	verifyDomain,
 	setDomainAssignments,

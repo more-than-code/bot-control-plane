@@ -35,6 +35,18 @@ export function hostLabel(host: Pick<Host, 'name' | 'status'>): string {
 	return host.status === 'revoked' ? `${host.name} (revoked)` : host.name;
 }
 
+/** The org Hosts section heading. Remove moves focus here because the reload drops the row and its trigger. */
+export const ORG_HOSTS_HEADING_ID = 'org-hosts-heading';
+
+/**
+ * After Remove (api-v1 v1.40). The reload has already dropped the row and the dialog, so the toast fires once with
+ * the host's label ("pi2 (revoked)", since a live host may share the name) and focus moves to the section heading.
+ */
+export function afterHostRemoved(label: string, toast: (label: string) => void, focus: (id: string) => void): void {
+	toast(label);
+	focus(ORG_HOSTS_HEADING_ID);
+}
+
 export type HostRename = { hostId: string; from: string; to: string };
 
 /**

@@ -200,8 +200,10 @@ func projectServiceWhere(projectID uuid.UUID, q store.ServiceListQuery) (string,
 		args = append(args, q.HostID.String())
 		hostPred = fmt.Sprintf("s.host_id = $%d::uuid", len(args))
 	}
+	// Rows of archived hosts are left out in every view (api-v1 v1.40).
 	where := `
-WHERE (
+WHERE h.archived_at IS NULL
+AND (
     s.project_id = $1::uuid
     AND EXISTS (
         SELECT 1 FROM app.host_access a

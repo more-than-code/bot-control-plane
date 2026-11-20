@@ -130,6 +130,11 @@ export type Host = {
 	last_seen_at: string | null;
 	enrolled_at: string;
 	revoked_at: string | null;
+	/**
+	 * api-v1 v1.40: when an org owner or admin removed the revoked host from the lists, else null. `parseHost`
+	 * always sets it (null from an older API); optional so a Host built by hand stays valid.
+	 */
+	archived_at?: string | null;
 	/** The level of the project in whose list the host appears. Null in org-scoped views. */
 	access_level: AccessLevel | null;
 	/** Every project's access to the host. Org owners and admins only; null for everyone else. */

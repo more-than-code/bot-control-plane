@@ -29,3 +29,8 @@ export function toastRoutesSaved(): void {
 export function toastHostRenamed(from: string, to: string): void {
 	toast.success(`Renamed ${from} to ${to}.`);
 }
+
+/** "Removed {host}." after a revoked host is removed from the lists (api-v1 v1.40). */
+export function toastHostRemoved(name: string): void {
+	toast.success(`Removed ${name}.`);
+}

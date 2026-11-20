@@ -392,6 +392,10 @@ func serviceOrder(row store.ProjectService) store.ServiceOrder {
 }
 
 func (m *Mem) serviceInViewLocked(svc store.Service, host store.Host, view string) bool {
+	// Rows of archived hosts are left out in every view (api-v1 v1.40).
+	if host.ArchivedAt != nil {
+		return false
+	}
 	switch view {
 	case "deploybot":
 		return host.RevokedAt == nil && m.deploybotRowLocked(svc)

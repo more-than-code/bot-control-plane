@@ -272,7 +272,7 @@ WHERE id = $1::uuid
 }
 
 const hostCols = `h.id::text, h.org_id::text, h.name, h.node_type, h.os, h.arch,
-       h.always_on, h.agent_version, h.last_seen_at, h.enrolled_at, h.revoked_at, h.programs`
+       h.always_on, h.agent_version, h.last_seen_at, h.enrolled_at, h.revoked_at, h.archived_at, h.programs`
 
 func (d *DB) GetHost(ctx context.Context, id uuid.UUID) (store.Host, error) {
 	return scanHost(d.pool.QueryRow(ctx, `
@@ -334,8 +334,9 @@ SELECT `+hostCols+`, `+level+`
 FROM app.hosts h
 `+join+`
 -- Host cursors have rank 0 since v1.24. An old rank-1 cursor (shared hosts
--- before v1.24) matches no branch, so it is past the last page.
-WHERE (
+-- before v1.24) matches no branch, so it is past the last page. Archived
+-- hosts are left out of every list (api-v1 v1.40).
+WHERE h.archived_at IS NULL AND (
     CAST($2 AS int) IS NULL
     OR (CAST($2 AS int) = 0 AND (h.name COLLATE "C") > (CAST($3 AS text) COLLATE "C"))
     OR (
@@ -409,6 +410,36 @@ SELECT name, revoked_at FROM app.hosts WHERE id = $1::uuid FOR UPDATE
 		return "", mapErr(err)
 	}
 	return from, nil
+}
+
+// ArchiveHost sets archived_at on a revoked host (api-v1 v1.40). The row
+// is locked so a concurrent second archive returns the first time and
+// changed false.
+func (d *DB) ArchiveHost(ctx context.Context, hostID uuid.UUID, at time.Time) (time.Time, bool, error) {
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return time.Time{}, false, mapErr(err)
+	}
+	defer tx.Rollback(ctx)
+	var revoked, archived *time.Time
+	if err := tx.QueryRow(ctx, `
+SELECT revoked_at, archived_at FROM app.hosts WHERE id = $1::uuid FOR UPDATE
+`, hostID.String()).Scan(&revoked, &archived); err != nil {
+		return time.Time{}, false, mapErr(err)
+	}
+	if revoked == nil {
+		return time.Time{}, false, store.ErrState
+	}
+	if archived != nil {
+		return *archived, false, nil
+	}
+	if err := exec(ctx, tx, `UPDATE app.hosts SET archived_at = $2 WHERE id = $1::uuid`, hostID.String(), at); err != nil {
+		return time.Time{}, false, mapErr(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return time.Time{}, false, mapErr(err)
+	}
+	return at, true, nil
 }
 
 func (d *DB) RevokeHost(ctx context.Context, hostID uuid.UUID, at time.Time) error {
@@ -552,7 +583,7 @@ func scanHostRow(row pgx.Row, extra ...any) (store.Host, error) {
 	var programs []byte
 	dest := []any{
 		&id, &orgID, &h.Name, &h.NodeType, &h.OS, &h.Arch, &h.AlwaysOn,
-		&h.AgentVersion, &h.LastSeenAt, &h.EnrolledAt, &h.RevokedAt, &programs,
+		&h.AgentVersion, &h.LastSeenAt, &h.EnrolledAt, &h.RevokedAt, &h.ArchivedAt, &programs,
 	}
 	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return store.Host{}, mapErr(err)

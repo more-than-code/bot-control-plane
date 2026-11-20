@@ -1061,3 +1061,14 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
    - A key whose name ends in `_FILE`, `_PATH` or `_DIR` (case-insensitive) is not refused, because its value is a path.
    - Any other key matching the secret-name rule is refused with `bad_request` `<KEY> looks like a secret: put it in secret_env or in a secret env-set key`. That message replaces `use secret_env`.
    - The same exemption applies wherever the secret-name rule is used for plain values (amended 2026-11-20, Joe "Apply everywhere"). The env-set plan reminder (v1.32 item 2, update plan) gives no warning for such a key. The program run gate for plain env-set keys ("looks like a secret but is not marked secret") does not refuse such a key. One rule serves all three: catalog `LooksSecret` minus the path suffixes.
+
+## v1.40 Remove a revoked host from the lists (archive) (2026-11-20, approved spec `docs/spec-host-remove.md` rev 1; migration 0026)
+
+1. **`Host`** gains `archived_at`: `null`, or the RFC3339 time the host was removed from the lists. Additive. An archived host's `status` stays `revoked`.
+2. **`POST /v1/hosts/{id}/archive`** (no body), for owners and admins of the host's org. Others get `forbidden`; a caller who cannot see the host gets `not_found`; delegated (MCP) sessions get `forbidden`.
+   - A live (not revoked) host → `conflict` `revoke this host first`.
+   - An already archived host → `200` with the host, no change, no audit.
+   - Otherwise it sets `archived_at` to now and answers `200` with the `Host`, as `GET /v1/hosts/{id}` answers it.
+   - Audit: `host.archive` on success. An authorization denial is audited as on every mutating route (decision `denied`, action `host.archive`).
+3. **Lists:** `GET /v1/orgs/{id}/hosts` and `GET /v1/projects/{id}/hosts` omit archived hosts. `GET /v1/projects/{id}/services` omits the rows of archived hosts in every `view`. Reads by id are unchanged: `GET /v1/hosts/{id}`, its metrics, processes and services. The host's `host_access` rows are kept.
+4. **Storage:** migration `0026_host_archive.sql` adds `app.hosts.archived_at timestamptz` with `CHECK (archived_at IS NULL OR revoked_at IS NOT NULL)`. Its down script drops both and never refuses; archived hosts then list again as revoked.

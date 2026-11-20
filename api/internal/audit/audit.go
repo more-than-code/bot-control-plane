@@ -26,6 +26,7 @@ const (
 	ActionHostEnroll      = "host.enroll"
 	ActionHostRevoke      = "host.revoke"
 	ActionHostRename      = "host.rename"
+	ActionHostArchive     = "host.archive"
 	// api-v1 v1.24 item 8. The old host.share* and catalog approval
 	// actions stay readable in history; nothing writes them now.
 	ActionHostAccessGrant          = "host.access_grant"

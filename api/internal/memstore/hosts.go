@@ -174,7 +174,7 @@ func (m *Mem) ListHosts(_ context.Context, projectID uuid.UUID, limit int, curso
 			continue
 		}
 		h, ok := m.hosts[a.HostID]
-		if !ok {
+		if !ok || h.ArchivedAt != nil {
 			continue
 		}
 		h = cloneHost(h)
@@ -194,7 +194,7 @@ func (m *Mem) ListOrgHosts(_ context.Context, orgID uuid.UUID, limit int, cursor
 	}
 	var all []store.Host
 	for _, h := range m.hosts {
-		if h.OrgID != orgID {
+		if h.OrgID != orgID || h.ArchivedAt != nil {
 			continue
 		}
 		h = cloneHost(h)
@@ -274,6 +274,24 @@ func (m *Mem) RenameHost(_ context.Context, hostID uuid.UUID, name string) (stri
 	h.Name = name
 	m.hosts[hostID] = h
 	return from, nil
+}
+
+func (m *Mem) ArchiveHost(_ context.Context, hostID uuid.UUID, at time.Time) (time.Time, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h, ok := m.hosts[hostID]
+	if !ok {
+		return time.Time{}, false, store.ErrNotFound
+	}
+	if h.RevokedAt == nil {
+		return time.Time{}, false, store.ErrState
+	}
+	if h.ArchivedAt != nil {
+		return *h.ArchivedAt, false, nil
+	}
+	h.ArchivedAt = &at
+	m.hosts[hostID] = h
+	return at, true, nil
 }
 
 func (m *Mem) RevokeHost(_ context.Context, hostID uuid.UUID, at time.Time) error {

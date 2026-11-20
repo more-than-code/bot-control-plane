@@ -44,6 +44,7 @@ var delegatedDenyPatterns = []string{
 	"DELETE /v1/projects/{id}/invites/{invite_id}",
 	"PATCH /v1/hosts/{id}",
 	"DELETE /v1/hosts/{id}/credential",
+	"POST /v1/hosts/{id}/archive",
 	"PUT /v1/hosts/{id}/access/{project_id}",
 	"DELETE /v1/hosts/{id}/access/{project_id}",
 	"PUT /v1/hosts/{id}/shares/{project_id}",
@@ -194,6 +195,13 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		}},
 		{"DELETE /v1/hosts/{id}/credential", http.MethodDelete, "/v1/hosts/" + host + "/credential", "", func(t *testing.T) string {
 			return credState(t, w, sc)
+		}},
+		{"POST /v1/hosts/{id}/archive", http.MethodPost, "/v1/hosts/" + host + "/archive", "", func(t *testing.T) string {
+			h, err := w.mem.GetHost(context.Background(), sc.host.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return fmt.Sprint(h.ArchivedAt != nil)
 		}},
 		{"PUT /v1/hosts/{id}/access/{project_id}", http.MethodPut, "/v1/hosts/" + host + "/access/" + other.ID.String(),
 			`{"level":"deploy"}`, func(t *testing.T) string {

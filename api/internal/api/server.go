@@ -236,6 +236,7 @@ func contractRoutes() []route {
 		{"GET /v1/hosts/{id}", false, (*Server).handleHostGet, delegatedAllow},
 		{"PATCH /v1/hosts/{id}", false, (*Server).handleHostPatch, delegatedDeny},
 		{"DELETE /v1/hosts/{id}/credential", false, (*Server).handleHostRevoke, delegatedDeny},
+		{"POST /v1/hosts/{id}/archive", false, (*Server).handleHostArchive, delegatedDeny},
 		{"GET /v1/hosts/{id}/access", false, (*Server).handleAccessList, delegatedDenyRead},
 		{"PUT /v1/hosts/{id}/access/{project_id}", false, (*Server).handleAccessPut, delegatedDeny},
 		{"DELETE /v1/hosts/{id}/access/{project_id}", false, (*Server).handleAccessDelete, delegatedDeny},

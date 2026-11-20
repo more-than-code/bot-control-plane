@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { invalidate } from '$app/navigation';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
@@ -79,6 +80,9 @@
 {:else}
 	{#if data.message || (form?.message && !accessFailure)}
 		<Notice kind="error">{(accessFailure ? null : form?.message) ?? data.message}</Notice>
+	{/if}
+	{#if data.host.archived_at}
+		<p class="text-muted-foreground mb-4 text-sm">This host was removed from the lists on <LocalTime iso={data.host.archived_at} />.</p>
 	{/if}
 	<Tabs label="Host sections" current={data.tab} items={tabs} />
 
