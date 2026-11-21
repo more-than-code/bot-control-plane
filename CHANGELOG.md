@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.44 — 2026-11-22
+- Edit, version and apply a host's config files from the console. The host owner chooses which files in `runner.toml`, and only organization owners and admins can change them.
+- Each apply is checked by the host's own command, restarts the file's service, is confirmed healthy, and puts the previous file back if anything fails.
+- Secret config files keep their values encrypted and never show them: you set or remove keys, then save and apply.
+- A new "needs action" problem now shows as a notice on any open console page, and you can turn on desktop notifications for them in the bell menu.
+- Reconnect after moving between pages works again.
+
 ## v0.2.43 — 2026-11-21
 - Connect GitHub logins now stay signed in: Deploybot renews GitHub's 8-hour access token before it expires, including for projects that rarely deploy.
 - If GitHub ends the sign-in (the app was revoked, access was removed, or it was unused for 6 months), the bell says so and asks you to reconnect GitHub in Settings.
