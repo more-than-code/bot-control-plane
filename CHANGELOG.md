@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.42 — 2026-11-21
+- The bell now shows problems: a host that stopped reporting, a registry login that was refused, and a deploy that failed or rolled back. Each says what to do, and resolves on its own when fixed.
+- New MCP tool `list_problems` lists the open and recent problems of a project or organization.
+- A deploy, rollback or remove that is still running shows in the entry's history with the time it ends by, and the dialog follows it to the end.
+- Trying to deploy while another operation runs now says what is running and when to try again.
+- The console no longer gives up on a long deploy: it answers within 80 seconds and shows the outcome when it arrives.
+
 ## v0.2.41 — 2026-11-21
 - Rename a host from the organization's Hosts table. A revoked host no longer keeps its name, so a re-enrolled machine can take it back.
 - Remove a revoked host from every host list. Its history and audit records stay.
