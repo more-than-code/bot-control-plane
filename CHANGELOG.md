@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.43 — 2026-11-21
+- Connect GitHub logins now stay signed in: Deploybot renews GitHub's 8-hour access token before it expires, including for projects that rarely deploy.
+- If GitHub ends the sign-in (the app was revoked, access was removed, or it was unused for 6 months), the bell says so and asks you to reconnect GitHub in Settings.
+- A GitHub login connected before this release still expires as before: reconnect GitHub once in the project's Settings.
+
 ## v0.2.42 — 2026-11-21
 - The bell now shows problems: a host that stopped reporting, a registry login that was refused, and a deploy that failed or rolled back. Each says what to do, and resolves on its own when fixed.
 - New MCP tool `list_problems` lists the open and recent problems of a project or organization.
