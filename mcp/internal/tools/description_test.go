@@ -132,3 +132,12 @@ func TestListProblemsDescription(t *testing.T) {
 		}
 	}
 }
+
+// spec-deploy-stuck §2.4: a confirm past its wait names the end time and
+// points at the deploy history, not entry_status.
+func TestConfirmDescriptionNamesDeployHistory(t *testing.T) {
+	d := listToolDescriptions(t)["confirm"]
+	if !strings.Contains(d, "ends by at the latest") || !strings.Contains(d, "deploy history (deploy_entry for that host)") || strings.Contains(d, "check entry_status for the outcome") {
+		t.Errorf("confirm description: %q", d)
+	}
+}

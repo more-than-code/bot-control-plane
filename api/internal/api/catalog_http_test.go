@@ -369,7 +369,7 @@ func TestCatalogConfirmationAndIdempotency(t *testing.T) {
 	conn2 := helloAgent(t, w, secondHost, cred, credID, allowPrograms(false), nil)
 	log2 := watchTasks(t, conn2, succeededTask)
 	status, env = postAct(w, tok, project, "tra", "run", secondHost.ID.String(), "console-1", nil)
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgKeyReused)
 	if log.count() != 1 || log2.count() != 0 {
 		t.Fatalf("conflict dispatched %d %d", log.count(), log2.count())
 	}
@@ -391,7 +391,7 @@ func TestCatalogConfirmationAndIdempotency(t *testing.T) {
 		t.Fatalf("replay minted another confirmation %#v tasks %d", env.Payload, log.count())
 	}
 	status, env = postAct(w, delegated, project, "tra", "restart", secondHost.ID.String(), "del-1", nil)
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgKeyReused)
 
 	status, env = w.do(w.token(other.ID), http.MethodPost, "/v1/confirmations/"+id, confirmBody("del-1"))
 	mustHTTP(t, status, env, http.StatusNotFound, "not_found", "not found")
@@ -509,9 +509,9 @@ func TestCatalogConfirmationEdges(t *testing.T) {
 	status, env = w.do(tok, http.MethodPut, "/v1/projects/"+project+"/catalog/tra", `{"kind":"program","command":"pnpm run start","shell":false,"dir":"/home/joe/app","run_as":"joe"}`)
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	status, env = w.do(delegated, http.MethodPost, "/v1/confirmations/"+id, confirmBody("edge-hash"))
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgPlanChanged)
 	status, env = w.do(delegated, http.MethodPost, "/v1/confirmations/"+id, confirmBody("edge-hash"))
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgPlanChanged)
 	if log.count() != 0 {
 		t.Fatalf("spec conflict dispatched %d", log.count())
 	}

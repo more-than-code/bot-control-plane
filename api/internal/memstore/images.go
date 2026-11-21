@@ -75,7 +75,7 @@ func (m *Mem) BeginImageOp(ctx context.Context, entryID, hostID uuid.UUID, specH
 			continue
 		}
 		if row.InFlightUntil.After(at) {
-			return store.ImageDeploy{}, store.ErrConflict
+			return store.ImageDeploy{}, &store.ImageOpRunning{StartedAt: row.StartedAt, Until: row.InFlightUntil}
 		}
 		finished := at
 		row.Outcome = "timeout"
@@ -132,6 +132,17 @@ func (m *Mem) ReleaseImageOp(ctx context.Context, id uuid.UUID) error {
 	}
 	delete(m.imageDeploys, id)
 	return nil
+}
+
+func (m *Mem) RunningImageOp(_ context.Context, entryID, hostID uuid.UUID) (store.ImageDeploy, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, row := range m.imageDeploys {
+		if row.InFlight && row.EntryID == entryID && row.HostID == hostID {
+			return copyDeploy(row), nil
+		}
+	}
+	return store.ImageDeploy{}, store.ErrNotFound
 }
 
 func (m *Mem) ListImageDeploys(_ context.Context, entryID, hostID uuid.UUID) ([]store.ImageDeploy, error) {

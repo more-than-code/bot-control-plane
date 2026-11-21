@@ -113,6 +113,23 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 	if _, claimed, err := d.ClaimIdempotency(ctx, owner.ID, "claim-key", sumA[:], at); err != nil || !claimed {
 		t.Fatalf("other user %v %v", claimed, err)
 	}
+	// api-v1 v1.42 item 2: a released key runs as new, for either hash; a
+	// missing key is not an error. Parity with memstore TestReleaseIdempotency.
+	if err := d.ReleaseIdempotency(ctx, other.ID, "claim-key"); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := d.ClaimIdempotency(ctx, other.ID, "claim-key", sumB[:], at); err != nil || !claimed {
+		t.Fatalf("claim after release %v %v", claimed, err)
+	}
+	if err := d.ReleaseIdempotency(ctx, other.ID, "claim-key"); err != nil {
+		t.Fatalf("release pending %v", err)
+	}
+	if err := d.ReleaseIdempotency(ctx, other.ID, "claim-key"); err != nil {
+		t.Fatalf("release missing %v", err)
+	}
+	if _, err := d.GetIdempotency(ctx, owner.ID, "claim-key", at); err != nil {
+		t.Fatalf("other user's key released %v", err)
+	}
 
 	plain, tokenHash, err := secret.NewToken()
 	if err != nil {

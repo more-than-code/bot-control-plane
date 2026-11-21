@@ -89,7 +89,11 @@ export type ImageDeployState = {
 	/** Which call the confirmation continues. Remove stays on the short timeout. */
 	confirmKind: 'deploy' | 'rollback' | 'remove' | null;
 	message: string | null;
+	/** A conflict with a running operation (api-v1 v1.42 item 2): its times, so the Notice shows them in local time. */
+	conflict?: ConflictTimes | null;
 };
+
+export type ConflictTimes = { started_at: string; ends_by: string };
 
 /** Permissions drawer. `loaded` is false when the grant list could not be read. */
 export type CatalogPermissionsState = {

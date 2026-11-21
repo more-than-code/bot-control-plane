@@ -161,8 +161,9 @@ export type ImageWorkload = 'service' | 'job';
 
 export type ImageRestart = 'no' | 'on-failure' | 'unless-stopped';
 
-/** Deploy and rollback outcomes. They arrive in the 200 body, not as HTTP errors. */
+/** Deploy and rollback outcomes. They arrive in the 200 body, not as HTTP errors. `in_flight` only in History (api-v1 v1.42). */
 export type ImageOutcome =
+	| 'in_flight'
 	| 'succeeded'
 	| 'unchanged'
 	| 'failed'
@@ -402,6 +403,8 @@ export type ImageDeploy = {
 	/** Null only for automatic actions (`via` agent). */
 	by: string | null;
 	via: 'console' | 'mcp' | 'agent';
+	/** The running row's latest end (api-v1 v1.42); null on every finished row and from older APIs. */
+	ends_by: string | null;
 };
 
 export type ImageState = 'running' | 'exited' | 'created' | 'paused' | 'restarting' | 'dead' | 'missing' | 'unknown';

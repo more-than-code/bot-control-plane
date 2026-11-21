@@ -27,19 +27,20 @@ func (d *DB) BeginImageOp(ctx context.Context, entryID, hostID uuid.UUID, specHa
 	}
 	defer tx.Rollback(ctx)
 	var staleID string
+	var staleStarted time.Time
 	var staleUntil *time.Time
 	err = tx.QueryRow(ctx, `
-SELECT id::text, in_flight_until
+SELECT id::text, started_at, in_flight_until
 FROM app.image_deploys
 WHERE host_id = $1::uuid AND entry_id = $2::uuid AND in_flight
 FOR UPDATE
-`, hostID.String(), entryID.String()).Scan(&staleID, &staleUntil)
+`, hostID.String(), entryID.String()).Scan(&staleID, &staleStarted, &staleUntil)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return store.ImageDeploy{}, mapErr(err)
 	}
 	if err == nil {
 		if staleUntil != nil && staleUntil.After(at) {
-			return store.ImageDeploy{}, store.ErrConflict
+			return store.ImageDeploy{}, &store.ImageOpRunning{StartedAt: staleStarted, Until: *staleUntil}
 		}
 		if err := exec(ctx, tx, `
 UPDATE app.image_deploys
@@ -61,6 +62,23 @@ INSERT INTO app.image_deploys (
     $5, NULL, $6::uuid, $7, true, $8
 )
 RETURNING `+deployCols, id.String(), entryID.String(), hostID.String(), specHash, at, by.String(), via, until))
+	if errors.Is(err, store.ErrConflict) {
+		// A concurrent begin won the unique index; name its row. The read is
+		// tried twice. When it still fails, or the winner has already
+		// finished, the plain ErrConflict is left for the caller, which asks
+		// the user to try again shortly.
+		_ = tx.Rollback(ctx)
+		for attempt := 0; attempt < 2; attempt++ {
+			winner, rerr := d.RunningImageOp(ctx, entryID, hostID)
+			if rerr == nil {
+				return store.ImageDeploy{}, &store.ImageOpRunning{StartedAt: winner.StartedAt, Until: winner.InFlightUntil}
+			}
+			if errors.Is(rerr, store.ErrNotFound) {
+				break
+			}
+		}
+		return store.ImageDeploy{}, store.ErrConflict
+	}
 	if err != nil {
 		return store.ImageDeploy{}, err
 	}
@@ -68,6 +86,16 @@ RETURNING `+deployCols, id.String(), entryID.String(), hostID.String(), specHash
 		return store.ImageDeploy{}, mapErr(err)
 	}
 	return row, nil
+}
+
+func (d *DB) RunningImageOp(ctx context.Context, entryID, hostID uuid.UUID) (store.ImageDeploy, error) {
+	return scanDeploy(d.pool.QueryRow(ctx, `
+SELECT `+deployCols+`
+FROM app.image_deploys
+WHERE entry_id = $1::uuid AND host_id = $2::uuid AND in_flight
+ORDER BY started_at DESC, id DESC
+LIMIT 1
+`, entryID.String(), hostID.String()))
 }
 
 func (d *DB) FinishImageDeploy(ctx context.Context, id uuid.UUID, outcome string, digest *string, exitCode *int, at time.Time) (store.ImageDeploy, error) {

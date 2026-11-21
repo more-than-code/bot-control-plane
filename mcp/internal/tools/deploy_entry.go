@@ -161,6 +161,7 @@ func projectHistory(raw json.RawMessage) []any {
 			Outcome    string `json:"outcome"`
 			StartedAt  string `json:"started_at"`
 			FinishedAt string `json:"finished_at"`
+			EndsBy     string `json:"ends_by"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
@@ -181,11 +182,17 @@ func projectHistory(raw json.RawMessage) []any {
 		if when == "" {
 			when = item.StartedAt
 		}
-		out = append(out, map[string]any{
+		row := map[string]any{
 			"digest":  item.Digest,
 			"outcome": item.Outcome,
 			"time":    when,
-		})
+		}
+		// A running row (api-v1 v1.42 item 1) has no digest and no
+		// finished_at; time is its start and ends_by its latest end.
+		if item.Outcome == "in_flight" && item.EndsBy != "" {
+			row["ends_by"] = item.EndsBy
+		}
+		out = append(out, row)
 	}
 	return out
 }

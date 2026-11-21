@@ -604,6 +604,7 @@ func historyLines(payload json.RawMessage) string {
 			Digest  string `json:"digest"`
 			Outcome string `json:"outcome"`
 			Time    string `json:"time"`
+			EndsBy  string `json:"ends_by"`
 		} `json:"history"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil || len(body.History) == 0 {
@@ -613,6 +614,16 @@ func historyLines(payload json.RawMessage) string {
 	b.WriteString("\nrecent deploys:")
 	for _, item := range body.History {
 		b.WriteByte('\n')
+		if item.Outcome == "in_flight" {
+			// A running deploy, rollback or remove: no digest yet.
+			b.WriteString("running since ")
+			b.WriteString(summaryField(item.Time))
+			if item.EndsBy != "" {
+				b.WriteString(", ends by ")
+				b.WriteString(summaryField(item.EndsBy))
+			}
+			continue
+		}
 		b.WriteString(shortDigest(item.Digest))
 		if item.Outcome != "" {
 			b.WriteByte(' ')

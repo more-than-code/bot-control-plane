@@ -15,20 +15,36 @@ import (
 // ImageDeploy is one finished or in-flight image deploy.
 // InFlight is not part of the HTTP object.
 type ImageDeploy struct {
-	ID            uuid.UUID  `json:"id"`
-	EntryID       uuid.UUID  `json:"entry_id"`
-	HostID        uuid.UUID  `json:"host_id"`
-	Digest        *string    `json:"digest"`
-	SpecHash      string     `json:"spec_hash"`
-	Outcome       string     `json:"outcome"`
-	ExitCode      *int       `json:"exit_code"`
-	StartedAt     time.Time  `json:"started_at"`
-	FinishedAt    *time.Time `json:"finished_at"`
-	By            *uuid.UUID `json:"by"`
-	Via           string     `json:"via"`
+	ID         uuid.UUID  `json:"id"`
+	EntryID    uuid.UUID  `json:"entry_id"`
+	HostID     uuid.UUID  `json:"host_id"`
+	Digest     *string    `json:"digest"`
+	SpecHash   string     `json:"spec_hash"`
+	Outcome    string     `json:"outcome"`
+	ExitCode   *int       `json:"exit_code"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	By         *uuid.UUID `json:"by"`
+	Via        string     `json:"via"`
+	// EndsBy is set by the HTTP layer on the in-flight row of a history
+	// list (api-v1 v1.42 item 1); null on every other row.
+	EndsBy        *time.Time `json:"ends_by"`
 	InFlight      bool       `json:"-"`
 	InFlightUntil time.Time  `json:"-"`
 }
+
+// ImageOpRunning is BeginImageOp refused because another deploy, rollback
+// or remove holds (host, entry) (api-v1 v1.42 item 2). StartedAt and Until
+// are that row's started_at and in_flight_until. errors.Is(err, ErrConflict)
+// holds.
+type ImageOpRunning struct {
+	StartedAt time.Time
+	Until     time.Time
+}
+
+func (e *ImageOpRunning) Error() string { return "conflict" }
+
+func (e *ImageOpRunning) Unwrap() error { return ErrConflict }
 
 // AutoActionsPerHour is the rev 2 cap on stored auto_action rows per
 // (entry, host) in a rolling hour.

@@ -1,6 +1,6 @@
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
-function dateFormat(kind: 'when' | 'clock' | 'time' | 'day', timeZone: string | undefined): Intl.DateTimeFormat {
+function dateFormat(kind: 'when' | 'clock' | 'zoned' | 'time' | 'day', timeZone: string | undefined): Intl.DateTimeFormat {
 	const key = `${kind}:${timeZone ?? ''}`;
 	const cached = formatters.get(key);
 	if (cached) return cached;
@@ -14,9 +14,10 @@ function dateFormat(kind: 'when' | 'clock' | 'time' | 'day', timeZone: string | 
 		options.minute = '2-digit';
 		options.second = '2-digit';
 		options.timeZoneName = 'short';
-	} else if (kind === 'clock') {
+	} else if (kind === 'clock' || kind === 'zoned') {
 		options.hour = '2-digit';
 		options.minute = '2-digit';
+		if (kind === 'zoned') options.timeZoneName = 'short';
 	} else if (kind === 'time') {
 		options.hour = '2-digit';
 		options.minute = '2-digit';
@@ -66,6 +67,14 @@ export function formatAgo(iso: string | null, now: number = Date.now()): string 
 export function formatTime(date: Date, timeZone?: string): string {
 	if (Number.isNaN(date.getTime())) return '';
 	return dateFormat('time', timeZone || undefined).format(date);
+}
+
+/** `hh:mm`, with the zone abbreviation when `withZone`. A missing or unparsable time is ''. */
+export function formatClock(iso: string | null | undefined, timeZone?: string, withZone = false): string {
+	if (!iso) return '';
+	const date = new Date(iso);
+	if (Number.isNaN(date.getTime())) return '';
+	return dateFormat(withZone ? 'zoned' : 'clock', timeZone || undefined).format(date);
 }
 
 /** `timeZone` is an IANA name. Omit it to use the runtime zone. */

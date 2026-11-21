@@ -4,8 +4,9 @@ import { ENV_KEY, byteLength, duplicateEntryMessage, isCatalogName, isIdempotenc
 import { pastedText } from '$lib/file-request';
 import { privateKeyRevealPath, privateSetEntry } from '$lib/private-keys';
 import {
+	IMAGE_ACTION_WAIT_MS,
 	STILL_RUNNING,
-	deployTimeoutMs,
+	historyTimeoutMs,
 	draftForBrowser,
 	imageDraftFromForm,
 	imageRequestBody,
@@ -23,7 +24,7 @@ import {
 import { generateRequestBody, isGenerateKind, revealFailedText } from '$lib/env-generate';
 import { imageRepository, isTaggedRef, tagLookupError, type ImageDigestResult, type ImageTagsResult, type TagLookupError } from '$lib/image-tags';
 import type { EnvSet, ProjectFile, Registry } from '$lib/api-types';
-import type { ImageDeployState, ImageEditorState } from '$lib/project-action';
+import type { ConflictTimes, ImageDeployState, ImageEditorState } from '$lib/project-action';
 import { ApiError, apiFetch } from '$lib/server/api';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
@@ -67,6 +68,37 @@ function stillRunning(err: unknown): boolean {
 	return err instanceof ApiError && (err.status === 504 || err.code === 'timeout');
 }
 
+/** The times a running-operation conflict carries (api-v1 v1.42 item 2), or null. */
+function conflictTimes(err: unknown): ConflictTimes | null {
+	if (!(err instanceof ApiError) || err.code !== 'conflict' || typeof err.payload !== 'object' || err.payload === null) return null;
+	const payload = err.payload as Record<string, unknown>;
+	const started = payload.started_at;
+	const ends = payload.ends_by;
+	if (typeof started !== 'string' || typeof ends !== 'string' || started.length > 64 || ends.length > 64) return null;
+	if (!Number.isFinite(Date.parse(started)) || !Number.isFinite(Date.parse(ends))) return null;
+	return { started_at: started, ends_by: ends };
+}
+
+/**
+ * A failed deploy, rollback, remove or confirm. Past the wait cap the answer is
+ * still running (`capped`). That and a running-operation conflict reload
+ * History, which then lists the running row; `alwaysHistory` reloads it for
+ * any failure.
+ */
+async function imageActionFailure(
+	event: RequestEvent,
+	err: unknown,
+	id: string,
+	base: Omit<ImageDeployState, 'resultId'>,
+	opts: { capped: boolean; alwaysHistory: boolean; started: number }
+) {
+	const running = opts.capped && stillRunning(err);
+	const conflict = conflictTimes(err);
+	const message = running ? STILL_RUNNING : apiMessage(err);
+	const history = running || conflict || opts.alwaysHistory ? await historyFor(event, id, base.name, base.hostId, opts.started) : null;
+	return deployFailure(event, apiStatus(err), { ...base, history, message, conflict });
+}
+
 function editorFailure(event: RequestEvent, status: number, mode: 'create' | 'edit', name: string | null, draft: ImageDraft, field: string | null, message: string) {
 	const imageEditor: ImageEditorState = { mode, name, draft: draftForBrowser(draft), message, field };
 	return fail(status, present(event, { scope: 'catalog' as const, imageEditor }));
@@ -107,9 +139,10 @@ function named(form: FormData): string {
 	return isCatalogName(name) ? name : '';
 }
 
-async function historyFor(event: RequestEvent, id: string, name: string, hostId: string): Promise<ImageDeployState['history']> {
+async function historyFor(event: RequestEvent, id: string, name: string, hostId: string, started?: number): Promise<ImageDeployState['history']> {
+	const timeoutMs = started === undefined ? undefined : historyTimeoutMs(started, Date.now());
 	try {
-		const payload = await apiFetch(event, `/v1/projects/${id}/catalog/${name}/deploys?host_id=${hostId}`);
+		const payload = await apiFetch(event, `/v1/projects/${id}/catalog/${name}/deploys?host_id=${hostId}`, undefined, timeoutMs);
 		return parseImageDeployList(payload)?.items ?? null;
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
@@ -152,13 +185,13 @@ function deployContext(form: FormData): { name: string; hostId: string; workload
 }
 
 export async function catalogDeploy(event: RequestEvent) {
+	const started = Date.now();
 	requireUser(event);
 	const id = projectIdOf(event.params);
 	const form = await event.request.formData();
 	const ctx = deployContext(form);
 	if ('message' in ctx) return fail(400, present(event, { scope: 'catalog' as const, message: ctx.message }));
 	const base = emptyDeploy(ctx.name, ctx.hostId, ctx.workload, ctx.waitSec, null);
-	const timeoutMs = deployTimeoutMs(ctx.workload, ctx.waitSec);
 	try {
 		const payload = await apiFetch(
 			event,
@@ -167,11 +200,11 @@ export async function catalogDeploy(event: RequestEvent) {
 				method: 'POST',
 				body: JSON.stringify({ host_id: ctx.hostId, force: formText(form, 'force') === '1', idempotency_key: ctx.key })
 			},
-			timeoutMs
+			IMAGE_ACTION_WAIT_MS
 		);
 		const parsed = parseDeployPayload(payload);
 		if (!parsed) return deployFailure(event, 502, { ...base, message: UNEXPECTED });
-		const history = await historyFor(event, id, ctx.name, ctx.hostId);
+		const history = await historyFor(event, id, ctx.name, ctx.hostId, started);
 		if (parsed.kind === 'confirmation') {
 			return present(event, {
 				scope: 'catalog' as const,
@@ -184,13 +217,12 @@ export async function catalogDeploy(event: RequestEvent) {
 		});
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
-		const message = stillRunning(err) ? STILL_RUNNING : apiMessage(err);
-		const history = stillRunning(err) ? null : await historyFor(event, id, ctx.name, ctx.hostId);
-		return deployFailure(event, apiStatus(err), { ...base, history, message });
+		return imageActionFailure(event, err, id, base, { capped: true, alwaysHistory: true, started });
 	}
 }
 
 export async function catalogRollback(event: RequestEvent) {
+	const started = Date.now();
 	requireUser(event);
 	const id = projectIdOf(event.params);
 	const form = await event.request.formData();
@@ -199,17 +231,16 @@ export async function catalogRollback(event: RequestEvent) {
 	const digest = formText(form, 'digest');
 	const base = emptyDeploy(ctx.name, ctx.hostId, ctx.workload, ctx.waitSec, null);
 	if (!isFullDigest(digest)) return deployFailure(event, 400, { ...base, message: 'That digest is not valid.' });
-	const timeoutMs = deployTimeoutMs(ctx.workload, ctx.waitSec);
 	try {
 		const payload = await apiFetch(
 			event,
 			`/v1/projects/${id}/catalog/${ctx.name}/rollback`,
 			{ method: 'POST', body: JSON.stringify({ host_id: ctx.hostId, digest, idempotency_key: ctx.key }) },
-			timeoutMs
+			IMAGE_ACTION_WAIT_MS
 		);
 		const parsed = parseDeployPayload(payload);
 		if (!parsed) return deployFailure(event, 502, { ...base, message: UNEXPECTED });
-		const history = await historyFor(event, id, ctx.name, ctx.hostId);
+		const history = await historyFor(event, id, ctx.name, ctx.hostId, started);
 		if (parsed.kind === 'confirmation') {
 			return present(event, {
 				scope: 'catalog' as const,
@@ -222,12 +253,12 @@ export async function catalogRollback(event: RequestEvent) {
 		});
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
-		const message = stillRunning(err) ? STILL_RUNNING : apiMessage(err);
-		return deployFailure(event, apiStatus(err), { ...base, message });
+		return imageActionFailure(event, err, id, base, { capped: true, alwaysHistory: false, started });
 	}
 }
 
 export async function catalogRemove(event: RequestEvent) {
+	const started = Date.now();
 	requireUser(event);
 	const id = projectIdOf(event.params);
 	const form = await event.request.formData();
@@ -235,13 +266,15 @@ export async function catalogRemove(event: RequestEvent) {
 	if ('message' in ctx) return fail(400, present(event, { scope: 'catalog' as const, message: ctx.message }));
 	const base = emptyDeploy(ctx.name, ctx.hostId, ctx.workload, ctx.waitSec, null);
 	try {
-		const payload = await apiFetch(event, `/v1/projects/${id}/catalog/${ctx.name}/remove`, {
-			method: 'POST',
-			body: JSON.stringify({ host_id: ctx.hostId, idempotency_key: ctx.key })
-		});
+		const payload = await apiFetch(
+			event,
+			`/v1/projects/${id}/catalog/${ctx.name}/remove`,
+			{ method: 'POST', body: JSON.stringify({ host_id: ctx.hostId, idempotency_key: ctx.key }) },
+			IMAGE_ACTION_WAIT_MS
+		);
 		const parsed = parseRemovePayload(payload);
 		if (!parsed) return deployFailure(event, 502, { ...base, message: UNEXPECTED });
-		const history = await historyFor(event, id, ctx.name, ctx.hostId);
+		const history = await historyFor(event, id, ctx.name, ctx.hostId, started);
 		if (parsed.kind === 'confirmation') {
 			return present(event, {
 				scope: 'catalog' as const,
@@ -251,11 +284,12 @@ export async function catalogRemove(event: RequestEvent) {
 		return present(event, { scope: 'catalog' as const, imageDeploy: deployState({ ...base, history, status: parsed.status }) });
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
-		return deployFailure(event, apiStatus(err), { ...base, message: apiMessage(err) });
+		return imageActionFailure(event, err, id, base, { capped: true, alwaysHistory: false, started });
 	}
 }
 
 export async function catalogConfirm(event: RequestEvent) {
+	const started = Date.now();
 	requireUser(event);
 	const id = projectIdOf(event.params);
 	const form = await event.request.formData();
@@ -268,15 +302,14 @@ export async function catalogConfirm(event: RequestEvent) {
 	if (kind !== 'deploy' && kind !== 'rollback' && kind !== 'remove') {
 		return deployFailure(event, 400, { ...base, message: 'That confirmation is not valid.' });
 	}
-	const timeoutMs = kind === 'remove' ? undefined : deployTimeoutMs(ctx.workload, ctx.waitSec);
 	try {
 		const payload = await apiFetch(
 			event,
 			`/v1/confirmations/${confirmationId}`,
 			{ method: 'POST', body: JSON.stringify({ idempotency_key: ctx.key }) },
-			timeoutMs
+			IMAGE_ACTION_WAIT_MS
 		);
-		const history = await historyFor(event, id, ctx.name, ctx.hostId);
+		const history = await historyFor(event, id, ctx.name, ctx.hostId, started);
 		if (kind === 'remove') {
 			const parsed = parseRemovePayload(payload);
 			if (!parsed) return deployFailure(event, 502, { ...base, message: UNEXPECTED });
@@ -302,8 +335,7 @@ export async function catalogConfirm(event: RequestEvent) {
 		});
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
-		const message = kind !== 'remove' && stillRunning(err) ? STILL_RUNNING : apiMessage(err);
-		return deployFailure(event, apiStatus(err), { ...base, message });
+		return imageActionFailure(event, err, id, base, { capped: true, alwaysHistory: false, started });
 	}
 }
 

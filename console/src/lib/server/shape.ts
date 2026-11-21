@@ -1228,6 +1228,7 @@ export function parseProgramLogs(value: unknown): ProgramLogs | null {
 }
 
 const IMAGE_OUTCOMES = new Set<ImageOutcome>([
+	'in_flight',
 	'succeeded',
 	'unchanged',
 	'failed',
@@ -1566,6 +1567,14 @@ export function parseImageDeploy(value: unknown): ImageDeploy | null {
 	if (digest === undefined || exit_code === undefined) return null;
 	if (typeof value.outcome !== 'string' || !IMAGE_OUTCOMES.has(value.outcome as ImageOutcome)) return null;
 	if (value.via !== 'console' && value.via !== 'mcp' && value.via !== 'agent') return null;
+	// api-v1 v1.42: only a running row has ends_by, and it has no finish time.
+	const ends_by = value.ends_by == null ? null : timestamp(value.ends_by);
+	if (value.ends_by != null && !ends_by) return null;
+	if (value.outcome === 'in_flight') {
+		if (finished_at != null || !ends_by || !Number.isFinite(Date.parse(ends_by))) return null;
+	} else if (ends_by != null) {
+		return null;
+	}
 	// Only an automatic action (via agent) may have no user. A named user must be a uuid.
 	let by: string | null = null;
 	if (value.by != null || value.via !== 'agent') {
@@ -1584,7 +1593,8 @@ export function parseImageDeploy(value: unknown): ImageDeploy | null {
 		started_at,
 		finished_at,
 		by,
-		via: value.via
+		via: value.via,
+		ends_by
 	};
 }
 
@@ -1611,7 +1621,8 @@ export function parseDeployPayload(value: unknown): DeployPayload | null {
 	const deploy = parseImageDeploy(value.deploy);
 	const status = parseImageStatus(value.status);
 	const lines = parseLogLines(value.lines);
-	if (!deploy || !status || !lines) return null;
+	// A running row is History only (api-v1 v1.42); a deploy result is finished.
+	if (!deploy || deploy.outcome === 'in_flight' || !status || !lines) return null;
 	return { kind: 'deploy', deploy, status, lines: lines.lines };
 }
 

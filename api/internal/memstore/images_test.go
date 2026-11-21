@@ -283,8 +283,18 @@ func TestImageInFlightAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.BeginImageOp(ctx, entry.ID, host.ID, hash, owner.ID, "console", at, at.Add(time.Hour)); !errors.Is(err, store.ErrConflict) {
+	_, err = m.BeginImageOp(ctx, entry.ID, host.ID, hash, owner.ID, "console", at.Add(time.Minute), at.Add(time.Hour))
+	var running *store.ImageOpRunning
+	if !errors.Is(err, store.ErrConflict) || !errors.As(err, &running) || !running.StartedAt.Equal(at) || !running.Until.Equal(at.Add(time.Hour)) {
 		t.Fatalf("second begin %v", err)
+	}
+	// api-v1 v1.42 item 1: the running row is read on its own; the history
+	// list stays finished rows only.
+	if row, err := m.RunningImageOp(ctx, entry.ID, host.ID); err != nil || row.ID != first.ID || row.Outcome != "in_flight" || !row.InFlightUntil.Equal(at.Add(time.Hour)) {
+		t.Fatalf("running %#v %v", row, err)
+	}
+	if rows, err := m.ListImageDeploys(ctx, entry.ID, host.ID); err != nil || len(rows) != 0 {
+		t.Fatalf("history %#v %v", rows, err)
 	}
 	digests := make([]string, 4)
 	for i := 0; i < 4; i++ {
@@ -308,8 +318,54 @@ func TestImageInFlightAndRollback(t *testing.T) {
 	if err != nil || len(got) != 3 || got[0] != digests[3] || got[1] != digests[2] || got[2] != digests[1] {
 		t.Fatalf("digests %#v %v", got, err)
 	}
+	if _, err := m.RunningImageOp(ctx, entry.ID, host.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("running after finish %v", err)
+	}
 	if _, err := m.BeginImageOp(ctx, entry.ID, host.ID, hash, owner.ID, "console", at, at.Add(time.Hour)); err != nil {
 		t.Fatalf("begin after finish %v", err)
+	}
+}
+
+// api-v1 v1.42: RunningImageOp returns a row past its deadline as it stands
+// (the handler leaves it out of History), and a later begin takes it over.
+// Parity with the Postgres check in assertImages.
+func TestRunningImageOpStaleRow(t *testing.T) {
+	ctx := context.Background()
+	m := New()
+	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	owner := catalogUser(t, m, "stale-owner")
+	home := catalogProject(t, m, owner.ID, "Home", "home", at)
+	host := catalogHost(t, m, home, owner.ID, "pi", at)
+	img, err := catalog.BuildImage("web", []byte(`{"kind":"service","image":"nginx"}`), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := catalog.ImageHash(img, nil)
+	entry, err := m.CreateCatalogEntry(ctx, home.ID, store.CatalogWrite{
+		Name: "web", Kind: "image", ImageRaw: []byte(catalog.SpecJSON(img)),
+		SpecHash: hash, CommandDisplay: img.Image, Actor: owner.ID, At: at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stuck, err := m.BeginImageOp(ctx, entry.ID, host.ID, hash, owner.ID, "console", at, at.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := m.RunningImageOp(ctx, entry.ID, host.ID); err != nil || got.ID != stuck.ID || got.Outcome != "in_flight" || !got.InFlightUntil.Equal(at.Add(time.Second)) {
+		t.Fatalf("stale running %#v %v", got, err)
+	}
+	takenAt := at.Add(2 * time.Minute)
+	taken, err := m.BeginImageOp(ctx, entry.ID, host.ID, hash, owner.ID, "console", takenAt, takenAt.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("stale takeover %v", err)
+	}
+	if got, err := m.RunningImageOp(ctx, entry.ID, host.ID); err != nil || got.ID != taken.ID {
+		t.Fatalf("running after takeover %#v %v", got, err)
+	}
+	rows, err := m.ListImageDeploys(ctx, entry.ID, host.ID)
+	if err != nil || len(rows) != 1 || rows[0].ID != stuck.ID || rows[0].Outcome != "timeout" {
+		t.Fatalf("stale row history %#v %v", rows, err)
 	}
 }
 

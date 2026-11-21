@@ -465,6 +465,14 @@ WHERE user_id = $1::uuid AND idempotency_key = $2
 	return nil
 }
 
+func (d *DB) ReleaseIdempotency(ctx context.Context, userID uuid.UUID, key string) error {
+	_, err := d.pool.Exec(ctx, `
+DELETE FROM app.idempotency_keys
+WHERE user_id = $1::uuid AND idempotency_key = $2
+`, userID.String(), key)
+	return mapErr(err)
+}
+
 func (d *DB) SetHostPrograms(ctx context.Context, hostID uuid.UUID, programs *store.HostPrograms) error {
 	raw, err := programsJSON(programs)
 	if err != nil {

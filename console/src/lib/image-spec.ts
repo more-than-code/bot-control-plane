@@ -10,6 +10,7 @@ import type {
 	ImageWorkload
 } from '$lib/api-types';
 import { ENV_KEY, byteLength, isCatalogName } from '$lib/catalog';
+import { formatClock } from '$lib/format';
 
 /** Shown beside the memory field. Blank still means no limit. */
 export const SUGGESTED_MEMORY_MB = 256;
@@ -26,7 +27,7 @@ export const HEALTH_POLICY_DEFAULTS: Required<ImageHealthPolicy> = {
 	max_actions_per_hour: 3
 };
 
-export const STILL_RUNNING = 'Still running on the host. Check the history in a minute.';
+export const STILL_RUNNING = 'Still running on the host. History shows it and updates when it finishes.';
 
 const LINE_BREAK = /[\u0000\n\r]/;
 const SECRET_KEY = /password|passwd|token|secret|credential|api[_-]?key|private[_-]?key/i;
@@ -669,10 +670,77 @@ export function imageSpecFromDraft(
 	return { ok: true, spec, name };
 }
 
-/** Deploy and rollback wait for the host. 300s plus the spec wait plus 90s. */
-export function deployTimeoutMs(workload: ImageWorkload, seconds: number): number {
-	const wait = Number.isFinite(seconds) ? seconds : workload === 'job' ? 600 : 30;
-	return (300 + wait + 90) * 1000;
+/**
+ * Deploy, rollback and their confirm wait at most this long for the API
+ * (spec-deploy-stuck §2.3): Cloudflare cuts a request at 100 s. The API
+ * carries on; History then shows the running row.
+ */
+export const IMAGE_ACTION_WAIT_MS = 80_000;
+
+const HISTORY_READ_MS = 10_000;
+const HISTORY_READ_FLOOR_MS = 1_000;
+const ACTION_ANSWER_MS = 95_000;
+
+/**
+ * The timeout of the History read that follows a deploy, rollback, remove or
+ * confirm (spec-deploy-stuck §9 item 4), so the whole action answers before
+ * Cloudflare's 100 s cut: at most 10 s, and no later than 95 s after the
+ * action started, but never under 1 s.
+ */
+export function historyTimeoutMs(started: number, now: number): number {
+	return Math.max(HISTORY_READ_FLOOR_MS, Math.min(HISTORY_READ_MS, ACTION_ANSWER_MS - (now - started)));
+}
+
+/** History refresh interval while a deploy, rollback or remove runs. */
+export const RUNNING_POLL_MS = 10_000;
+
+type RunningRow = { id: string; outcome: string; ends_by?: string | null };
+
+/** The running row (api-v1 v1.42 item 1): the API lists it first. */
+export function runningRow<T extends RunningRow>(history: readonly T[]): T | null {
+	const first = history[0];
+	return first && first.outcome === 'in_flight' ? first : null;
+}
+
+/** How long past `ends_by`, by the local clock, History is still refreshed while it lists the running row. */
+export const RUNNING_POLL_GRACE_MS = 120_000;
+
+/**
+ * Milliseconds until the next History refresh, or null to stop. While a row
+ * runs, every RUNNING_POLL_MS, with one refresh landing just after `ends_by`.
+ * The local clock may be skewed from the API's, so polling stops only once a
+ * refresh no longer lists the running row, or RUNNING_POLL_GRACE_MS after
+ * `ends_by` by the local clock.
+ */
+export function historyPollDelay(history: readonly RunningRow[], now: number): number | null {
+	const row = runningRow(history);
+	if (!row) return null;
+	const end = row.ends_by ? Date.parse(row.ends_by) : NaN;
+	if (!Number.isFinite(end) || !Number.isFinite(now) || now >= end + RUNNING_POLL_GRACE_MS) return null;
+	if (now >= end) return RUNNING_POLL_MS;
+	return Math.min(RUNNING_POLL_MS, end - now + 1000);
+}
+
+/** The outcome of the running row once a refresh lists it finished, for the live region. Null otherwise. */
+export function finishedOutcome(previous: readonly RunningRow[], next: readonly RunningRow[]): string | null {
+	const was = runningRow(previous);
+	if (!was) return null;
+	const now = next.find((row) => row.id === was.id);
+	if (!now || now.outcome === 'in_flight') return null;
+	return now.outcome;
+}
+
+/**
+ * The API's running-operation conflict message (api-v1 v1.42 item 2) with
+ * its two UTC clock times in the viewer's zone. Any other message, or times
+ * that do not parse, are returned as they are.
+ */
+export function localConflictMessage(message: string, times: { started_at: string; ends_by: string } | null, timeZone?: string): string {
+	if (!times) return message;
+	const since = formatClock(times.started_at, timeZone, true);
+	const until = formatClock(times.ends_by, timeZone, true);
+	if (since === '' || until === '') return message;
+	return message.replace(/since \d{2}:\d{2} UTC/, `since ${since}`).replace(/after \d{2}:\d{2} UTC/, `after ${until}`);
 }
 
 /** Twelve hex digits after `sha256:`. Anything else is not shown as a digest. */

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -25,7 +27,7 @@ const confirmSchema = `{
 func registerConfirm(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "confirm",
-		Description: "Perform a pending catalog run, stop, restart, deploy, or rollback, or replace health checks, or create, replace, or delete a catalog entry, or create, update, or delete an env set, or replace an entry's routes, after the user agrees. The action is real and is audited. This contacts the host now for a program or an image deploy or rollback. Pass the same idempotency_key as the run, stop, restart, deploy_entry, rollback_entry, set_health_checks, create_catalog_entry, update_catalog_entry, delete_catalog_entry, create_env_set, update_env_set, delete_env_set, or set_routes call that returned this confirmation; a different key is refused and nothing runs. A program confirm with project_id and entry waits up to 30 seconds. A deploy or rollback confirm waits up to 50 seconds, with or without project_id and entry. Pass project_id and entry when you have them for a run, stop, restart, deploy, or rollback: for a program they keep the shorter wait. For any other plan leave entry out; project_id alone is ignored. Returns the program status, or for an image the outcome, short digest, exit code, and last log lines. Right after a program run or restart, its ports and started_at can still be empty; they appear in entry_status after the host's next status report, a few seconds later. A health-check confirm reports how many checks were set. A catalog-entry confirm does not contact the host. A routes confirm returns the entry's routes with their state; the API then updates the host's edge. It returns the entry name and image reference without env values, or says the entry was deleted. A deploy or rollback still going after 50 seconds keeps running on the host: the result is \"still running on the host\"; check entry_status for the outcome.",
+		Description: "Perform a pending catalog run, stop, restart, deploy, or rollback, or replace health checks, or create, replace, or delete a catalog entry, or create, update, or delete an env set, or replace an entry's routes, after the user agrees. The action is real and is audited. This contacts the host now for a program or an image deploy or rollback. Pass the same idempotency_key as the run, stop, restart, deploy_entry, rollback_entry, set_health_checks, create_catalog_entry, update_catalog_entry, delete_catalog_entry, create_env_set, update_env_set, delete_env_set, or set_routes call that returned this confirmation; a different key is refused and nothing runs. A program confirm with project_id and entry waits up to 30 seconds. A deploy or rollback confirm waits up to 50 seconds, with or without project_id and entry. Pass project_id and entry when you have them for a run, stop, restart, deploy, or rollback: for a program they keep the shorter wait. For any other plan leave entry out; project_id alone is ignored. Returns the program status, or for an image the outcome, short digest, exit code, and last log lines. Right after a program run or restart, its ports and started_at can still be empty; they appear in entry_status after the host's next status report, a few seconds later. A health-check confirm reports how many checks were set. A catalog-entry confirm does not contact the host. A routes confirm returns the entry's routes with their state; the API then updates the host's edge. It returns the entry name and image reference without env values, or says the entry was deleted. A deploy or rollback still going after 50 seconds keeps running on the host: the result is \"still running on the host\" with the time it ends by at the latest when project_id and entry were passed; the entry's deploy history (deploy_entry for that host) then shows the outcome.",
 		Annotations: mutatingAnnotations(true),
 		InputSchema: json.RawMessage(confirmSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -68,27 +70,115 @@ func registerConfirm(server *mcp.Server, api *apiclient.Client) {
 		// project_id and entry are not sent. They only choose the wait.
 		// The API body stays {"idempotency_key"}.
 		var (
-			status  int
-			payload json.RawMessage
-			fail    *mcp.CallToolResult
+			status   int
+			payload  json.RawMessage
+			fail     *mcp.CallToolResult
+			deadline bool
 		)
 		if in.ProjectID == "" {
 			// Without project_id and entry the action is unknown. It may be
 			// an image deploy, so it gets the image budget and still running.
-			extendWriteBudget(ctx, apiclient.MaxCallTimeout)
-			status, payload, fail = postWithin(ctx, api, path, body, apiclient.MaxCallTimeout)
+			extendWriteBudget(ctx, apiclient.MaxCallTimeout+runningLookupTimeout)
+			status, payload, fail, deadline = postWithin(ctx, api, path, body, apiclient.MaxCallTimeout)
 		} else {
 			wait := confirmWaitFor(ctx, api, in.ProjectID, in.Entry)
 			if wait.deploy {
-				extendWriteBudget(ctx, wait.limit)
-				status, payload, fail = postWithin(ctx, api, path, body, wait.limit)
+				extendWriteBudget(ctx, wait.limit+runningLookupTimeout)
+				status, payload, fail, deadline = postWithin(ctx, api, path, body, wait.limit)
 			} else {
 				status, payload, fail = postStatus(ctx, api, path, body)
 			}
+		}
+		if deadline {
+			return stillRunning(runningEndsBy(ctx, api, in.ProjectID, in.Entry))
 		}
 		if fail != nil {
 			return fail
 		}
 		return actedOrPending(status, payload)
 	})
+}
+
+// runningLookupTimeout bounds the ends_by lookup after a confirm deadline.
+const runningLookupTimeout = 3 * time.Second
+
+// maxRunningLookupHosts is the most deploy hosts the lookup reads. A project
+// with more gets the text without a time.
+const maxRunningLookupHosts = 5
+
+// runningEndsBy finds the ends_by of the entry's running deploy or rollback
+// (api-v1 v1.42 item 1). confirm does not name the host, so it reads the
+// history of each host the project may deploy to, in parallel, and answers
+// only when exactly one has a running row. "" when project_id and entry are
+// unknown, the project has more than maxRunningLookupHosts deploy hosts, or
+// nothing matches.
+func runningEndsBy(ctx context.Context, api *apiclient.Client, projectID, entry string) string {
+	if projectID == "" || entry == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, runningLookupTimeout)
+	defer cancel()
+	raw, fail := get(ctx, api, idPath("v1", "projects", projectID, "hosts"), nil)
+	if fail != nil {
+		return ""
+	}
+	var hosts struct {
+		Items []struct {
+			ID          string `json:"id"`
+			AccessLevel string `json:"access_level"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(raw, &hosts) != nil {
+		return ""
+	}
+	var ids []string
+	for _, host := range hosts.Items {
+		if host.AccessLevel == "deploy" && requireUUID("host_id", host.ID) == nil {
+			ids = append(ids, host.ID)
+		}
+	}
+	if len(ids) > maxRunningLookupHosts {
+		return ""
+	}
+	found := make([]string, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if deploys, ok := fetchDeploys(ctx, api, projectID, entry, id); ok {
+				found[i] = runningRowEndsBy(deploys)
+			}
+		}()
+	}
+	wg.Wait()
+	endsBy := ""
+	for _, f := range found {
+		if f == "" {
+			continue
+		}
+		if endsBy != "" {
+			return ""
+		}
+		endsBy = f
+	}
+	return endsBy
+}
+
+// runningRowEndsBy is the ends_by of a history list's first row when it is
+// in flight, else "".
+func runningRowEndsBy(raw json.RawMessage) string {
+	var body struct {
+		Items []struct {
+			Outcome string `json:"outcome"`
+			EndsBy  string `json:"ends_by"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(raw, &body) != nil || len(body.Items) == 0 || body.Items[0].Outcome != "in_flight" {
+		return ""
+	}
+	if _, err := time.Parse(time.RFC3339, body.Items[0].EndsBy); err != nil {
+		return ""
+	}
+	return body.Items[0].EndsBy
 }

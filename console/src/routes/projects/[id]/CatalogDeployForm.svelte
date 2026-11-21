@@ -14,7 +14,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
-	import { imageEnvHashNote, imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, imageNetworksBlockReason, isCatalogHost, projectListedBlockReason, reuseIdempotencyKey } from '$lib/catalog';
+	import { imageEnvHashNote, imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, imageNetworksBlockReason, hasRunningConflict, isCatalogHost, projectListedBlockReason, reuseIdempotencyKey } from '$lib/catalog';
 	import { blockInFlightSubmit, deployProgressNote, flightFocusTarget, flightLabel } from '$lib/catalog-flight';
 	import {
 		applyHistoryResponse,
@@ -27,9 +27,16 @@
 		nextHistory,
 		nextIdempotencyKey,
 		nextRollbackKey,
+		STILL_RUNNING,
+		finishedOutcome,
+		historyPollDelay,
+		localConflictMessage,
 		rollbackChoices,
+		runningRow,
 		shortDigest
 	} from '$lib/image-spec';
+	import { formatClock } from '$lib/format';
+	import { timeZoneSource } from '$lib/time-zone';
 	import type { ImageDeployState } from '$lib/project-action';
 	import { serviceLogsHref } from '$lib/service-label';
 	import { onPlainClick } from '$lib/url';
@@ -155,6 +162,18 @@
 			: null
 	);
 	const shownDigest = $derived(activeFlight === 'rollback' ? (rollingDigest ?? flightDigest) : null);
+	const zones = timeZoneSource();
+	// A running-operation conflict (api-v1 v1.42) names its times in UTC; show them in the viewer's zone.
+	// Still running and a running-operation conflict are informational (role=status). They clear
+	// once History shows the operation finished, or no longer lists a running row for that host.
+	let clearedFor = $state<string | null>(null);
+	const infoNotice = $derived(result?.message != null && (result.message === STILL_RUNNING || hasRunningConflict({ imageDeploy: result })));
+	const noticeCleared = $derived(infoNotice && clearedFor != null && clearedFor === (result?.resultId ?? null));
+	const noticeText = $derived(
+		result?.message && !noticeCleared ? localConflictMessage(result.message, result.conflict ?? null, zones?.current) : null
+	);
+	/** Said once when a running row in History finishes; the row itself is not a live region. */
+	let finishedNote = $state('');
 
 	$effect(() => {
 		onBusy?.(busy);
@@ -215,6 +234,19 @@
 		historyForm.requestSubmit();
 	});
 
+	// While History lists a running deploy, rollback or remove (api-v1 v1.42), read it again every 10 s
+	// until a read no longer lists the row, or two minutes past its ends_by by the local clock. A new
+	// list reruns this; closing the drawer stops it.
+	$effect(() => {
+		if (!browser || !active) return;
+		const delay = historyPollDelay(history, Date.now());
+		if (delay == null) return;
+		const timer = setTimeout(() => {
+			if (!historyPending) historyForm?.requestSubmit();
+		}, delay);
+		return () => clearTimeout(timer);
+	});
+
 	$effect(() => {
 		if (!browser) return;
 		if (deployKey === '') deployKey = crypto.randomUUID();
@@ -225,6 +257,23 @@
 	function freshKey(): string {
 		return crypto.randomUUID();
 	}
+
+	function failureData(actionResult: { type: string; data?: unknown }): unknown {
+		return actionResult.type === 'failure' ? actionResult.data : undefined;
+	}
+
+	// A running-operation conflict started nothing and the API did not store it under the key
+	// (api-v1 v1.42 item 2): every action, Remove included, retries with a fresh key.
+	let rotatedFor: string | null = null;
+	$effect(() => {
+		if (!browser || !result?.conflict || rotatedFor === result.resultId) return;
+		rotatedFor = result.resultId;
+		deployKey = freshKey();
+		deployRequest = null;
+		confirmKey = freshKey();
+		removeKey = freshKey();
+		rollbackRequest = {};
+	});
 
 	function rememberRollback(node: HTMLElement, digestValue: string) {
 		const button = node.querySelector('button');
@@ -254,7 +303,7 @@
 			} finally {
 				submitting = false;
 				flightAction = null;
-				if (!reuseIdempotencyKey(actionResult.type)) {
+				if (!reuseIdempotencyKey(actionResult.type, failureData(actionResult))) {
 					deployKey = freshKey();
 					deployRequest = null;
 				}
@@ -281,7 +330,7 @@
 					submitting = false;
 					flightAction = null;
 					rollingDigest = null;
-					if (!reuseIdempotencyKey(actionResult.type)) {
+					if (!reuseIdempotencyKey(actionResult.type, failureData(actionResult))) {
 						const next = { ...rollbackRequest };
 						delete next[digestValue];
 						rollbackRequest = next;
@@ -305,7 +354,7 @@
 				await update({ reset: false });
 			} finally {
 				submitting = false;
-				if (!reuseIdempotencyKey(actionResult.type)) confirmKey = freshKey();
+				if (!reuseIdempotencyKey(actionResult.type, failureData(actionResult))) confirmKey = freshKey();
 			}
 		};
 	};
@@ -321,6 +370,13 @@
 			deploy?.history ?? null,
 			deploy?.message ?? null
 		);
+		const ended = finishedOutcome(history, next.history);
+		if (ended != null) finishedNote = `${entry.name} finished: ${ended.replaceAll('_', ' ')}.`;
+		// A refresh after this result that shows the operation finished, or no running row for the
+		// result's host, clears the still-running or running-conflict notice.
+		if (ended != null || (next.ready && next.listedHost === result?.hostId && runningRow(next.history) == null)) {
+			clearedFor = result?.resultId ?? null;
+		}
 		history = [...next.history];
 		historyReady = next.ready;
 		historyPending = next.pending;
@@ -425,9 +481,9 @@
 				<Checkbox name="force" value="1" bind:checked={force} disabled={busy} />
 				Force
 			</Label>
-			{#if result?.message}
+			{#if noticeText}
 				<div bind:this={noticeEl} tabindex="-1" class="max-w-full min-w-0 focus-visible:ring-3 focus-visible:ring-ring break-words">
-					<Notice kind="error">{result.message}</Notice>
+					<Notice kind={infoNotice ? 'info' : 'error'}>{noticeText}</Notice>
 				</div>
 			{/if}
 			{#if result?.outcome}
@@ -503,6 +559,7 @@
 
 		<div class="mt-4 grid gap-2">
 			<h3 class="text-sm font-medium">History</h3>
+			<p class="sr-only" role="status">{finishedNote}</p>
 			{#if historyError}
 				<div class="max-w-full min-w-0 break-words">
 					<Notice kind="error">{historyError}</Notice>
@@ -520,10 +577,17 @@
 					{#each history as item (item.id)}
 						<li class="flex flex-wrap items-center gap-2 text-sm">
 							<StatusBadge status={item.outcome} />
-							{#if item.outcome !== 'auto_failed'}
-								<span class="font-mono">{shortDigest(item.digest) ?? 'no digest'}</span>
+							{#if item.outcome === 'in_flight'}
+								<span class="text-muted-foreground">since <LocalTime iso={item.started_at} /></span>
+								{#if formatClock(item.ends_by, zones?.current) !== ''}
+									<span class="text-muted-foreground">ends by {formatClock(item.ends_by, zones?.current)}</span>
+								{/if}
+							{:else}
+								{#if item.outcome !== 'auto_failed'}
+									<span class="font-mono">{shortDigest(item.digest) ?? 'no digest'}</span>
+								{/if}
+								<span class="text-muted-foreground"><LocalTime iso={item.finished_at ?? item.started_at} /></span>
 							{/if}
-							<span class="text-muted-foreground"><LocalTime iso={item.finished_at ?? item.started_at} /></span>
 							{#if item.via === 'agent'}
 								<span class="text-muted-foreground">Deploybot agent</span>
 							{/if}

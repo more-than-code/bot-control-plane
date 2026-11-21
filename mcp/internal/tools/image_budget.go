@@ -11,7 +11,7 @@ import (
 // An image deploy or rollback confirm waits at most apiclient.MaxCallTimeout
 // (50s), then reports "still running on the host". The API keeps the action
 // running after the call ends (a context without cancel), so a long pull or
-// health wait finishes on the host and entry_status shows the result. MCP
+// health wait finishes on the host and the deploy history shows the result. MCP
 // clients cut tool calls long before a 990s pull + health budget would end.
 // A known program keeps the default client timeout.
 // confirmWait is the deadline for POST /v1/confirmations/{id}.

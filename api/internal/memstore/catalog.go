@@ -422,6 +422,13 @@ func (m *Mem) ReplaceIdempotencyResponse(_ context.Context, userID uuid.UUID, ke
 	return nil
 }
 
+func (m *Mem) ReleaseIdempotency(_ context.Context, userID uuid.UUID, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.idempotency, idemKey(userID, key))
+	return nil
+}
+
 func (m *Mem) SetHostPrograms(_ context.Context, hostID uuid.UUID, programs *store.HostPrograms) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

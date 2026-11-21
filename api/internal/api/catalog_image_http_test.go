@@ -233,7 +233,7 @@ func TestImageTaskFrame(t *testing.T) {
 		t.Fatal("replay dispatched again")
 	}
 	status, env, _ = postImage(t, w, tok, project, "web", "deploy", host, "frame-1", map[string]any{"force": true})
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgKeyReused)
 	if log.count() != 1 {
 		t.Fatal("force change dispatched")
 	}
@@ -514,14 +514,40 @@ func TestImageFlightRollbackDisconnect(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("in-flight task was not sent")
 	}
+	// v1.42 item 2: the running case names the entry, host and times. The
+	// lock lasts the deploy budget (390 s) + 30 s margin + 120 s grace.
 	status, env, _ = postImage(t, w, tok, project, "web", "deploy", host, "flight-2", nil)
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", "A deploy, rollback or remove of web on pi4 has been running since 12:00 UTC. Try again after 12:09 UTC.")
+	busy := objectPayload(t, env)
+	if len(busy) != 2 || busy["started_at"] != "2026-10-13T12:00:00Z" || busy["ends_by"] != "2026-10-13T12:09:00Z" {
+		t.Fatalf("running conflict payload %#v", busy)
+	}
+	// v1.42 item 1: History lists the running row first.
+	status, env, _ = mustCall(t, w, tok, http.MethodGet, "/v1/projects/"+project+"/catalog/web/deploys?host_id="+host, "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	running := listItems(t, env)
+	if len(running) < 2 || running[0]["outcome"] != "in_flight" || running[0]["finished_at"] != nil || running[0]["ends_by"] != "2026-10-13T12:09:00Z" || running[0]["started_at"] != "2026-10-13T12:00:00Z" || running[0]["digest"] != nil {
+		t.Fatalf("running history %#v", running)
+	}
+	for _, row := range running[1:] {
+		if row["outcome"] == "in_flight" || row["ends_by"] != nil {
+			t.Fatalf("finished row %#v", row)
+		}
+	}
 	close(release)
 	gotFirst := <-first
 	if gotFirst.err != nil {
 		t.Fatal(gotFirst.err)
 	}
 	mustHTTP(t, gotFirst.status, gotFirst.env, http.StatusOK, "ok", "ok")
+	if d, _ := objectPayload(t, gotFirst.env)["deploy"].(map[string]any); d == nil || d["ends_by"] != nil {
+		t.Fatalf("finished deploy ends_by %#v", gotFirst.env.Payload)
+	}
+	status, env, _ = mustCall(t, w, tok, http.MethodGet, "/v1/projects/"+project+"/catalog/web/deploys?host_id="+host, "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if after := listItems(t, env); len(after) != len(running) || after[0]["outcome"] == "in_flight" {
+		t.Fatalf("history after finish %#v", after)
+	}
 
 	setStage("drop")
 	ctx, cancel := context.WithCancel(context.Background())

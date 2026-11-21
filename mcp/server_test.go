@@ -2049,6 +2049,9 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 		if mode == "history-down" {
 			return http.StatusInternalServerError, "error", "history down", nil
 		}
+		if mode == "history-running" {
+			return http.StatusOK, "ok", "", runningDeployHistory()
+		}
 		return http.StatusOK, "ok", "", deployHistory()
 	case r.Method == http.MethodPost && catalogVerb(r.URL.Path, "deploy"):
 		if mode == "acted" {

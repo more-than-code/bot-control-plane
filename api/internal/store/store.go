@@ -827,11 +827,16 @@ type Store interface {
 	ClaimIdempotency(ctx context.Context, userID uuid.UUID, key string, hash []byte, at time.Time) (IdempotencyRecord, bool, error)
 	PutIdempotency(ctx context.Context, userID uuid.UUID, key string, rec IdempotencyRecord) error
 	ReplaceIdempotencyResponse(ctx context.Context, userID uuid.UUID, key string, status int, body []byte) error
+	// ReleaseIdempotency deletes the user's key row, claimed or finished, so
+	// the next request with that key runs as new (api-v1 v1.42 item 2: a
+	// running-operation or changed-plan conflict is not stored). A missing
+	// row is not an error.
+	ReleaseIdempotency(ctx context.Context, userID uuid.UUID, key string) error
 	SetHostPrograms(ctx context.Context, hostID uuid.UUID, programs *HostPrograms) error
 
 	// BeginImageOp inserts one in-flight deploy for (host, entry).
 	// until is the deadline stored on the row. A second in-flight row whose
-	// deadline is still after at returns ErrConflict. A row whose deadline
+	// deadline is still after at returns *ImageOpRunning (an ErrConflict). A row whose deadline
 	// is missing or not after at is marked outcome timeout in the same
 	// transaction, and the new row proceeds.
 	BeginImageOp(ctx context.Context, entryID, hostID uuid.UUID, specHash string, by uuid.UUID, via string, at, until time.Time) (ImageDeploy, error)
@@ -843,6 +848,9 @@ type Store interface {
 	// non-automatic rows, plus at most the newest 20 automatic (via agent)
 	// rows newer than the oldest of those (v1.15 rev 2 item 5).
 	ListImageDeploys(ctx context.Context, entryID, hostID uuid.UUID) ([]ImageDeploy, error)
+	// RunningImageOp returns the in-flight row for (entry, host), whatever
+	// its deadline, or ErrNotFound when there is none (api-v1 v1.42 item 1).
+	RunningImageOp(ctx context.Context, entryID, hostID uuid.UUID) (ImageDeploy, error)
 	// RollbackDigests returns up to three newest distinct succeeded or unchanged digests.
 	RollbackDigests(ctx context.Context, entryID, hostID uuid.UUID) ([]string, error)
 	// AutoActionTarget resolves an auto_action's project slug and entry name

@@ -469,9 +469,25 @@ export function shouldApplyPreviewUpdate(previewing: boolean, requestId: number,
 	return requestId === latestPreviewId;
 }
 
-/** Keep the idempotency key until the post succeeds, so a retry replays instead of dispatching again. */
-export function reuseIdempotencyKey(resultType: string): boolean {
-	return resultType !== 'success';
+/**
+ * Keep the idempotency key until the post succeeds, so a retry replays instead of dispatching again.
+ * A running-operation conflict (api-v1 v1.42 item 2: its `imageDeploy.conflict` carries `started_at`
+ * and `ends_by`) started nothing and is not stored under the key, so the next try gets a fresh key.
+ */
+export function reuseIdempotencyKey(resultType: string, data?: unknown): boolean {
+	if (resultType === 'success') return false;
+	return !hasRunningConflict(data);
+}
+
+/** True when action data carries a running-operation conflict with its two times. */
+export function hasRunningConflict(data: unknown): boolean {
+	if (typeof data !== 'object' || data === null) return false;
+	const deploy = (data as { imageDeploy?: unknown }).imageDeploy;
+	if (typeof deploy !== 'object' || deploy === null) return false;
+	const conflict = (deploy as { conflict?: unknown }).conflict;
+	if (typeof conflict !== 'object' || conflict === null) return false;
+	const times = conflict as { started_at?: unknown; ends_by?: unknown };
+	return typeof times.started_at === 'string' && typeof times.ends_by === 'string';
 }
 
 /** Owners edit the spec. Everyone else gets the catalog row without the values that will run. */

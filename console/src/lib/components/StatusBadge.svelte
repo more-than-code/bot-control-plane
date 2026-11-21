@@ -23,6 +23,7 @@
 		'image_unavailable',
 		'forbidden_spec',
 		'conflict',
+		'in_flight',
 		'auto_restarted',
 		'auto_rolled_back',
 		'auto_gave_up',
@@ -32,6 +33,7 @@
 
 	/** Words for statuses whose wire value does not read well. Others show as sent. */
 	const label: Record<string, string> = {
+		in_flight: 'running',
 		auto_restarted: 'Automatic restart',
 		auto_rolled_back: 'Automatic rollback',
 		auto_gave_up: 'Automatic: gave up',
@@ -57,6 +59,7 @@
 		image_unavailable: 'text-status-down',
 		forbidden_spec: 'text-status-revoked',
 		conflict: 'text-status-offline',
+		in_flight: 'text-status-asleep',
 		auto_restarted: 'text-status-asleep',
 		auto_rolled_back: 'text-status-asleep',
 		auto_gave_up: 'text-status-down',

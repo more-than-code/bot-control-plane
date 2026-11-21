@@ -236,7 +236,7 @@ func (s *Server) handleConfirmation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if entry.SpecHash != c.SpecHash {
-		writeCode(w, "conflict", "conflict")
+		s.planChanged(w, p.User.ID, c.IdempotencyKey)
 		return
 	}
 	if err := s.Store.MarkConfirmationUsed(r.Context(), hash, p.User.ID, now); err != nil {
@@ -497,6 +497,23 @@ func shellExec(exec string) bool {
 	}
 }
 
+// Conflict messages of api-v1 v1.42 item 2.
+const (
+	msgPlanChanged = "The entry changed after this plan was made. Plan again."
+	msgKeyReused   = "This request key was already used for a different request."
+	// msgJustStarted takes the entry and host names: a begin lost the race to
+	// another one whose row could not be read back.
+	msgJustStarted = "Another deploy, rollback or remove of %s on %s just started. Try again shortly."
+)
+
+// planChanged answers a confirmation whose entry changed after the plan. The
+// plan's key is released, so planning again with the same key makes a new
+// plan instead of replaying the stale one (api-v1 v1.42 item 2).
+func (s *Server) planChanged(w http.ResponseWriter, userID uuid.UUID, key string) {
+	s.releaseKey(userID, key)
+	writeCode(w, "conflict", msgPlanChanged)
+}
+
 // claimOrReplay reserves the idempotency key. false means the response was
 // already written: a replay, a conflict, or an in-progress claim.
 func (s *Server) claimOrReplay(w http.ResponseWriter, r *http.Request, userID uuid.UUID, key string, hash []byte) bool {
@@ -506,7 +523,7 @@ func (s *Server) claimOrReplay(w http.ResponseWriter, r *http.Request, userID uu
 		return false
 	}
 	if errors.Is(err, store.ErrConflict) {
-		writeCode(w, "conflict", "conflict")
+		writeCode(w, "conflict", msgKeyReused)
 		return false
 	}
 	if err != nil {

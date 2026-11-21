@@ -7,9 +7,10 @@ import { render } from 'svelte/server';
 import type { CatalogEntry, EnvSet, Host, ImageDeploy, ImageEntry, ImageSpec, ProjectFile, ProjectServiceRow, Registry } from '../src/lib/api-types.ts';
 import { IMAGE_DEPLOY_TIP, IMAGE_RUN_TIP } from '../src/lib/catalog.ts';
 import { formatBytes, formatWhen } from '../src/lib/format.ts';
-import { API_TIMEOUT_MS } from '../src/lib/server/api.ts';
 import { clearSecretField, settleFileSave } from '../src/lib/secret-field.ts';
 import {
+	IMAGE_ACTION_WAIT_MS,
+	STILL_RUNNING,
 	acceptHostHistory,
 	applyDockerPaste,
 	applyHistoryResponse,
@@ -68,6 +69,8 @@ const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
 const ENTRY_ID = '00000000-0000-4000-8000-0000000000c1';
 const HASH = 'ab'.repeat(32);
 const KEY = 'image-key-1';
+/** The History read after a deploy, rollback, remove or confirm (spec-deploy-stuck §9 item 4). */
+const HISTORY_READ_MS = 10_000;
 const SECRET = 'super-secret-value-99';
 const PLAIN = 'visible-plain-value-99';
 const REGISTRY_TOKEN = 'registry-token-secret';
@@ -214,7 +217,8 @@ function deployRow(id: string, outcome: ImageDeploy['outcome'], imageDigest: str
 		started_at: '2026-10-14T00:00:00Z',
 		finished_at: '2026-10-14T00:01:00Z',
 		by: USER.id,
-		via: 'console'
+		via: 'console',
+		ends_by: null
 	};
 }
 
@@ -879,7 +883,8 @@ describe('catalog images', { concurrency: false }, () => {
 				form: { name: 'web', host_id: HOST_ID, workload: 'service', wait_sec: '40', idempotency_key: KEY }
 			}).event as never
 		);
-		assert.deepEqual(hold.seen, [430000, API_TIMEOUT_MS, 480000, API_TIMEOUT_MS, API_TIMEOUT_MS, API_TIMEOUT_MS]);
+		// Remove uses the 80 s cap too, and each History read after the action has its own short timeout.
+		assert.deepEqual(hold.seen, [IMAGE_ACTION_WAIT_MS, HISTORY_READ_MS, IMAGE_ACTION_WAIT_MS, HISTORY_READ_MS, IMAGE_ACTION_WAIT_MS, HISTORY_READ_MS]);
 		hold.restore();
 
 		const abort = spyTimeouts('abort');
@@ -897,10 +902,10 @@ describe('catalog images', { concurrency: false }, () => {
 				form: { name: 'web', host_id: HOST_ID, workload: 'service', wait_sec: '30', idempotency_key: KEY }
 			}).event as never
 		);
-		assert.equal(abort.seen.length, 1);
-		assert.equal(abort.seen[0], 420000);
+		// Still running reloads History (spec-deploy-stuck §2.3); this stub aborts that read too.
+		assert.deepEqual(abort.seen, [IMAGE_ACTION_WAIT_MS, HISTORY_READ_MS]);
 		const failedDeploy = actionData(failed).imageDeploy;
-		assert.equal(failedDeploy?.message, 'Still running on the host. Check the history in a minute.');
+		assert.equal(failedDeploy?.message, STILL_RUNNING);
 		assert.equal(failedDeploy?.history, null);
 		abort.restore();
 
@@ -912,9 +917,8 @@ describe('catalog images', { concurrency: false }, () => {
 				form: { name: 'web', host_id: HOST_ID, workload: 'job', wait_sec: '90', idempotency_key: KEY, digest: digest('b') }
 			}).event as never
 		);
-		assert.equal(rollbackAbort.seen.length, 1);
-		assert.equal(rollbackAbort.seen[0], 480000);
-		assert.equal(actionData(rolled).imageDeploy?.message, 'Still running on the host. Check the history in a minute.');
+		assert.deepEqual(rollbackAbort.seen, [IMAGE_ACTION_WAIT_MS, HISTORY_READ_MS]);
+		assert.equal(actionData(rolled).imageDeploy?.message, STILL_RUNNING);
 		rollbackAbort.restore();
 	});
 
@@ -2003,11 +2007,11 @@ describe('catalog images', { concurrency: false }, () => {
 					history: null,
 					confirmation: null,
 					confirmKind: null,
-					message: 'Still running on the host. Check the history in a minute.'
+					message: STILL_RUNNING
 				}
 			}
 		}).body;
-		assert.equal(stalled.includes('Still running on the host. Check the history in a minute.'), true);
+		assert.equal(stalled.includes(STILL_RUNNING), true);
 		assert.equal(stalled.includes('>Retry<'), true);
 		assert.equal(stalled.includes('No deploys yet'), false);
 		assert.equal(stalled.includes('Loading history'), false);
@@ -2106,7 +2110,7 @@ describe('catalog images', { concurrency: false }, () => {
 		const post = confirmCalls.find((call) => call.method === 'POST' && call.url.pathname.startsWith('/v1/confirmations/'));
 		assert.equal(post?.url.pathname, `/v1/confirmations/${confirmationId}`);
 		assert.deepEqual(JSON.parse(post?.body ?? '{}'), { idempotency_key: KEY });
-		assert.equal(confirmHold.seen[0], 430000);
+		assert.equal(confirmHold.seen[0], IMAGE_ACTION_WAIT_MS);
 		confirmHold.restore();
 
 		const removeHold = spyTimeouts('hold');
@@ -2125,7 +2129,7 @@ describe('catalog images', { concurrency: false }, () => {
 				}
 			}).event as never
 		);
-		assert.equal(removeHold.seen[0], API_TIMEOUT_MS);
+		assert.equal(removeHold.seen[0], IMAGE_ACTION_WAIT_MS);
 		removeHold.restore();
 
 		const abort = spyTimeouts('abort');
@@ -2148,9 +2152,8 @@ describe('catalog images', { concurrency: false }, () => {
 				}
 			}).event as never
 		);
-		assert.equal(abort.seen.length, 1);
-		assert.equal(abort.seen[0], 420000);
-		assert.equal(actionData(failed).imageDeploy?.message, 'Still running on the host. Check the history in a minute.');
+		assert.deepEqual(abort.seen, [IMAGE_ACTION_WAIT_MS, HISTORY_READ_MS]);
+		assert.equal(actionData(failed).imageDeploy?.message, STILL_RUNNING);
 		abort.restore();
 	});
 

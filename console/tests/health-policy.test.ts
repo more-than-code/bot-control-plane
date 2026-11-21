@@ -236,6 +236,7 @@ function deployRow(id: string, outcome: ImageDeploy['outcome'], via: ImageDeploy
 		started_at: '2026-10-14T00:00:00Z',
 		finished_at: '2026-10-14T00:00:00Z',
 		by: via === 'agent' ? null : USER.id,
+		ends_by: null,
 		via
 	};
 }

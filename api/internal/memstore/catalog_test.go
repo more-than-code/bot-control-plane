@@ -95,6 +95,43 @@ func TestClaimIdempotency(t *testing.T) {
 	}
 }
 
+// api-v1 v1.42 item 2: a released key runs as new, for either hash; a
+// missing key is not an error. Parity with the Postgres check in assertCatalog.
+func TestReleaseIdempotency(t *testing.T) {
+	ctx := context.Background()
+	m := New()
+	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	owner := catalogUser(t, m, "release-owner")
+	other := catalogUser(t, m, "release-other")
+	var hash, different [32]byte
+	hash[0] = 1
+	different[0] = 2
+	if _, claimed, err := m.ClaimIdempotency(ctx, owner.ID, "k", hash[:], at); err != nil || !claimed {
+		t.Fatalf("claim %v %v", claimed, err)
+	}
+	if _, claimed, err := m.ClaimIdempotency(ctx, other.ID, "k", hash[:], at); err != nil || !claimed {
+		t.Fatalf("other claim %v %v", claimed, err)
+	}
+	if err := m.ReplaceIdempotencyResponse(ctx, owner.ID, "k", 202, []byte(`{"code":"ok"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ReleaseIdempotency(ctx, owner.ID, "k"); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := m.ClaimIdempotency(ctx, owner.ID, "k", different[:], at); err != nil || !claimed {
+		t.Fatalf("claim after release %v %v", claimed, err)
+	}
+	if err := m.ReleaseIdempotency(ctx, owner.ID, "k"); err != nil {
+		t.Fatalf("release pending %v", err)
+	}
+	if err := m.ReleaseIdempotency(ctx, owner.ID, "k"); err != nil {
+		t.Fatalf("release missing %v", err)
+	}
+	if _, err := m.GetIdempotency(ctx, other.ID, "k", at); err != nil {
+		t.Fatalf("other user's key released %v", err)
+	}
+}
+
 func TestCatalogDeleteKeepsSiblingConfirmations(t *testing.T) {
 	ctx := context.Background()
 	m := New()

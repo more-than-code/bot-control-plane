@@ -586,8 +586,17 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key = 'TOKEN'
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.BeginImageOp(ctx, entry.ID, host.ID, changed.SpecHash, owner.ID, "console", at, at.Add(time.Hour)); !errors.Is(err, store.ErrConflict) {
+	_, err = d.BeginImageOp(ctx, entry.ID, host.ID, changed.SpecHash, owner.ID, "console", at.Add(time.Second), at.Add(time.Hour))
+	var running *store.ImageOpRunning
+	if !errors.Is(err, store.ErrConflict) || !errors.As(err, &running) || !running.StartedAt.Equal(at) || !running.Until.Equal(at.Add(time.Hour)) {
 		t.Fatalf("in flight %v", err)
+	}
+	// api-v1 v1.42 item 1: the running row is read on its own.
+	if got, err := d.RunningImageOp(ctx, entry.ID, host.ID); err != nil || got.ID != row.ID || got.Outcome != "in_flight" || got.FinishedAt != nil || !got.InFlightUntil.Equal(at.Add(time.Hour)) {
+		t.Fatalf("running %#v %v", got, err)
+	}
+	if listed, err := d.ListImageDeploys(ctx, entry.ID, host.ID); err != nil || len(listed) != 0 {
+		t.Fatalf("history with a running row %#v %v", listed, err)
 	}
 	digest := "sha256:" + strings.Repeat("ab", 32)
 	if _, err := d.FinishImageDeploy(ctx, row.ID, "succeeded", &digest, nil, at.Add(time.Second)); err != nil {
@@ -596,6 +605,9 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key = 'TOKEN'
 	history, err := d.ListImageDeploys(ctx, entry.ID, host.ID)
 	if err != nil || len(history) != 1 || history[0].Outcome != "succeeded" || history[0].Digest == nil || *history[0].Digest != digest {
 		t.Fatalf("history %#v %v", history, err)
+	}
+	if _, err := d.RunningImageOp(ctx, entry.ID, host.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("running after finish %v", err)
 	}
 	opened, err := d.BeginImageOp(ctx, entry.ID, host.ID, changed.SpecHash, owner.ID, "console", at.Add(2*time.Second), at.Add(time.Hour))
 	if err != nil {
@@ -621,6 +633,11 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key = 'TOKEN'
 	stuck, err := d.BeginImageOp(ctx, entry.ID, host.ID, changed.SpecHash, owner.ID, "console", stuckAt, stuckAt.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
+	}
+	// api-v1 v1.42: RunningImageOp returns a row past its deadline as it
+	// stands (the handler leaves it out of History); memstore does the same.
+	if got, err := d.RunningImageOp(ctx, entry.ID, host.ID); err != nil || got.ID != stuck.ID || got.Outcome != "in_flight" || !got.InFlightUntil.Equal(stuckAt.Add(time.Second)) {
+		t.Fatalf("stale running %#v %v", got, err)
 	}
 	takenAt := stuckAt.Add(2 * time.Minute)
 	taken, err := d.BeginImageOp(ctx, entry.ID, host.ID, changed.SpecHash, owner.ID, "console", takenAt, takenAt.Add(time.Hour))
@@ -683,7 +700,8 @@ WHERE project_id = $1::uuid AND set_name = 'svc' AND key = 'TOKEN'
 			winner = got.row.ID
 			continue
 		}
-		if errors.Is(got.err, store.ErrConflict) {
+		var lost *store.ImageOpRunning
+		if errors.As(got.err, &lost) && lost.StartedAt.Equal(raceAt) && lost.Until.Equal(raceAt.Add(time.Hour)) {
 			conflictN++
 			continue
 		}

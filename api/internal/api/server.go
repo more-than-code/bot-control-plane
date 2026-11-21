@@ -63,6 +63,9 @@ type Server struct {
 	// Production leaves it at 0. Tests set it so a timeout does not wait
 	// out the real deploy budget.
 	imageBudget int
+	// imageMargin replaces the 30 s result margin while imageBudget is set.
+	// Tests only.
+	imageMargin int
 	// releases, when set, replaces the embedded CHANGELOG.md as the source
 	// of release notifications (api-v1 v1.37). Tests only.
 	releases func() []changelog.Entry

@@ -250,7 +250,7 @@ func TestEnvSetCreateEdges(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
 	expiring, _ := objectPayload(t, env)["confirmation_id"].(string)
 	status, env, _ = mustCall(t, w, delegated, http.MethodPost, envSetsPath(project), `{"name":"e","keys":[{"key":"B"}],"idempotency_key":"same"}`)
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgKeyReused)
 
 	// Expired: conflict with the expired text, nothing created.
 	w.srv.Now = func() time.Time { return time.Date(2026, 10, 13, 12, 6, 0, 0, time.UTC) }

@@ -100,7 +100,7 @@ func TestDelegatedCatalogIdempotency(t *testing.T) {
 	}
 
 	status, env = c.w.do(c.tok, http.MethodPost, path, catalogImageBody("web", `{"kind":"service","image":"nginx:1.27"}`, "order-1"))
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgKeyReused)
 	status, env = c.w.do(c.tok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("other"))
 	mustHTTP(t, status, env, http.StatusConflict, "conflict", "idempotency_key does not match the request that issued this confirmation")
 	status, env = c.w.do(c.tok, http.MethodPost, "/v1/confirmations/"+id, confirmBody("order-1"))

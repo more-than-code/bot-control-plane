@@ -1087,3 +1087,14 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
 4. **New routes:** `GET /v1/orgs/{id}/problems` (org owners and admins) and `GET /v1/projects/{id}/problems` (the problems the caller would see in the bell for that project). Both list open problems; `?resolved=1` adds problems resolved in the last 24 hours. Delegated (MCP) sessions are allowed. Response `{"items": [Problem]}`.
 5. **MCP:** new tool `list_problems` (`org_id` or `project_id`, exactly one).
 6. **Storage:** migration `0027_problems.sql` creates `app.problems` with a partial unique index on `(kind, subject) WHERE resolved_at IS NULL`. Resolved rows older than 30 days are deleted. Its down script drops the table and never refuses. `BOT_API_PROBLEMS=off` turns the detectors off (the routes then answer empty lists).
+
+## v1.42 Running operations in deploy history, clear conflict messages (2026-11-21, approved spec `docs/spec-deploy-stuck.md` rev 1; no migration)
+
+1. **`GET /v1/projects/{id}/catalog/{name}/deploys`** lists a deploy, rollback or remove that is still running for that entry and host first, with outcome `in_flight`, `finished_at` `null`, and a new field `ends_by` (RFC3339: the time after which the operation's lock clears at the latest). Finished rows are unchanged and carry `ends_by` `null`; the list holds the running row, if any, then the finished rows as before (v1.15 rev 2 item 5: up to 50 deploy rows plus up to 20 automatic rows). `in_flight` joins the Outcome values in responses only.
+2. **Conflict messages** (code stays `conflict`, status 409):
+   - Another deploy, rollback or remove of the entry is running on that host: `msg` "A deploy, rollback or remove of <entry> on <host> has been running since <HH:MM> UTC. Try again after <HH:MM> UTC.", and the body carries `started_at` and `ends_by` (RFC3339).
+   - A confirmation whose plan no longer matches the entry: "The entry changed after this plan was made. Plan again."
+   - An idempotency key reused with a different request body: "This request key was already used for a different request."
+   - A deploy, rollback or remove that loses a race with one that has just started, when the other's times cannot be read: "Another deploy, rollback or remove of <entry> on <host> just started. Try again shortly."
+   - The running-operation, just-started and changed-plan conflicts are not stored as the answer for the request's idempotency key: nothing started, so a retry with the same key after the operation ended runs normally.
+3. **Wait for the agent:** for deploy and rollback the API waits for the task result for the task budget plus 30 s. The budget sent to the agent (`timeout_sec`) is unchanged. A result within that time is recorded with its outcome; `timeout` is recorded only after it.

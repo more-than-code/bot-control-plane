@@ -124,6 +124,19 @@ func deployHistory() map[string]any {
 	}}
 }
 
+// runningDeployHistory is deployHistory with a running row first
+// (api-v1 v1.42 item 1).
+func runningDeployHistory() map[string]any {
+	h := deployHistory()
+	items := h["items"].([]any)
+	running := map[string]any{
+		"digest": nil, "outcome": "in_flight", "started_at": "2026-10-15T05:00:00Z",
+		"finished_at": nil, "ends_by": "2026-10-15T05:09:00Z",
+	}
+	h["items"] = append([]any{running}, items...)
+	return h
+}
+
 func imageDeployResult() map[string]any {
 	return map[string]any{
 		"deploy": map[string]any{
@@ -605,7 +618,7 @@ func TestDeployTimeoutText(t *testing.T) {
 	res = mustCall(t, cs, "confirm", map[string]any{
 		"confirmation_id": confirmationID, "idempotency_key": "confirm-1",
 	})
-	if textOf(t, res) != "error: still running on the host, check entry_status later" {
+	if textOf(t, res) != stillRunningPlain {
 		t.Fatalf("plain confirm text %q", textOf(t, res))
 	}
 
@@ -617,12 +630,69 @@ func TestDeployTimeoutText(t *testing.T) {
 		t.Fatalf("program confirm text %q", textOf(t, res))
 	}
 
+	// No running row in the history: the end time is not known.
 	res = mustCall(t, cs, "confirm", map[string]any{
 		"confirmation_id": confirmationID, "idempotency_key": "confirm-1",
 		"project_id": projectID, "entry": imageEntry,
 	})
-	if textOf(t, res) != "error: still running on the host, check entry_status later" {
+	if textOf(t, res) != stillRunningPlain {
 		t.Fatalf("image confirm text %q", textOf(t, res))
+	}
+
+	// spec-deploy-stuck §2.4: the running row's ends_by is named, read from
+	// the history of the one host with deploy access.
+	fake.setMode("history-running")
+	before = fake.count()
+	res = mustCall(t, cs, "confirm", map[string]any{
+		"confirmation_id": confirmationID, "idempotency_key": "confirm-1",
+		"project_id": projectID, "entry": imageEntry,
+	})
+	if textOf(t, res) != "error: still running on the host, ends by 05:09 UTC at the latest; the entry's deploy history shows the outcome (deploy_entry for that host lists it)" {
+		t.Fatalf("running confirm text %q", textOf(t, res))
+	}
+	deploysPath := "/v1/projects/" + projectID + "/catalog/" + imageEntry + "/deploys"
+	calls := callsSince(fake, before)
+	if hist := findCalls(calls, http.MethodGet, deploysPath); len(hist) != 1 || hist[0].RawQuery != "host_id="+hostID {
+		t.Fatalf("history reads %#v", hist)
+	}
+	// Without project_id and entry the lookup is not made.
+	before = fake.count()
+	res = mustCall(t, cs, "confirm", map[string]any{
+		"confirmation_id": confirmationID, "idempotency_key": "confirm-1",
+	})
+	if textOf(t, res) != stillRunningPlain || len(findCalls(callsSince(fake, before), http.MethodGet, deploysPath)) != 0 {
+		t.Fatalf("plain running confirm %q", textOf(t, res))
+	}
+}
+
+const stillRunningPlain = "error: still running on the host; the entry's deploy history shows the outcome (deploy_entry for that host lists it)"
+
+// spec-deploy-stuck §2.4: deploy_entry's history shows a running row
+// (rollback_entry attaches no history; TestDeployEntryConfirm keeps that).
+func TestDeployEntryRunningHistory(t *testing.T) {
+	fake := &fakeAPI{token: userToken, images: true}
+	mcpSrv, _ := newTestServer(t, fake)
+	cs, _ := connectMCP(t, mcpSrv, userToken)
+	fake.setMode("history-running")
+	for _, tool := range []string{"deploy_entry"} {
+		args := map[string]any{
+			"project_id": projectID, "entry": imageEntry, "host_id": hostID, "idempotency_key": tool + "-1",
+		}
+		res := mustCall(t, cs, tool, args)
+		if res.IsError || !strings.Contains(textOf(t, res), "recent deploys:\nrunning since 2026-10-15T05:00:00Z, ends by 2026-10-15T05:09:00Z\nsha256:abababababab succeeded 2026-10-15T01:01:00Z\nsha256:cdcdcdcdcdcd unchanged") {
+			t.Fatalf("%s text %q", tool, textOf(t, res))
+		}
+		hist, _ := structuredMap(t, res)["history"].([]any)
+		if len(hist) != 3 {
+			t.Fatalf("%s history %#v", tool, hist)
+		}
+		run, _ := hist[0].(map[string]any)
+		if run["outcome"] != "in_flight" || run["digest"] != "" || run["time"] != "2026-10-15T05:00:00Z" || run["ends_by"] != "2026-10-15T05:09:00Z" {
+			t.Fatalf("%s running row %#v", tool, run)
+		}
+		if done, _ := hist[1].(map[string]any); done["ends_by"] != nil {
+			t.Fatalf("%s finished row %#v", tool, done)
+		}
 	}
 }
 

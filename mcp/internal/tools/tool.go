@@ -186,34 +186,38 @@ func putStatus(ctx context.Context, api *apiclient.Client, path string, body any
 }
 
 // postWithin is postStatus with a per-call deadline. A deadline is reported
-// as still running on the host. Only confirm uses it: for an image deploy or
-// rollback, an unknown entry, or a confirm without project_id and entry.
-// Other calls keep the default deadline and the generic API error.
-func postWithin(ctx context.Context, api *apiclient.Client, path string, body any, timeout time.Duration) (int, json.RawMessage, *mcp.CallToolResult) {
-	return callStatusWithin(ctx, api, http.MethodPost, path, nil, body, timeout)
-}
-
-func callStatusWithin(ctx context.Context, api *apiclient.Client, method, path string, query url.Values, body any, timeout time.Duration) (int, json.RawMessage, *mcp.CallToolResult) {
+// as deadline true with no result; the caller answers still running on the
+// host. Only confirm uses it: for an image deploy or rollback, an unknown
+// entry, or a confirm without project_id and entry. Other calls keep the
+// default deadline and the generic API error.
+func postWithin(ctx context.Context, api *apiclient.Client, path string, body any, timeout time.Duration) (status int, payload json.RawMessage, fail *mcp.CallToolResult, deadline bool) {
 	token, ok := auth.DelegatedFromContext(ctx)
 	if !ok {
-		return 0, nil, toolError("unauthorized", "missing bearer token")
+		return 0, nil, toolError("unauthorized", "missing bearer token"), false
 	}
-	status, payload, err := api.DoStatusWithin(ctx, timeout, token, method, path, query, body)
+	status, payload, err := api.DoStatusWithin(ctx, timeout, token, http.MethodPost, path, nil, body)
 	if err != nil {
 		if errors.Is(err, apiclient.ErrDeadline) {
-			return 0, nil, stillRunning()
+			return 0, nil, nil, true
 		}
 		var apiErr *apiclient.Error
 		if errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
 			auth.NoteRejected(ctx)
 		}
-		return 0, nil, fromAPI(err)
+		return 0, nil, fromAPI(err), false
 	}
-	return status, payload, nil
+	return status, payload, nil, false
 }
 
-func stillRunning() *mcp.CallToolResult {
-	return toolError("error", "still running on the host, check entry_status later")
+// stillRunning answers a deploy or rollback that outlived the call deadline
+// (spec-deploy-stuck §2.4). endsBy is the running row's ends_by (api-v1
+// v1.42 item 1), or "" when it is not known.
+func stillRunning(endsBy string) *mcp.CallToolResult {
+	msg := "still running on the host"
+	if t, err := time.Parse(time.RFC3339, endsBy); err == nil {
+		msg += ", ends by " + t.UTC().Format("15:04") + " UTC at the latest"
+	}
+	return toolError("error", msg+"; the entry's deploy history shows the outcome (deploy_entry for that host lists it)")
 }
 
 // actedOrPending reports a program status only for HTTP 200.
@@ -590,11 +594,15 @@ func projectHistoryRows(items []any) []any {
 		if !ok {
 			continue
 		}
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"digest":  publicString(stringField(row, "digest")),
 			"outcome": publicString(stringField(row, "outcome")),
 			"time":    publicString(stringField(row, "time")),
-		})
+		}
+		if endsBy := stringField(row, "ends_by"); endsBy != "" {
+			item["ends_by"] = publicString(endsBy)
+		}
+		out = append(out, item)
 	}
 	return out
 }

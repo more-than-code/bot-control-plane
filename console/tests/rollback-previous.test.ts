@@ -89,7 +89,8 @@ function row(id: string, outcome: ImageDeploy['outcome'], imageDigest: string | 
 		started_at: '2026-10-14T00:00:00Z',
 		finished_at: '2026-10-14T00:01:00Z',
 		by: USER.id,
-		via: 'console'
+		via: 'console',
+		ends_by: null
 	};
 }
 

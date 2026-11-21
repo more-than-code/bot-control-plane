@@ -279,7 +279,8 @@ test('an in-flight deploy shows a spinner, a label, and a timer', () => {
 		started_at: '2026-10-14T00:00:00Z',
 		finished_at: '2026-10-14T00:01:00Z',
 		by: USER.id,
-		via: 'console'
+		via: 'console',
+		ends_by: null
 	});
 	const rolling = render(CatalogDeployForm, {
 		props: {

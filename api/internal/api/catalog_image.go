@@ -35,15 +35,18 @@ const (
 	invalidAgentResult  = "invalid agent result"
 	settleTimeout       = 5 * time.Second
 	staleGraceSec       = 120
-	maxAgentLines       = 50
-	maxLogLines         = 2000
-	maxAgentLineChars   = 2048     // agent-protocol: each line cut to 2048 characters
-	maxAgentLineTotal   = 64 << 10 // and at most 64 KiB in all, counted the same way
-	maxStatusBytes      = 2048
-	secretRedactMin     = 6
-	redactedMarker      = "[REDACTED]"
-	secretLineMin       = 16
-	secretPieceMax      = 4096
+	// resultMarginSec is the API's wait past the deploy or rollback task
+	// budget (api-v1 v1.42 item 3).
+	resultMarginSec   = 30
+	maxAgentLines     = 50
+	maxLogLines       = 2000
+	maxAgentLineChars = 2048     // agent-protocol: each line cut to 2048 characters
+	maxAgentLineTotal = 64 << 10 // and at most 64 KiB in all, counted the same way
+	maxStatusBytes    = 2048
+	secretRedactMin   = 6
+	redactedMarker    = "[REDACTED]"
+	secretLineMin     = 16
+	secretPieceMax    = 4096
 )
 
 // reasonNetworkClosed is the refusal for a shared network the host does not
@@ -135,6 +138,21 @@ func (s *Server) handleCatalogDeploys(w http.ResponseWriter, r *http.Request) {
 	}
 	if items == nil {
 		items = []store.ImageDeploy{}
+	}
+	// A running operation comes first (api-v1 v1.42 item 1). A row whose
+	// deadline has passed is no longer running: the next begin records it
+	// as timeout.
+	running, err := s.Store.RunningImageOp(r.Context(), entry.ID, hostID)
+	switch {
+	case err == nil && running.InFlightUntil.After(s.now()):
+		until := running.InFlightUntil.UTC()
+		running.Outcome = "in_flight"
+		running.FinishedAt = nil
+		running.EndsBy = &until
+		items = append([]store.ImageDeploy{running}, items...)
+	case err != nil && !errors.Is(err, store.ErrNotFound):
+		s.fail(w, err)
+		return
 	}
 	img, err := catalog.ParseStored(entry.ImageRaw)
 	if err != nil {
@@ -397,7 +415,7 @@ func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principa
 		}
 	}
 	if entry.SpecHash != c.SpecHash {
-		writeCode(w, "conflict", "conflict")
+		s.planChanged(w, p.User.ID, c.IdempotencyKey)
 		return
 	}
 	if !s.confirmEnvRefsOK(w, r, p, c, host, entry, img) {
@@ -426,15 +444,29 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 	if s.imageBudget > 0 {
 		timeout = s.imageBudget
 	}
-	ctx, cancel := imageCtx(r, action, timeout)
+	// The API waits past the agent's budget, so the agent's own outcome is
+	// recorded rather than a blind timeout (api-v1 v1.42 item 3).
+	wait := timeout + s.resultMargin(action)
+	ctx, cancel := imageCtx(r, action, wait)
 	defer cancel()
 	mutate := action == "deploy" || action == "rollback" || action == "remove"
 	var opID uuid.UUID
 	hold := false
 	if mutate {
 		at := s.now()
-		until := at.Add(time.Duration(timeout+staleGraceSec) * time.Second)
+		until := at.Add(time.Duration(wait+staleGraceSec) * time.Second)
 		row, err := s.Store.BeginImageOp(ctx, entry.ID, host.ID, entry.SpecHash, p.User.ID, viaKind(p.Session.Kind), at, until)
+		var running *store.ImageOpRunning
+		if errors.As(err, &running) {
+			s.imageRunning(w, p.User.ID, key, entry.Name, host.Name, running)
+			return
+		}
+		if errors.Is(err, store.ErrConflict) {
+			// A begin lost the race and the winner could not be named.
+			s.releaseKey(p.User.ID, key)
+			writeCode(w, "conflict", fmt.Sprintf(msgJustStarted, entry.Name, host.Name))
+			return
+		}
 		if err != nil {
 			s.imageFail(ctx, w, p.User.ID, key, err, nil)
 			return
@@ -1469,6 +1501,37 @@ func containersReady(host store.Host) bool {
 	return host.Programs != nil && host.Programs.Images && host.Programs.Docker
 }
 
+// resultMargin is how long past the task budget the API waits for a
+// deploy or rollback result (api-v1 v1.42 item 3). Other actions get none.
+func (s *Server) resultMargin(action string) int {
+	if action != "deploy" && action != "rollback" {
+		return 0
+	}
+	if s.imageBudget > 0 {
+		return s.imageMargin
+	}
+	return resultMarginSec
+}
+
+// imageRunning answers a begin refused because another deploy, rollback or
+// remove holds the entry on that host (api-v1 v1.42 item 2). The names are
+// the caller's own entry and host; no value enters the message. Nothing
+// started, so the answer is not stored: the key is released and a retry with
+// it after the operation ended runs. On a confirm the key held the 202 plan,
+// whose confirmation is now used; releasing it lets that key plan again.
+func (s *Server) imageRunning(w http.ResponseWriter, userID uuid.UUID, key, entryName, hostName string, running *store.ImageOpRunning) {
+	started := running.StartedAt.UTC()
+	until := running.Until.UTC()
+	msg := fmt.Sprintf("A deploy, rollback or remove of %s on %s has been running since %s UTC. Try again after %s UTC.",
+		entryName, hostName, started.Format("15:04"), until.Format("15:04"))
+	body := envelopeRaw("conflict", msg, map[string]string{
+		"started_at": started.Format(time.RFC3339),
+		"ends_by":    until.Format(time.RFC3339),
+	})
+	s.releaseKey(userID, key)
+	writeJSON(w, statusFor("conflict"), body)
+}
+
 func imageTimeout(action string, img catalog.Image) int {
 	switch action {
 	case "deploy":
@@ -2100,6 +2163,19 @@ func (s *Server) settle(fn func(context.Context) error) error {
 		}
 	}
 	return err
+}
+
+// releaseKey drops the key's claim or stored answer so the next request
+// with it runs as new (api-v1 v1.42 item 2).
+func (s *Server) releaseKey(userID uuid.UUID, key string) {
+	if key == "" {
+		return
+	}
+	if err := s.settle(func(ctx context.Context) error {
+		return s.Store.ReleaseIdempotency(ctx, userID, key)
+	}); err != nil {
+		s.logErr(err)
+	}
 }
 
 func (s *Server) finishImageKey(userID uuid.UUID, key string, status int, body []byte) {

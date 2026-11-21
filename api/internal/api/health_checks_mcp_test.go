@@ -356,7 +356,7 @@ func TestDelegatedHealthIdempotency(t *testing.T) {
 		t.Fatalf("replay id %s want %s", got, id)
 	}
 	status, env = w.do(tok, http.MethodPut, path, `{"checks":[{"protocol":"http","port":8080,"path":"/ready"}],"idempotency_key":"same-key"}`)
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgKeyReused)
 	if len(storedChecks(t, w, sc.svc.ID)) != 0 {
 		t.Fatal("conflicting replay replaced checks")
 	}
@@ -608,7 +608,7 @@ func TestDelegatedHealthKeyPerService(t *testing.T) {
 	status, env := w.do(tok, http.MethodPut, healthPath(sc.svc.ID), body)
 	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
 	status, env = w.do(tok, http.MethodPut, healthPath(swag.ID), body)
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgKeyReused)
 	if len(storedChecks(t, w, sc.svc.ID)) != 0 || len(storedChecks(t, w, swag.ID)) != 0 {
 		t.Fatal("conflict replaced checks")
 	}
@@ -623,7 +623,7 @@ func TestDelegatedHealthKeyBindsInterval(t *testing.T) {
 	status, env := w.do(tok, http.MethodPut, path, `{"checks":[{"protocol":"http","port":8080,"path":"/health","interval_sec":60}],"idempotency_key":"iv-1"}`)
 	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
 	status, env = w.do(tok, http.MethodPut, path, `{"checks":[{"protocol":"http","port":8080,"path":"/health","interval_sec":90}],"idempotency_key":"iv-1"}`)
-	mustHTTP(t, status, env, http.StatusConflict, "conflict", "conflict")
+	mustHTTP(t, status, env, http.StatusConflict, "conflict", msgKeyReused)
 	if len(storedChecks(t, w, sc.svc.ID)) != 0 {
 		t.Fatal("interval conflict replaced checks")
 	}
