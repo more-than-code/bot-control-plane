@@ -2,6 +2,8 @@
 	import { goto } from '$app/navigation';
 	import Bell from '@lucide/svelte/icons/bell';
 	import { onMount, untrack } from 'svelte';
+	import { toast } from 'svelte-sonner';
+	import { browserProblemAlerts } from '$lib/problem-alerts';
 	import NotificationsList from '$lib/components/NotificationsList.svelte';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
@@ -22,7 +24,8 @@
 	/**
 	 * The header bell (spec-header-org-project-bell §3.2). It reads the console route after the page has loaded, again
 	 * whenever the popover opens, and every 2 minutes while the tab is visible and the popover is closed
-	 * (spec-bell-problems §3.3), so no page load waits on it. Opening marks nothing read. The dot is red while an unread open problem needs action. The
+	 * (spec-bell-problems §3.3), so no page load waits on it. A problem that newly needs action is alerted once, and with
+	 * desktop notifications on a hidden tab may read every 60 s (spec-console-live-updates §0). Opening marks nothing read. The dot is red while an unread open problem needs action. The
 	 * behaviour is `$lib/notifications-bell.ts`; this component only holds its state.
 	 */
 	let {
@@ -33,11 +36,28 @@
 	} = $props();
 
 	let bell = $state<BellState>(untrack(() => initialBellState(initial)));
+	let open = $state(false);
+	// New problems that need action: a toast, or a desktop notification while every tab is hidden ($lib/problem-alerts).
+	const alerts = browserProblemAlerts({
+		toast,
+		// View and a notification click: the same path as a row click (mark read, go, refresh).
+		openProblem: (key, href) => controller.openKey(key, href),
+		goto: (href) => goto(href),
+		openBell: () => {
+			open = true;
+			void controller.openChanged(true);
+		}
+	});
 	const controller = createBell(
-		{ fetch: (input, init) => fetch(input, init), goto: (href) => goto(href), update: (next) => (bell = next) },
+		{
+			fetch: (input, init) => fetch(input, init),
+			goto: (href) => goto(href),
+			update: (next) => (bell = next),
+			onLoaded: (previous, next, first) => void alerts.onLoaded(previous, next, first),
+			onSignedOut: () => alerts.onSignedOut()
+		},
 		untrack(() => bell)
 	);
-	let open = $state(false);
 	let titleEl = $state<HTMLElement | null>(null);
 
 	/** Mark all read disables itself when nothing is left unread; keep focus in the popover on the title then. */
@@ -52,7 +72,13 @@
 
 	onMount(() => {
 		void controller.start();
-		return controller.poll(browserPoll(() => open));
+		const stopPoll = controller.poll(browserPoll(() => open, undefined, alerts.hiddenPoll));
+		const stopSeen = alerts.watchSeen();
+		return () => {
+			stopPoll();
+			stopSeen();
+			alerts.dispose();
+		};
 	});
 </script>
 

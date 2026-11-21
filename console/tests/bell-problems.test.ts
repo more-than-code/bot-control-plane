@@ -208,7 +208,7 @@ describe('bell polling', () => {
 	test('the component polls through browserPoll with its open state', () => {
 		// onMount does not run in a server render; this one line is the wiring the tests above cover.
 		const source = readFileSync(new URL('../src/lib/components/NotificationsBell.svelte', import.meta.url), 'utf8');
-		assert.match(source, /return controller\.poll\(browserPoll\(\(\) => open\)\);/);
+		assert.match(source, /controller\.poll\(browserPoll\(\(\) => open,/);
 	});
 });
 

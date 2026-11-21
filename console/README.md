@@ -50,6 +50,11 @@ In development, run `pnpm dev` on port 5180 against a running API (`go run ./cmd
 
 Success confirmations for an image save, a health-check save and Add member show as a toast at the bottom of the window (the shadcn-svelte Toaster, bottom-center, app pages only); errors stay inline.
 
+Problem alerts (umbrella `docs/spec-console-live-updates.md` §0; details in `docs/design.md`, "Problem alerts and desktop notifications"):
+
+- A problem that newly needs action gets one toast from the same toaster: its title, "View" and "Dismiss"; it stays until dismissed. None on the first bell read after a page load, none for a key already alerted in the tab (so a reload replays nothing), and a problem that stops needing action is forgotten, so a recurrence alerts again. More than 3 at once give one "N new problems need action" with "Open the bell".
+- Desktop notifications (account menu, off by default; the browser asks permission only when you turn it on; "Blocked in this browser's settings" when it was denied): while every console tab is hidden, a new problem is one system notification across tabs instead of a toast; clicking it focuses the tab and opens the problem's page. Only then does one hidden tab read the bell, every 60 s. Signing out, or a session that expired, turns it off and forgets the tab's alert keys.
+
 | Path | Behavior |
 |------|----------|
 | `/` | 303 redirect to `/projects`. On deploybot.dev `/` is the homepage instead: Caddy rewrites it to `/about` and the `reroute` hook in `src/hooks.ts` does the same in the browser; `/about` there is a 301 to `/` (umbrella `docs/spec-seo-site.md`). |

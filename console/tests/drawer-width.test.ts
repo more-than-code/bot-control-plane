@@ -176,7 +176,7 @@ describe('resizable drawers', () => {
 		assert.ok(close !== -1 && after > close && after < sheet.indexOf('</SheetPrimitive.Content>'), 'after renders last inside the content');
 	});
 
-	test('only the drawer width file uses localStorage', () => {
+	test('only the drawer width file (and the desktop notifications switch) uses localStorage', () => {
 		const users: string[] = [];
 		function walk(dir: string) {
 			for (const name of readdirSync(dir)) {
@@ -186,8 +186,8 @@ describe('resizable drawers', () => {
 			}
 		}
 		walk(resolve(root, 'src'));
-		assert.deepEqual(users, [resolve(root, 'src/lib/drawer-width.ts')]);
+		assert.deepEqual(users.sort(), [resolve(root, 'src/lib/desktop-notify.ts'), resolve(root, 'src/lib/drawer-width.ts')]);
 		const auth = readFileSync(resolve(root, 'tests/auth-session.test.ts'), 'utf8');
-		assert.match(auth, /if \(!file\.endsWith\(resolve\(root, 'src\/lib\/drawer-width\.ts'\)\)\) assert\.equal\(text\.includes\('localStorage'\), false, file\);/);
+		assert.match(auth, /if \(!file\.endsWith\(resolve\(root, 'src\/lib\/drawer-width\.ts'\)\) && !file\.endsWith\(resolve\(root, 'src\/lib\/desktop-notify\.ts'\)\)\) \{\s*assert\.equal\(text\.includes\('localStorage'\), false, file\);/);
 	});
 });

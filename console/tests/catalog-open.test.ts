@@ -393,7 +393,7 @@ describe('collapsible entries', () => {
 		assert.deepEqual([...store.keys()], ['other']);
 		assert.equal(clearOpenStorage(null), 0);
 		const layout = readFileSync(new URL('../src/routes/+layout.svelte', import.meta.url), 'utf8');
-		assert.match(layout, /action="\/signout"[^>]*onsubmit=\{\(\) => clearOpenStorage\(visitStorage\(\)\)\}/);
+		assert.match(layout, /action="\/signout"[^>]*onsubmit=\{\(\) => \{\s*clearOpenStorage\(visitStorage\(\)\);/);
 	});
 });
 

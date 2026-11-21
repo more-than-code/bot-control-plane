@@ -11,12 +11,16 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import HeaderNav from '$lib/components/HeaderNav.svelte';
+	import DesktopNotifySwitch from '$lib/components/DesktopNotifySwitch.svelte';
+	import { browserPrefs } from '$lib/desktop-notify';
+	import { signOutCleanup } from '$lib/problem-alerts';
 	import NotificationsBell from '$lib/components/NotificationsBell.svelte';
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
 	import { avatarInitial } from '$lib/avatar';
 	import { browserTimeZone, provideTimeZone, rememberTimeZone } from '$lib/time-zone';
 	import { cn } from '$lib/utils';
 	import { SITE_URL } from '$lib/site/links';
+	import { referrerPolicyFor } from '$lib/referrer-policy';
 	import '../app.css';
 
 	let { children, data } = $props();
@@ -40,6 +44,11 @@
 		rememberTimeZone(local);
 	});
 
+	// The header's Referrer-Policy holds only for the document the server sent; a client-side navigation keeps it.
+	// This meta follows the route, so a project page reached from a `no-referrer` page still posts its Connect
+	// GitHub form with a real Origin ($lib/referrer-policy).
+	const referrerPolicy = $derived(referrerPolicyFor(page.url.pathname));
+
 	// The public site pages ((site) group) bring their own layout, not the app shell.
 	const sitePage = $derived(page.route.id?.startsWith('/(site)') ?? false);
 	// Same link style as the sign-in line and the public site footer.
@@ -50,6 +59,10 @@
 		page.route.id === '/hosts/[id]' ? ((page.data as { org?: { id?: string } | null }).org?.id ?? null) : null
 	);
 </script>
+
+<svelte:head>
+	<meta name="referrer" content={referrerPolicy} />
+</svelte:head>
 
 {#if sitePage}
 	{@render children()}
@@ -122,10 +135,14 @@
 										{/snippet}
 									</DropdownMenu.Item>
 								{/if}
+								<DesktopNotifySwitch />
 							</DropdownMenu.Content>
 						</DropdownMenu.Root>
-						<!-- Signing out also forgets which catalog entries were open in this tab. -->
-						<form class="shrink-0" method="POST" action="/signout" use:enhance onsubmit={() => clearOpenStorage(visitStorage())}>
+						<!-- Signing out also forgets which catalog entries were open in this tab, its alert keys and the desktop notifications choice. -->
+						<form class="shrink-0" method="POST" action="/signout" use:enhance onsubmit={() => {
+								clearOpenStorage(visitStorage());
+								signOutCleanup(visitStorage(), browserPrefs());
+							}}>
 							<Button type="submit" variant="outline" size="sm"><LogOut class="size-4" />Sign out</Button>
 						</form>
 					</div>
@@ -146,6 +163,6 @@
 			</nav>
 		</footer>
 	</div>
-	<!-- Success confirmations only. Errors stay inline next to what failed. -->
+	<!-- Success confirmations and problem alerts (spec-console-live-updates §0). Form errors stay inline next to what failed. -->
 	<Toaster position="bottom-center" />
 {/if}
