@@ -47,6 +47,9 @@ func clonePrograms(p *store.HostPrograms) *store.HostPrograms {
 		cp.Projects = append([]string{}, p.Projects...)
 	}
 	cp.SharedNetworks = store.CloneSharedNetworks(p.SharedNetworks)
+	if p.HostFiles != nil {
+		cp.HostFiles = append([]store.HostFile{}, p.HostFiles...)
+	}
 	if p.Edge != nil {
 		edge := *p.Edge
 		cp.Edge = &edge

@@ -101,3 +101,17 @@ func dotenvValue(n int, key, value string) error {
 func isSpace(b byte) bool {
 	return b == ' ' || b == '\t'
 }
+
+// ValidEnvKey is the env key rule, shared with host secret file keys
+// (api-v1 v1.44 item 5).
+func ValidEnvKey(key string) bool { return envKeyRe.MatchString(key) }
+
+// MaxEnvValue is the longest env value, in bytes.
+const MaxEnvValue = maxEnvValue
+
+// ValidLineValue is a one-line env value: valid UTF-8, no NUL, no line
+// break, at most MaxEnvValue bytes (host secret file values, api-v1 v1.44
+// item 5).
+func ValidLineValue(value string) bool {
+	return len(value) <= maxEnvValue && utf8.ValidString(value) && !strings.ContainsAny(value, "\x00\r\n")
+}

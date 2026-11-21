@@ -284,6 +284,9 @@ func (h *Hub) dispatch(ac *agentConn, f frame) error {
 		return nil
 	case "auto_action":
 		return h.onAutoAction(ac, f)
+	case "host_files_status":
+		h.onHostFilesStatus(ac, f)
+		return nil
 	default:
 		h.log.Info("ignored agent frame", "type", f.Type)
 		return nil
@@ -347,6 +350,10 @@ func parsePrograms(raw json.RawMessage) (*store.HostPrograms, bool) {
 		}
 	}
 	if !validSharedNetworks(p.SharedNetworks) {
+		return nil, false
+	}
+	// agent-protocol v1.18 item 3.
+	if !validHostFiles(p.HostFiles) {
 		return nil, false
 	}
 	// agent-protocol v1.15 item 2: the pinned Caddy image, by digest.

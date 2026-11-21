@@ -533,6 +533,7 @@ type Store interface {
 	EdgeStore
 	NotificationStore
 	ProblemStore
+	HostFileStore
 	// ListOpenRequests is the user's pending, unexpired value, file and
 	// connect requests at at, newest first, at most max (api-v1 v1.33 item
 	// 8), in projects that are not deleted.

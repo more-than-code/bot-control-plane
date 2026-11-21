@@ -21,6 +21,7 @@
 		typeToConfirm = null,
 		typed = $bindable(''),
 		onSettled,
+		onSubmitting,
 		cancel
 	}: {
 		id: string;
@@ -34,6 +35,8 @@
 		typed?: string;
 		/** `form` is what was submitted, read before the reload changes the props. */
 		onSettled?: (resultType: string, form: FormData) => void | Promise<void>;
+		/** True while the post runs, then false (also when it fails), for a progress note outside the dialog. */
+		onSubmitting?: (active: boolean) => void;
 		cancel?: Snippet;
 	} = $props();
 
@@ -45,9 +48,14 @@
 	{action}
 	{id}
 	use:enhance={({ formData }) => {
+		onSubmitting?.(true);
 		return async ({ result, update }) => {
-			await update();
-			await onSettled?.(result.type, formData);
+			try {
+				await update();
+				await onSettled?.(result.type, formData);
+			} finally {
+				onSubmitting?.(false);
+			}
 		};
 	}}
 >

@@ -97,6 +97,9 @@ type Mem struct {
 	notificationReads map[uuid.UUID]map[string]time.Time
 	// problems is id → problem (api-v1 v1.41); see problems.go.
 	problems map[uuid.UUID]store.Problem
+	// hostFiles is host config file versions, applies and status (api-v1
+	// v1.44); see host_files.go.
+	hostFiles hostFileData
 }
 
 type sessionRec struct {

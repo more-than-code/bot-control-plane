@@ -294,11 +294,14 @@ func TestOrgsMigration(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	t.Cleanup(func() {
-		// Leave the database migrated for the next test.
+		// Leave the database migrated for the next test, at the newest schema.
 		cctx, ccancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer ccancel()
 		if onTestDatabase(cctx, d) {
-			_ = Migrate(cctx, url)
+			if err := Migrate(cctx, url); err != nil {
+				t.Errorf("migrate after the test: %v", err)
+			}
+			assertNewestProblemsSchema(t, cctx, d)
 		}
 	})
 	// 0016 dropped what the down script needs: start from phase 1.
@@ -661,7 +664,10 @@ func TestOrgsMigrationProductionShape(t *testing.T) {
 		cctx, ccancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer ccancel()
 		if onTestDatabase(cctx, d) {
-			_ = Migrate(cctx, url)
+			if err := Migrate(cctx, url); err != nil {
+				t.Errorf("migrate after the test: %v", err)
+			}
+			assertNewestProblemsSchema(t, cctx, d)
 		}
 	})
 	restorePhase1Schema(t, ctx, url)

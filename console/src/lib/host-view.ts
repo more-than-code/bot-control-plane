@@ -1,11 +1,12 @@
 import type { Host, HostAccess, HostEdge, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
+import type { HostFilesTab } from './host-files';
 import { isCatalogHost } from './catalog';
 import { parseRange, type RangeKey } from './ranges';
 import type { Column } from './table';
 
 export const METRIC_REFRESH_MS = 30_000;
 
-export const HOST_TABS = ['overview', 'processes'] as const;
+export const HOST_TABS = ['overview', 'processes', 'files'] as const;
 export type HostTab = (typeof HOST_TABS)[number];
 
 export type ProcessSort = 'cpu' | 'memory';
@@ -132,10 +133,12 @@ export type HostPage = {
 	edge?: HostEdge | null;
 	/** The edge read failed. */
 	edgeMessage?: string | null;
+	/** The Config files tab (api-v1 v1.44), read only on `tab=files`. */
+	files?: HostFilesTab | null;
 };
 
 export function parseHostTab(value: string | null): HostTab {
-	if (value === 'processes') return value;
+	if (value === 'processes' || value === 'files') return value;
 	return 'overview';
 }
 

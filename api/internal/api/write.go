@@ -71,9 +71,9 @@ func statusFor(code string) int {
 		return http.StatusNotFound
 	case "gone":
 		return http.StatusGone
-	case "conflict":
+	case "conflict", "worker_busy", "unsupported_agent":
 		return http.StatusConflict
-	case "unavailable":
+	case "unavailable", "host_offline":
 		return http.StatusServiceUnavailable
 	case "timeout":
 		return http.StatusGatewayTimeout

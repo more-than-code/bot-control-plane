@@ -30,6 +30,8 @@ type frame struct {
 	State            string          `json:"state"`
 	ErrorCode        json.RawMessage `json:"error_code"`
 	Payload          json.RawMessage `json:"payload"`
+	// Files is the host_files_status list (agent-protocol v1.18 item 5).
+	Files json.RawMessage `json:"files"`
 	// Raw is the whole frame, for handlers that decode a strict shape.
 	Raw []byte `json:"-"`
 }

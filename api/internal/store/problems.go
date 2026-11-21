@@ -15,6 +15,8 @@ const (
 	ProblemHostOffline   = "host_offline"
 	ProblemRegistryLogin = "registry_login"
 	ProblemDeploy        = "deploy"
+	// ProblemHostFile is a host config file (api-v1 v1.44 item 8).
+	ProblemHostFile = "host_file"
 )
 
 // Problem levels.
@@ -95,7 +97,7 @@ type RegistryLogin struct {
 // title of 1 to 300 and a detail of at most 300.
 func ValidProblemOpen(in ProblemOpen) bool {
 	switch in.Kind {
-	case ProblemHostOffline, ProblemRegistryLogin, ProblemDeploy:
+	case ProblemHostOffline, ProblemRegistryLogin, ProblemDeploy, ProblemHostFile:
 	default:
 		return false
 	}

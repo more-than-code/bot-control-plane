@@ -22,6 +22,7 @@ import {
 } from '$lib/server/shape';
 import { isUuid } from '$lib/server/validate';
 import { setEdge } from '$lib/server/edge-actions';
+import { applyHostFile, loadHostFiles, saveHostFile, saveSecretHostFile } from '$lib/server/host-files';
 import { parseHostEdge } from '$lib/server/edge-shape';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
@@ -166,6 +167,25 @@ async function loadProcesses(event: RequestEvent, host: Host, range: RangeKey, p
 	};
 }
 
+/** Config files (api-v1 v1.44): the list for anyone who sees the host; content, keys and actions for org owners and admins. */
+async function loadFiles(event: LoadEvent, host: Host, range: RangeKey, processSort: ProcessSort, accessLoad: Promise<AccessData>): Promise<HostPage> {
+	const canEdit = isOrgAdmin(event.locals.orgs, host.org_id);
+	const [files, access] = await Promise.all([loadHostFiles(event, host, canEdit), accessLoad]);
+	return {
+		host,
+		tab: 'files',
+		range,
+		processSort,
+		message: null,
+		serviceLinks: {},
+		metrics: [],
+		processes: null,
+		processesMessage: null,
+		files,
+		...access
+	};
+}
+
 /**
  * The host's org (for the breadcrumb) and, for org owners and admins, the Access section: the host's access
  * rows and the org's projects, read together. A failure stays in the section and does not replace the page.
@@ -225,6 +245,7 @@ export const load: PageServerLoad = async (event) => {
 		// The access reads run alongside the tab's own reads.
 		const access = loadAccess(event, host);
 		if (query.tab === 'processes') return present(event, await loadProcesses(event, host, query.range, query.processSort, access));
+		if (query.tab === 'files') return present(event, await loadFiles(event, host, query.range, query.processSort, access));
 		return present(event, await loadOverview(event, host, query.range, query.processSort, access));
 	} catch (err) {
 		const failure = loadFailure(err);
@@ -236,6 +257,9 @@ export const actions: Actions = {
 	setAccess: setAccessAction('access'),
 	removeAccess: removeAccessAction('access'),
 	setEdge,
+	saveFile: saveHostFile,
+	saveSecretFile: saveSecretHostFile,
+	applyFile: applyHostFile,
 	snapshot: async (event) => {
 		requireUser(event);
 		const id = hostId(event.params);

@@ -54,6 +54,11 @@ type HostPrograms struct {
 	// item 2). Nil when the agent did not send it (agents < 0.2.11): the
 	// edge is then not available.
 	Edge *HostEdgePolicy `json:"edge,omitempty"`
+	// HostFiles is hello.programs.host_files (api-v1 v1.44, agent-protocol
+	// v1.18 item 3). Nil when the agent did not send it (agents before
+	// v1.18): host file applies are then unsupported. The API never puts it
+	// on a Host answer; the files route lists it.
+	HostFiles []HostFile `json:"host_files,omitzero"`
 }
 
 // HostEdgePolicy is the runner.toml edge switch and the Caddy image digest

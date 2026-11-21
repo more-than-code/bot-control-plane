@@ -723,8 +723,8 @@ export type NotificationKind = 'release' | 'host_update' | 'problem';
 /** A problem's level (api-v1 v1.41 item 1). */
 export type ProblemLevel = 'needs_action' | 'heads_up';
 
-/** A problem's kind (api-v1 v1.41 item 1). */
-export type ProblemKind = 'host_offline' | 'registry_login' | 'deploy';
+/** A problem's kind (api-v1 v1.41 item 1; `host_file` since v1.44 item 8). */
+export type ProblemKind = 'host_offline' | 'registry_login' | 'deploy' | 'host_file';
 
 export type Notification = {
 	key: string;

@@ -59,6 +59,11 @@ func TestRouteTable(t *testing.T) {
 		"DELETE /v1/orgs/{id}/join-tokens/{token_id}",
 		"GET /v1/orgs/{id}/audit",
 		"GET /v1/orgs/{id}/problems",
+		"GET /v1/orgs/{id}/hosts/{host_id}/files",
+		"GET /v1/orgs/{id}/hosts/{host_id}/files/{name}",
+		"GET /v1/orgs/{id}/hosts/{host_id}/files/{name}/versions/{v}",
+		"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}",
+		"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply",
 		"GET /v1/orgs/{id}/domains",
 		"POST /v1/orgs/{id}/domains",
 		"POST /v1/orgs/{id}/domains/{domain_id}/verify",
@@ -287,7 +292,7 @@ func callsAuthorize(body *ast.BlockStmt) bool {
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
-		if ok && (sel.Sel.Name == "Authorize" || sel.Sel.Name == "AuthorizeHost" || sel.Sel.Name == "AuthorizeAccessRemove" || sel.Sel.Name == "gateHost" || sel.Sel.Name == "orgGate" || sel.Sel.Name == "projectOrgAdmin" || sel.Sel.Name == "fileProject") {
+		if ok && (sel.Sel.Name == "Authorize" || sel.Sel.Name == "AuthorizeHost" || sel.Sel.Name == "AuthorizeAccessRemove" || sel.Sel.Name == "gateHost" || sel.Sel.Name == "orgGate" || sel.Sel.Name == "projectOrgAdmin" || sel.Sel.Name == "fileProject" || sel.Sel.Name == "hostFileGate") {
 			found = true
 		}
 		// loadOwnRequest (requests.go) calls authz.Authorize for every request handler.

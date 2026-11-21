@@ -17,21 +17,50 @@ import (
 
 const problemsMigration = "0027_problems.sql"
 
-// dropProblemsSchema runs the 0027 down script on conn (already
-// deploybot_owner), which drops app.problems with its rows, then forgets
-// 0027 so Migrate applies it again. The 0015 down script drops app.orgs,
-// which app.problems references.
+// dropProblemsSchema takes app.problems down on conn (already
+// deploybot_owner) and forgets every migration that built it, so Migrate
+// rebuilds it as the newest migration defines it: first 0029 (it widens
+// the problems kind check and adds the host file objects), then 0027.
+// Forgetting only 0027 would re-create the table with the 0027 check while
+// 0029 stays recorded. A database without app.problems (already taken
+// down, both rows forgotten) is left as it is.
 func dropProblemsSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 	t.Helper()
-	body, err := migrations.FS.ReadFile("0027_problems.down.sql")
-	if err != nil {
+	var n int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'app' AND table_name = 'problems'`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conn.PgConn().Exec(ctx, string(body)).ReadAll(); err != nil {
-		t.Fatalf("0027 down: %v", err)
+	if n == 0 {
+		return
 	}
-	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+problemsMigration+`'`); err != nil {
-		t.Fatal(err)
+	for _, m := range []struct{ down, up string }{
+		{"0029_host_files.down.sql", hostFilesMigration},
+		{"0027_problems.down.sql", problemsMigration},
+	} {
+		body, err := migrations.FS.ReadFile(m.down)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := conn.PgConn().Exec(ctx, string(body)).ReadAll(); err != nil {
+			t.Fatalf("%s: %v", m.down, err)
+		}
+		if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+m.up+`'`); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// assertNewestProblemsSchema fails when the live problems kind check is not
+// the one the newest migration defines (it must allow host_file, 0029).
+func assertNewestProblemsSchema(t *testing.T, ctx context.Context, d *DB) {
+	t.Helper()
+	var def string
+	if err := d.pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'problems_kind_chk'`).Scan(&def); err != nil {
+		t.Errorf("problems_kind_chk: %v", err)
+		return
+	}
+	if !strings.Contains(def, "'host_file'") {
+		t.Errorf("problems_kind_chk is not the newest definition: %s", def)
 	}
 }
 

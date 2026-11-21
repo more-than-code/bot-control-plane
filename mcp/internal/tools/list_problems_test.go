@@ -27,3 +27,13 @@ func TestSummarizeProblems(t *testing.T) {
 		t.Fatalf("empty %q", got)
 	}
 }
+
+// api-v1 v1.44: a host_file problem names the console tab; no file content goes over MCP.
+func TestSummarizeHostFileProblem(t *testing.T) {
+	payload, _ := json.Marshal(map[string]any{"items": []any{
+		map[string]any{"kind": "host_file", "level": "needs_action", "title": "dd-policy on pi1 could not be restored", "opened_at": "2026-11-22T08:00:00Z", "resolved_at": nil},
+	}})
+	if text := summarizeProblems(payload); !strings.Contains(text, "dd-policy on pi1 could not be restored since 2026-11-22 08:00 UTC (needs_action) — an organization owner or admin opens the host's Config files tab") {
+		t.Fatalf("summary %q", text)
+	}
+}

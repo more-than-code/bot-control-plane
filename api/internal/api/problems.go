@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -179,6 +180,7 @@ func (s *Server) SweepProblems(ctx context.Context) {
 	}
 	s.sweepHosts(ctx, now)
 	s.sweepDeploys(ctx)
+	s.sweepHostFiles(ctx, now)
 }
 
 // hourlyProblems is the hourly work, within problemsHourlyDeadline.
@@ -601,7 +603,7 @@ func (r *problemReader) list(ctx context.Context, since *time.Time) ([]store.Pro
 // owners and admins (org owners and admins are project admins); deploy for
 // those plus anyone holding the entry's deploy action.
 func (r *problemReader) sees(ctx context.Context, p store.Problem) (bool, error) {
-	if p.Kind == store.ProblemHostOffline {
+	if p.Kind == store.ProblemHostOffline || p.Kind == store.ProblemHostFile {
 		return r.adminOrgs[p.OrgID], nil
 	}
 	if p.ProjectID == nil {
@@ -634,6 +636,9 @@ func (r *problemReader) sees(ctx context.Context, p store.Problem) (bool, error)
 // href is the console page that fixes the problem.
 func (r *problemReader) href(ctx context.Context, p store.Problem) string {
 	switch {
+	case p.Kind == store.ProblemHostFile && p.HostID != nil:
+		_, name, _ := strings.Cut(p.Subject, ":")
+		return hostFileHref(*p.HostID, name)
 	case p.Kind == store.ProblemHostOffline && p.HostID != nil:
 		return "/hosts/" + p.HostID.String()
 	case p.ProjectID == nil:

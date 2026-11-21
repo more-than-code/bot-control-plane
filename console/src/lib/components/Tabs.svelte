@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Cpu from '@lucide/svelte/icons/cpu';
+	import FileCog from '@lucide/svelte/icons/file-cog';
 	import FolderKanban from '@lucide/svelte/icons/folder-kanban';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Library from '@lucide/svelte/icons/library';
@@ -24,6 +25,7 @@
 		Hosts: Server,
 		'Catalog & services': Library,
 		Processes: Cpu,
+		'Config files': FileCog,
 		Members: Users,
 		'Join tokens': KeyRound,
 		Settings: SettingsIcon

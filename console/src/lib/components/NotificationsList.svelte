@@ -1,4 +1,5 @@
 <script lang="ts">
+	import FileWarning from '@lucide/svelte/icons/file-warning';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import ServerCog from '@lucide/svelte/icons/server-cog';
@@ -13,7 +14,7 @@
 	/**
 	 * The bell popover's rows (spec-header-org-project-bell §3.2) in the API's order: open problems first, then the
 	 * rest newest first. A problem row (api-v1 v1.41) has an icon by what broke (host from its href, registry login,
-	 * deploy), its age ("open 25 min", "resolved 3 h ago"), and is muted once resolved.
+	 * deploy, a host config file since v1.44), its age ("open 25 min", "resolved 3 h ago"), and is muted once resolved.
 	 */
 	let {
 		items,
@@ -30,7 +31,7 @@
 
 	const zones = timeZoneSource();
 
-	const PROBLEM_ICONS = { host_offline: ServerOff, registry_login: KeyRound, deploy: RotateCcw };
+	const PROBLEM_ICONS = { host_offline: ServerOff, registry_login: KeyRound, deploy: RotateCcw, host_file: FileWarning };
 
 	function iconOf(item: Notification) {
 		const problem = problemKindOf(item);

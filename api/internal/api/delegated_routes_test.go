@@ -70,6 +70,8 @@ var delegatedDenyPatterns = []string{
 	"DELETE /v1/orgs/{id}/domains/{domain_id}",
 	"PUT /v1/hosts/{id}/edge",
 	"POST /v1/me/notifications/read",
+	"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}",
+	"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply",
 }
 
 var delegatedAllowPatterns = []string{
@@ -292,6 +294,12 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 				t.Fatal(err)
 			}
 			return fmt.Sprint(reads)
+		}},
+		{"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}", http.MethodPut, org + "/hosts/" + host + "/files/dd-policy", `{"content":"x"}`, func(t *testing.T) string {
+			return hostFileSnap(t, w, sc.host.ID)
+		}},
+		{"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply", http.MethodPost, org + "/hosts/" + host + "/files/dd-policy/apply", `{"version":1}`, func(t *testing.T) string {
+			return hostFileSnap(t, w, sc.host.ID)
 		}},
 	}
 	if len(cases) != len(delegatedDenyPatterns) {
@@ -759,4 +767,14 @@ func fileSnap(t *testing.T, w *world, projectID uuid.UUID) string {
 	}
 	raw, _ := json.Marshal(items)
 	return string(raw)
+}
+
+// hostFileSnap is the host's saved versions and applies (api-v1 v1.44).
+func hostFileSnap(t *testing.T, w *world, hostID uuid.UUID) string {
+	t.Helper()
+	states, err := w.mem.HostFileStates(context.Background(), hostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprint(len(states))
 }

@@ -30,10 +30,12 @@ export function needActionCount(list: NotificationList | null): number {
 
 /**
  * A problem item's kind, from its link (bell items carry no problem kind, api-v1 v1.41 item 3): a host page is
- * `host_offline`, the registries section `registry_login`, anything else (a catalog entry) `deploy`.
+ * `host_offline`, a host's Config files tab `host_file` (api-v1 v1.44), the registries section `registry_login`,
+ * anything else (a catalog entry) `deploy`.
  */
 export function problemKindOf(item: Notification): ProblemKind | null {
 	if (item.kind !== 'problem') return null;
+	if (item.href.startsWith('/hosts/') && /[?&]tab=files(&|#|$)/.test(item.href)) return 'host_file';
 	if (item.href.startsWith('/hosts/')) return 'host_offline';
 	if (item.href.endsWith('#registries')) return 'registry_login';
 	return 'deploy';

@@ -31,7 +31,7 @@ const listProblemsSchema = `{
 func registerListProblems(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "list_problems",
-		Description: "List open problems for a project or an organization (api-v1 v1.41); pass exactly one of project_id or org_id. These are the problems the user sees in the console bell: host_offline (an always-on host has not reported for more than 10 minutes; organization owners and admins only, so org_id only), registry_login (a stored registry login was refused), and deploy (the latest deploy of an entry on a host failed or was rolled back). Each has level needs_action or heads_up, title, detail, opened_at and a console href. With project_id, the problems of that project the user may see; with org_id (organization owners and admins only), every problem in the organization. The summary names the usual fix: for a refused registry login, ask the person to reconnect it (connect_registry sends them a connect request); for an offline host, check the machine and its bot-agent service; for a deploy, look at entry_logs and entry_status. Reads stored problems. Does not contact the hosts or the registries.",
+		Description: "List open problems for a project or an organization (api-v1 v1.41); pass exactly one of project_id or org_id. These are the problems the user sees in the console bell: host_offline (an always-on host has not reported for more than 10 minutes; organization owners and admins only, so org_id only), registry_login (a stored registry login was refused), deploy (the latest deploy of an entry on a host failed or was rolled back), and host_file (a host config file could not be restored after a failed apply, or was changed on the host; organization owners and admins only, fixed in the console's Config files tab, since config files are not available over MCP). Each has level needs_action or heads_up, title, detail, opened_at and a console href. With project_id, the problems of that project the user may see; with org_id (organization owners and admins only), every problem in the organization. The summary names the usual fix: for a refused registry login, ask the person to reconnect it (connect_registry sends them a connect request); for an offline host, check the machine and its bot-agent service; for a deploy, look at entry_logs and entry_status. Reads stored problems. Does not contact the hosts or the registries.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(listProblemsSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -70,6 +70,7 @@ var problemFix = map[string]string{
 	"host_offline":   "check the machine and its bot-agent service",
 	"registry_login": "ask the person to reconnect it (connect_registry sends a connect request)",
 	"deploy":         "look at entry_logs and entry_status, then deploy again or roll back",
+	"host_file":      "an organization owner or admin opens the host's Config files tab in the console (config files are not available over MCP)",
 }
 
 // summarizeProblems is "N open problems: <title> since <time> (<level>) — <fix>; …".

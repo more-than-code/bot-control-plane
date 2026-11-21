@@ -13,6 +13,7 @@
 	import { actionUrlFrom } from '$lib/url';
 	import { accessFailureOf } from '$lib/host-access';
 	import HostEdgeSection from './HostEdgeSection.svelte';
+	import ConfigFilesTab from './ConfigFilesTab.svelte';
 	import OverviewTab from './OverviewTab.svelte';
 	import ProcessesTab from './ProcessesTab.svelte';
 
@@ -35,7 +36,8 @@
 
 	const tabs = $derived([
 		{ key: 'overview', label: 'Overview', href: `?tab=overview&range=${data.range}` },
-		{ key: 'processes', label: 'Processes', href: `?tab=processes&sort=${data.processSort}` }
+		{ key: 'processes', label: 'Processes', href: `?tab=processes&sort=${data.processSort}` },
+		{ key: 'files', label: 'Config files', href: '?tab=files' }
 	]);
 
 	$effect(() => {
@@ -88,6 +90,10 @@
 
 	{#if data.tab === 'overview'}
 		<OverviewTab host={data.host} range={data.range} metrics={data.metrics} snapshot={form?.snapshot ?? null} />
+	{:else if data.tab === 'files'}
+		{#if data.files}
+			<ConfigFilesTab hostId={data.host.id} files={data.files} {form} />
+		{/if}
 	{:else}
 		<ProcessesTab
 			sort={data.processSort}

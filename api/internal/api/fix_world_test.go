@@ -36,8 +36,16 @@ type world struct {
 
 func newWorld(t *testing.T) *world {
 	t.Helper()
+	return newWorldLog(t, nil)
+}
+
+// newWorldLog is newWorld whose API and hub log to log (nil discards).
+func newWorldLog(t *testing.T, log *slog.Logger) *world {
+	t.Helper()
 	mem := memstore.New()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 	clk := func() time.Time { return now }
 	cfg := config.Config{

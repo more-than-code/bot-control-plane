@@ -36,7 +36,8 @@
 		fallbackFocusId = null,
 		showTrigger = true,
 		triggerLabel = null,
-		destructive: destructiveStyle = null
+		destructive: destructiveStyle = null,
+		onSubmitting
 	}: {
 		id: string;
 		action: string;
@@ -72,6 +73,8 @@
 		triggerLabel?: string | null;
 		/** The destructive style when the label alone does not say so (Turn off edge). Null: picked from the label. */
 		destructive?: boolean | null;
+		/** True while the confirmed post runs, then false: lets the caller show progress outside the dialog. */
+		onSubmitting?: (active: boolean) => void;
 	} = $props();
 
 	let open = $state(false);
@@ -159,7 +162,7 @@
 			<AlertDialog.Title>{confirmLabel}</AlertDialog.Title>
 			<AlertDialog.Description class={messageClass}>{message}</AlertDialog.Description>
 		</AlertDialog.Header>
-		<ConfirmForm {id} {action} {confirmLabel} {destructive} {hidden} {typeToConfirm} bind:typed onSettled={settle}>
+		<ConfirmForm {id} {action} {confirmLabel} {destructive} {hidden} {typeToConfirm} bind:typed onSettled={settle} {onSubmitting}>
 			{#snippet cancel()}
 				<AlertDialog.Cancel type="button">Cancel</AlertDialog.Cancel>
 			{/snippet}

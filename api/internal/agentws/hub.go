@@ -89,6 +89,9 @@ type agentConn struct {
 	autoTokens float64
 	autoAt     time.Time
 	autoWarns  map[string]*warnCount
+	// host_files_status throttle, owned by the read loop.
+	statusTokens float64
+	statusAt     time.Time
 }
 
 // errFrameTooLarge is returned when a serialized outbound frame exceeds maxFrame.

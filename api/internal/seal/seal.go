@@ -14,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"sort"
+	"strconv"
 )
 
 // envHashInfo is the HKDF info of the env hash key (agent-protocol v1.14).
@@ -57,6 +58,12 @@ func RegistryRefreshAAD(projectID, host string) string {
 // FileAAD binds a ciphertext to one project file.
 func FileAAD(projectID, name string) string {
 	return projectID + "|file|" + name
+}
+
+// HostFileAAD binds a ciphertext to one version of one host config file
+// (api-v1 v1.44).
+func HostFileAAD(hostID, name string, version int) string {
+	return "host-file|" + hostID + "|" + name + "|" + strconv.Itoa(version)
 }
 
 // Seal returns a fresh 12-byte nonce and the ciphertext. The nonce is not

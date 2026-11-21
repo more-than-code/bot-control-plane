@@ -20,3 +20,6 @@ export function replaceState(url: string | URL): void {
 
 /** Server render does not navigate, so no callback runs. */
 export function afterNavigate(): void {}
+
+/** Server render does not navigate, so no callback runs. */
+export function beforeNavigate(): void {}

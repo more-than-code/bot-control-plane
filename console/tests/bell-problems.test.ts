@@ -89,6 +89,31 @@ describe('bell problem rows', () => {
 	});
 });
 
+describe('bell: host config file problems (api-v1 v1.44 item 8)', () => {
+	const HOST_FILE_OPEN: Notification = {
+		...HOST_OPEN,
+		key: 'problem:00000000-0000-4000-8000-0000000000f4',
+		title: 'dd-policy on pi3 could not be restored',
+		detail: 'The last apply was rollback_failed.',
+		href: `/hosts/${HOST}?tab=files&files.name=dd-policy`
+	};
+
+	test('a host link to the Config files tab is host_file, other host links stay host_offline', () => {
+		assert.equal(problemKindOf(HOST_FILE_OPEN), 'host_file');
+		assert.equal(problemKindOf({ ...HOST_FILE_OPEN, href: `/hosts/${HOST}?files.name=x&tab=files` }), 'host_file');
+		assert.equal(problemKindOf({ ...HOST_FILE_OPEN, href: `/hosts/${HOST}?tab=filesystem` }), 'host_offline');
+		assert.equal(problemKindOf(HOST_OPEN), 'host_offline');
+	});
+
+	test('its row has the file warning icon and links to the file', () => {
+		const html = render(NotificationsList, { props: { items: [HOST_FILE_OPEN] } }).body.replaceAll('&amp;', '&');
+		assert.match(html, /lucide-file-(warning|exclamation-point)/);
+		assert.doesNotMatch(html, /lucide-server-off/);
+		assert.match(html, new RegExp(`href="/hosts/${HOST}\\?tab=files&files\\.name=dd-policy"`));
+		assert.equal(needActionCount({ items: [HOST_FILE_OPEN], unread: 1 } as never), 1);
+	});
+});
+
 describe('bell dot and label', () => {
 	test('"N unread, M need action", without the second part at 0', () => {
 		assert.equal(bellLabel(3, 2), 'Notifications, 3 unread, 2 need action');

@@ -94,7 +94,11 @@ const (
 	// refresh token (api-v1 v1.43 item 2). Detail is {"host"}.
 	ActionRegistryGitHubRefreshRejected = "registry.github_refresh_rejected"
 	ActionFilePut                       = "file.put"
-	ActionFileDelete                    = "file.delete"
+	// Host config files (api-v1 v1.44 item 7). Detail never holds content,
+	// a value or a secret file's hash.
+	ActionHostFileSave  = "host_file.save"
+	ActionHostFileApply = "host_file.apply"
+	ActionFileDelete    = "file.delete"
 	// File requests (api-v1 v1.30). The fill itself is file.put with
 	// detail via "file_request".
 	ActionFileRequested       = "file.requested"

@@ -81,6 +81,10 @@ type Server struct {
 	refresh refreshLocks
 	// refreshSealFail, when set, fails the seal of a refreshed pair. Tests only.
 	refreshSealFail func() error
+	// hostFiles is the host config file applies in flight (api-v1 v1.44).
+	hostFiles hostFileRuns
+	// hostFileWaitTest, when non-zero, replaces the 430 s apply wait. Tests only.
+	hostFileWaitTest time.Duration
 }
 
 // delegatedPolicy says what an api_delegated session may do on a route.
@@ -152,6 +156,12 @@ func contractRoutes() []route {
 		{"GET /v1/orgs/{id}/audit", false, (*Server).handleOrgAudit, delegatedDenyRead},
 		// api-v1 v1.41 item 4: problems, console or delegated.
 		{"GET /v1/orgs/{id}/problems", false, (*Server).handleOrgProblems, delegatedAllow},
+		// api-v1 v1.44: host config files, console only.
+		{"GET /v1/orgs/{id}/hosts/{host_id}/files", false, (*Server).handleHostFileList, delegatedDenyRead},
+		{"GET /v1/orgs/{id}/hosts/{host_id}/files/{name}", false, (*Server).handleHostFileGet, delegatedDenyRead},
+		{"GET /v1/orgs/{id}/hosts/{host_id}/files/{name}/versions/{v}", false, (*Server).handleHostFileVersion, delegatedDenyRead},
+		{"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}", false, (*Server).handleHostFilePut, delegatedDeny},
+		{"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply", false, (*Server).handleHostFileApply, delegatedDeny},
 		// api-v1 v1.35 item 1: org domains, console only.
 		{"GET /v1/orgs/{id}/domains", false, (*Server).handleDomainList, delegatedDenyRead},
 		{"POST /v1/orgs/{id}/domains", false, (*Server).handleDomainCreate, delegatedDeny},
@@ -655,6 +665,13 @@ type hostView struct {
 // update_available (the host's agent_version is a lower X.Y.Z; always
 // false for a revoked host).
 func (s *Server) withUpdateHint(h store.Host) hostView {
+	// api-v1 v1.44: host files are listed by their own route, never on a
+	// Host. Every Host answer goes through here (hostViews, hostRead).
+	if h.Programs != nil && h.Programs.HostFiles != nil {
+		cp := *h.Programs
+		cp.HostFiles = nil
+		h.Programs = &cp
+	}
 	v := hostView{Host: h}
 	if s.LatestAgentVersion != "" {
 		latest := s.LatestAgentVersion
