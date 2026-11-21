@@ -90,8 +90,11 @@ const (
 	// Connect GitHub (api-v1 v1.29). Detail never holds the token.
 	ActionRegistryGitHubConnected    = "registry.github_connected"
 	ActionRegistryGitHubDisconnected = "registry.github_disconnected"
-	ActionFilePut                    = "file.put"
-	ActionFileDelete                 = "file.delete"
+	// ActionRegistryGitHubRefreshRejected is GitHub rejecting a stored
+	// refresh token (api-v1 v1.43 item 2). Detail is {"host"}.
+	ActionRegistryGitHubRefreshRejected = "registry.github_refresh_rejected"
+	ActionFilePut                       = "file.put"
+	ActionFileDelete                    = "file.delete"
 	// File requests (api-v1 v1.30). The fill itself is file.put with
 	// detail via "file_request".
 	ActionFileRequested       = "file.requested"

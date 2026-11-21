@@ -307,3 +307,35 @@ func TestStartProblemsOff(t *testing.T) {
 		}
 	}
 }
+
+// TestStartBackgroundUpkeep is spec-github-token-refresh §10.1 (T4): the
+// GitHub login upkeep starts with BOT_API_PROBLEMS=off, when the problem
+// sweep does not, and also with the problems on.
+func TestStartBackgroundUpkeep(t *testing.T) {
+	for _, problemsOff := range []bool{true, false} {
+		ctx, cancel := context.WithCancel(context.Background())
+		swept := make(chan struct{}, 1)
+		upkept := make(chan struct{}, 1)
+		startBackground(ctx, config.Config{ProblemsOff: problemsOff}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+			func() {}, func(context.Context) { swept <- struct{}{} }, func(context.Context) { upkept <- struct{}{} })
+		select {
+		case <-upkept:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("problems off %v: upkeep not started", problemsOff)
+		}
+		if problemsOff {
+			select {
+			case <-swept:
+				t.Fatal("problems off: the sweep started")
+			case <-time.After(50 * time.Millisecond):
+			}
+		} else {
+			select {
+			case <-swept:
+			case <-time.After(5 * time.Second):
+				t.Fatal("problems on: no sweep")
+			}
+		}
+		cancel()
+	}
+}

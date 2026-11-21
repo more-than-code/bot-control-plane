@@ -1,6 +1,7 @@
 package memstore
 
 import (
+	"bytes"
 	"context"
 	"sort"
 	"strings"
@@ -45,6 +46,20 @@ type registryRec struct {
 	// Source and ConnectedBy are api-v1 v1.29 item 5.
 	Source      string
 	ConnectedBy *uuid.UUID
+	// Refresh is the GitHub refresh material (api-v1 v1.43).
+	Refresh store.RegistryRefreshMaterial
+}
+
+// copyRefresh deep-copies refresh material.
+func copyRefresh(in store.RegistryRefreshMaterial) store.RegistryRefreshMaterial {
+	out := store.RegistryRefreshMaterial{AccessExpiresAt: copyTime(in.AccessExpiresAt), RefreshExpiresAt: copyTime(in.RefreshExpiresAt)}
+	if len(in.RefreshNonce) > 0 && len(in.RefreshCiphertext) > 0 {
+		out.RefreshNonce = append([]byte(nil), in.RefreshNonce...)
+		out.RefreshCiphertext = append([]byte(nil), in.RefreshCiphertext...)
+	} else {
+		out.RefreshExpiresAt = nil
+	}
+	return out
 }
 
 type imageDeployRec = store.ImageDeploy
@@ -874,6 +889,7 @@ func (m *Mem) putRegistryLocked(projectID uuid.UUID, host string, in store.Regis
 		Host: host, Username: in.Username,
 		Nonce: append([]byte(nil), in.Nonce...), Ciphertext: append([]byte(nil), in.Ciphertext...),
 		KeyVersion: in.KeyVersion, UpdatedAt: at, UpdatedBy: actor, Source: in.Source,
+		Refresh: copyRefresh(in.RegistryRefreshMaterial),
 	}
 	if in.ConnectedBy != nil {
 		id := *in.ConnectedBy
@@ -904,7 +920,69 @@ func (m *Mem) GetRegistryMaterial(_ context.Context, projectID uuid.UUID, host s
 		Host: rec.Host, Username: rec.Username,
 		Nonce: append([]byte(nil), rec.Nonce...), Ciphertext: append([]byte(nil), rec.Ciphertext...),
 		KeyVersion: rec.KeyVersion, Source: rec.Source,
+		RegistryRefreshMaterial: copyRefresh(rec.Refresh),
 	}, nil
+}
+
+func (m *Mem) RefreshRegistry(_ context.Context, projectID uuid.UUID, host string, oldRefreshNonce []byte, in store.RegistryRefresh) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := envKey(projectID, host)
+	rec, ok := m.registries[key]
+	if !ok || len(oldRefreshNonce) == 0 || rec.Source != store.RegistrySourceGitHub || !bytes.Equal(rec.Refresh.RefreshNonce, oldRefreshNonce) {
+		return false, nil
+	}
+	rec.Nonce = append([]byte(nil), in.Nonce...)
+	rec.Ciphertext = append([]byte(nil), in.Ciphertext...)
+	rec.KeyVersion = in.KeyVersion
+	rec.Refresh = copyRefresh(in.RegistryRefreshMaterial)
+	m.registries[key] = rec
+	return true, nil
+}
+
+func (m *Mem) ClearRegistryRefresh(_ context.Context, projectID uuid.UUID, host string, oldRefreshNonce []byte) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := envKey(projectID, host)
+	rec, ok := m.registries[key]
+	if !ok || len(oldRefreshNonce) == 0 || rec.Source != store.RegistrySourceGitHub || !bytes.Equal(rec.Refresh.RefreshNonce, oldRefreshNonce) {
+		return false, nil
+	}
+	rec.Refresh = store.RegistryRefreshMaterial{AccessExpiresAt: copyTime(rec.Refresh.AccessExpiresAt)}
+	m.registries[key] = rec
+	return true, nil
+}
+
+func (m *Mem) ListRegistryRefreshDue(_ context.Context, before time.Time) ([]store.RegistryLogin, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []store.RegistryLogin{}
+	for key, rec := range m.registries {
+		if rec.Source != store.RegistrySourceGitHub || len(rec.Refresh.RefreshNonce) == 0 ||
+			rec.Refresh.AccessExpiresAt == nil || !rec.Refresh.AccessExpiresAt.Before(before) {
+			continue
+		}
+		pid, host, ok := strings.Cut(key, "/")
+		if !ok {
+			continue
+		}
+		id, err := uuid.Parse(pid)
+		if err != nil {
+			continue
+		}
+		p, ok := m.projects[id]
+		if !ok || p.DeletedAt != nil {
+			continue
+		}
+		out = append(out, store.RegistryLogin{ProjectID: id, OrgID: p.OrgID, Host: host})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ProjectID != out[j].ProjectID {
+			return out[i].ProjectID.String() < out[j].ProjectID.String()
+		}
+		return out[i].Host < out[j].Host
+	})
+	return out, nil
 }
 
 func (m *Mem) deleteDeploysLocked(entryID uuid.UUID) {

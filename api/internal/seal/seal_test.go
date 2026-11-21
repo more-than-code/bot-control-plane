@@ -41,6 +41,16 @@ func TestSealRoundTrip(t *testing.T) {
 	if _, err := box.Open(RegistryAAD("proj", "ghcr.io"), n3, c3); err == nil || err.Error() != "decrypt failed" {
 		t.Fatalf("aad %v", err)
 	}
+	if RegistryRefreshAAD("p", "ghcr.io") != "registry-refresh|p|ghcr.io" {
+		t.Fatalf("RegistryRefreshAAD %q", RegistryRefreshAAD("p", "ghcr.io"))
+	}
+	rn, rc, err := box.Seal(RegistryRefreshAAD("proj", "ghcr.io"), []byte("ghr_x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := box.Open(RegistryAAD("proj", "ghcr.io"), rn, rc); err == nil {
+		t.Fatal("refresh ciphertext opened with the access token AAD")
+	}
 	if FileAAD("p", "n") != "p|file|n" {
 		t.Fatalf("FileAAD %q", FileAAD("p", "n"))
 	}

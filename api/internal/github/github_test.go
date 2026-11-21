@@ -88,10 +88,11 @@ func TestExchangeUserRevoke(t *testing.T) {
 	f := newFake(t)
 	c := f.client()
 	ctx := context.Background()
-	tok, err := c.Exchange(ctx, "code1", "ver1", "https://c/auth/github/callback")
-	if err != nil || tok != "gho_tok" {
-		t.Fatalf("exchange %q %v", tok, err)
+	full, err := c.Exchange(ctx, "code1", "ver1", "https://c/auth/github/callback")
+	if err != nil || full.Access != "gho_tok" || full.Refresh != "" || !full.ExpiresAt.IsZero() || !full.RefreshExpiresAt.IsZero() {
+		t.Fatalf("exchange %+v %v", full != (Token{}), err)
 	}
+	tok := full.Access
 	if f.gotForm.Get("code_verifier") != "ver1" || f.gotForm.Get("code") != "code1" || f.gotForm.Get("client_secret") != "sec" {
 		t.Fatalf("form %v", f.gotForm)
 	}
@@ -112,6 +113,75 @@ func TestExchangeUserRevoke(t *testing.T) {
 		if err := c.Revoke(ctx, tok); err != ErrFailed {
 			t.Fatalf("revoke %d: %v", code, err)
 		}
+	}
+}
+
+// TestExchangeExpiring is acceptance 1 at the client: an expiring answer
+// keeps the refresh token and both expiry times from the injected clock.
+func TestExchangeExpiring(t *testing.T) {
+	f := newFake(t)
+	now := time.Date(2026, 11, 21, 8, 0, 0, 0, time.UTC)
+	c := New(Config{ClientID: "cid", ClientSecret: "sec", TokenURL: f.srv.URL + "/login/oauth/access_token", APIURL: f.srv.URL, HTTP: f.srv.Client(),
+		Now: func() time.Time { return now }})
+	f.tokenBody = `{"access_token":"ghu_acc","expires_in":28800,"refresh_token":"ghr_ref","refresh_token_expires_in":15897600,"token_type":"bearer","scope":""}`
+	tok, err := c.Exchange(context.Background(), "c", "v", "r")
+	if err != nil || tok.Access != "ghu_acc" || tok.Refresh != "ghr_ref" ||
+		!tok.ExpiresAt.Equal(now.Add(8*time.Hour)) || !tok.RefreshExpiresAt.Equal(now.Add(15897600*time.Second)) {
+		t.Fatalf("exchange ok=%v %v", tok.Access == "ghu_acc", err)
+	}
+	// A refresh token that does not look like one is refused.
+	for _, body := range []string{
+		`{"access_token":"ghu_acc","expires_in":28800,"refresh_token":"gho_notrefresh"}`,
+		`{"access_token":"ghu_acc","expires_in":28800,"refresh_token":"ghr_has space"}`,
+		`{"access_token":"ghu_acc","expires_in":-1}`,
+		`{"access_token":"ghu_acc","expires_in":99999999999}`,
+	} {
+		f.tokenBody = body
+		if _, err := c.Exchange(context.Background(), "c", "v", "r"); err != ErrFailed {
+			t.Fatalf("%s: %v", body, err)
+		}
+	}
+}
+
+// TestRefresh: grant_type refresh_token with the client credentials; a
+// bad_refresh_token answer is ErrRefreshRejected; other failures ErrFailed,
+// never with a body.
+func TestRefresh(t *testing.T) {
+	f := newFake(t)
+	now := time.Date(2026, 11, 21, 8, 0, 0, 0, time.UTC)
+	c := New(Config{ClientID: "cid", ClientSecret: "sec", TokenURL: f.srv.URL + "/login/oauth/access_token", APIURL: f.srv.URL, HTTP: f.srv.Client(),
+		Now: func() time.Time { return now }})
+	f.tokenBody = `{"access_token":"ghu_new","expires_in":28800,"refresh_token":"ghr_new","refresh_token_expires_in":15897600}`
+	tok, err := c.Refresh(context.Background(), "ghr_old")
+	if err != nil || tok.Access != "ghu_new" || tok.Refresh != "ghr_new" || !tok.ExpiresAt.Equal(now.Add(8*time.Hour)) {
+		t.Fatalf("refresh ok=%v %v", tok.Access == "ghu_new", err)
+	}
+	if f.gotForm.Get("grant_type") != "refresh_token" || f.gotForm.Get("refresh_token") != "ghr_old" ||
+		f.gotForm.Get("client_id") != "cid" || f.gotForm.Get("client_secret") != "sec" || f.gotForm.Get("code") != "" {
+		t.Fatalf("form keys %d", len(f.gotForm))
+	}
+	f.tokenBody = `{"error":"bad_refresh_token","error_description":"SECRET-DETAIL"}`
+	if _, err := c.Refresh(context.Background(), "ghr_old"); err != ErrRefreshRejected || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("rejected %v", err)
+	}
+	for _, tc := range []struct {
+		code int
+		body string
+	}{
+		{500, `SECRET-DETAIL`},
+		{502, `{"error":"server_error"}`},
+		{200, `{"error":"incorrect_client_credentials","error_description":"SECRET-DETAIL"}`},
+		{200, `{"access_token":"ghu_new","refresh_token":"nope"}`},
+	} {
+		f.tokenCode, f.tokenBody = tc.code, tc.body
+		if _, err := c.Refresh(context.Background(), "ghr_old"); err != ErrFailed || strings.Contains(err.Error(), "SECRET") {
+			t.Fatalf("%d %s: %v", tc.code, tc.body, err)
+		}
+	}
+	// A bad_refresh_token code on the Exchange path is a plain failure.
+	f.tokenCode, f.tokenBody = 200, `{"error":"bad_refresh_token"}`
+	if _, err := c.Exchange(context.Background(), "c", "v", "r"); err != ErrFailed {
+		t.Fatalf("exchange %v", err)
 	}
 }
 

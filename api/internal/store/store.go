@@ -953,6 +953,19 @@ type Store interface {
 	DeleteRegistry(ctx context.Context, projectID uuid.UUID, host string) error
 	// GetRegistryMaterial returns one ciphertext. A missing host is ErrNotFound.
 	GetRegistryMaterial(ctx context.Context, projectID uuid.UUID, host string) (RegistryMaterial, error)
+	// RefreshRegistry stores a refreshed GitHub token on the github row
+	// whose refresh nonce is still oldRefreshNonce (api-v1 v1.43): the
+	// access token and the refresh material, nothing else (updated_at and
+	// updated_by stay). It reports false, writing nothing, when no such row
+	// exists (a lost race, a reconnect, a delete).
+	RefreshRegistry(ctx context.Context, projectID uuid.UUID, host string, oldRefreshNonce []byte, in RegistryRefresh) (bool, error)
+	// ClearRegistryRefresh drops the refresh token and its expiry from the
+	// github row whose refresh nonce is still oldRefreshNonce, keeping the
+	// access token and access_expires_at. It reports whether it cleared.
+	ClearRegistryRefresh(ctx context.Context, projectID uuid.UUID, host string, oldRefreshNonce []byte) (bool, error)
+	// ListRegistryRefreshDue returns the github logins of live projects that
+	// hold a refresh token and whose access token expires before before.
+	ListRegistryRefreshDue(ctx context.Context, before time.Time) ([]RegistryLogin, error)
 
 	// ListProjectFiles returns metadata sorted by name. SHA256 is nil when secret.
 	ListProjectFiles(ctx context.Context, projectID uuid.UUID) ([]ProjectFile, error)

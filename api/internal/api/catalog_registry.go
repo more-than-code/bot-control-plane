@@ -143,12 +143,19 @@ func (s *Server) cachedLookup(ctx context.Context, w http.ResponseWriter, p prin
 	}
 	repo := registry.Repo{Host: ref.Host, Path: ref.Path}
 	if mat != nil {
-		token, err := s.openRegistry(id, *mat)
-		if err != nil {
+		fresh, token, err := s.registryToken(ctx, id, mat.Host, refreshOnUse)
+		switch {
+		case errors.Is(err, errSecretsKey), errors.Is(err, errDecrypt):
 			s.secretWriteErr(w, err)
 			return nil, false
+		case errors.Is(err, store.ErrNotFound):
+			// Deleted since the read: look up without a login.
+		case err != nil:
+			s.writeErr(w, err, false)
+			return nil, false
+		default:
+			repo.Cred = &registry.Credential{Username: fresh.Username, Token: token}
 		}
-		repo.Cred = &registry.Credential{Username: mat.Username, Token: token}
 	}
 	start := time.Now()
 	v, sent, err := fetch(ctx, repo)

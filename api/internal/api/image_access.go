@@ -118,7 +118,7 @@ func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, proje
 			out.Access = access
 			s.logLookup("access", ref, "cache", 0, "cache", nil)
 			if stored {
-				s.noteRegistryAccess(ctx, projectID, ref.Host, out.Access)
+				s.noteRegistryAccess(ctx, projectID, ref.Host, out.Login, out.Access)
 			}
 			return out, nil
 		}
@@ -145,7 +145,7 @@ func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, proje
 		svc.Cache.Put(key, out.Access, s.now())
 	}
 	if stored {
-		s.noteRegistryAccess(ctx, projectID, ref.Host, out.Access)
+		s.noteRegistryAccess(ctx, projectID, ref.Host, out.Login, out.Access)
 	}
 	return out, nil
 }
@@ -167,11 +167,11 @@ func (s *Server) probeAccess(ctx context.Context, projectID uuid.UUID, ref catal
 	if !stored {
 		return accessPrivateNoLogin, nil
 	}
-	token, err := s.openRegistry(projectID, mat)
+	fresh, token, err := s.registryToken(ctx, projectID, mat.Host, refreshOnUse)
 	if err != nil {
 		return accessUnknown, nil
 	}
-	repo.Cred = &registry.Credential{Username: mat.Username, Token: token}
+	repo.Cred = &registry.Credential{Username: fresh.Username, Token: token}
 	_, sent, err := s.Registry.Client.Digest(ctx, repo, reference)
 	switch {
 	case err == nil:

@@ -1194,8 +1194,9 @@ func putRegistryRow(ctx context.Context, q queryer, projectID uuid.UUID, host st
 	}
 	row := q.QueryRow(ctx, `
 WITH up AS (
-INSERT INTO app.registries (project_id, host, username, nonce, ciphertext, key_version, updated_at, updated_by, source, connected_by)
-VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10::uuid)
+INSERT INTO app.registries (project_id, host, username, nonce, ciphertext, key_version, updated_at, updated_by, source, connected_by,
+    refresh_nonce, refresh_ciphertext, access_expires_at, refresh_expires_at)
+VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10::uuid, $11, $12, $13, $14)
 ON CONFLICT (project_id, host) DO UPDATE SET
     username = EXCLUDED.username,
     nonce = EXCLUDED.nonce,
@@ -1204,12 +1205,17 @@ ON CONFLICT (project_id, host) DO UPDATE SET
     updated_at = EXCLUDED.updated_at,
     updated_by = EXCLUDED.updated_by,
     source = EXCLUDED.source,
-    connected_by = EXCLUDED.connected_by
+    connected_by = EXCLUDED.connected_by,
+    refresh_nonce = EXCLUDED.refresh_nonce,
+    refresh_ciphertext = EXCLUDED.refresh_ciphertext,
+    access_expires_at = EXCLUDED.access_expires_at,
+    refresh_expires_at = EXCLUDED.refresh_expires_at
 RETURNING host, username, updated_at, updated_by, source, connected_by
 )
 SELECT up.host, up.username, up.updated_at, up.updated_by::text, up.source, up.connected_by::text, u.name
 FROM up LEFT JOIN app.users AS u ON u.id = up.connected_by
-`, projectID.String(), host, in.Username, in.Nonce, in.Ciphertext, in.KeyVersion, at, actor.String(), in.Source, connected)
+`, projectID.String(), host, in.Username, in.Nonce, in.Ciphertext, in.KeyVersion, at, actor.String(), in.Source, connected,
+		nilBytes(in.RefreshNonce), nilBytes(in.RefreshCiphertext), in.AccessExpiresAt, in.RefreshExpiresAt)
 	item, err := scanRegistry(row)
 	if err != nil {
 		return store.Registry{}, err
@@ -1231,14 +1237,87 @@ func (d *DB) DeleteRegistry(ctx context.Context, projectID uuid.UUID, host strin
 func (d *DB) GetRegistryMaterial(ctx context.Context, projectID uuid.UUID, host string) (store.RegistryMaterial, error) {
 	var item store.RegistryMaterial
 	err := d.pool.QueryRow(ctx, `
-SELECT host, username, nonce, ciphertext, key_version, source
+SELECT host, username, nonce, ciphertext, key_version, source,
+       refresh_nonce, refresh_ciphertext, access_expires_at, refresh_expires_at
 FROM app.registries
 WHERE project_id = $1::uuid AND host = $2
-`, projectID.String(), host).Scan(&item.Host, &item.Username, &item.Nonce, &item.Ciphertext, &item.KeyVersion, &item.Source)
+`, projectID.String(), host).Scan(&item.Host, &item.Username, &item.Nonce, &item.Ciphertext, &item.KeyVersion, &item.Source,
+		&item.RefreshNonce, &item.RefreshCiphertext, &item.AccessExpiresAt, &item.RefreshExpiresAt)
 	if err != nil {
 		return store.RegistryMaterial{}, mapErr(err)
 	}
 	return item, nil
+}
+
+// RefreshRegistry is the conditional write of a refreshed GitHub token
+// (api-v1 v1.43): only the github row still holding oldRefreshNonce.
+func (d *DB) RefreshRegistry(ctx context.Context, projectID uuid.UUID, host string, oldRefreshNonce []byte, in store.RegistryRefresh) (bool, error) {
+	if len(oldRefreshNonce) == 0 {
+		return false, nil
+	}
+	if !in.HasRefresh() {
+		in.RefreshNonce, in.RefreshCiphertext, in.RefreshExpiresAt = nil, nil, nil
+	}
+	tag, err := d.pool.Exec(ctx, `
+UPDATE app.registries
+SET nonce = $4, ciphertext = $5, key_version = $6,
+    refresh_nonce = $7, refresh_ciphertext = $8, access_expires_at = $9, refresh_expires_at = $10
+WHERE project_id = $1::uuid AND host = $2 AND source = 'github' AND refresh_nonce = $3
+`, projectID.String(), host, oldRefreshNonce, in.Nonce, in.Ciphertext, in.KeyVersion,
+		nilBytes(in.RefreshNonce), nilBytes(in.RefreshCiphertext), in.AccessExpiresAt, in.RefreshExpiresAt)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ClearRegistryRefresh drops a rejected refresh token (api-v1 v1.43 item 2).
+func (d *DB) ClearRegistryRefresh(ctx context.Context, projectID uuid.UUID, host string, oldRefreshNonce []byte) (bool, error) {
+	if len(oldRefreshNonce) == 0 {
+		return false, nil
+	}
+	tag, err := d.pool.Exec(ctx, `
+UPDATE app.registries
+SET refresh_nonce = NULL, refresh_ciphertext = NULL, refresh_expires_at = NULL
+WHERE project_id = $1::uuid AND host = $2 AND source = 'github' AND refresh_nonce = $3
+`, projectID.String(), host, oldRefreshNonce)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (d *DB) ListRegistryRefreshDue(ctx context.Context, before time.Time) ([]store.RegistryLogin, error) {
+	rows, err := d.pool.Query(ctx, `
+SELECT r.project_id::text, p.org_id::text, r.host
+FROM app.registries AS r
+JOIN app.projects AS p ON p.id = r.project_id AND p.deleted_at IS NULL
+WHERE r.source = 'github' AND r.refresh_nonce IS NOT NULL AND r.access_expires_at < $1
+ORDER BY r.project_id, r.host
+`, before)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []store.RegistryLogin{}
+	for rows.Next() {
+		var pid, org string
+		var l store.RegistryLogin
+		if err := rows.Scan(&pid, &org, &l.Host); err != nil {
+			return nil, mapErr(err)
+		}
+		l.ProjectID, l.OrgID = uuid.MustParse(pid), uuid.MustParse(org)
+		out = append(out, l)
+	}
+	return out, mapErr(rows.Err())
+}
+
+// nilBytes is b, or nil (SQL NULL) when b is empty.
+func nilBytes(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
 }
 
 func scanRegistry(row pgx.Row) (store.Registry, error) {

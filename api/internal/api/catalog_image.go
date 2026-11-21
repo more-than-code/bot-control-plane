@@ -761,7 +761,8 @@ func (s *Server) imageTask(ctx context.Context, projectID uuid.UUID, host store.
 		if err != nil {
 			return nil, nil, err
 		}
-		reg, err := s.registryAuth(ctx, projectID, img.RegistryHost)
+		// api-v1 v1.43: the token sent must outlive the agent's pull.
+		reg, err := s.registryAuth(ctx, projectID, img.RegistryHost, refreshOnTask)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -837,7 +838,7 @@ func (s *Server) redactValues(ctx context.Context, projectID uuid.UUID, img cata
 			envForms = envSecretForms(typed, generated)
 			failed = envFailed
 		}
-		reg, err := s.registryAuth(ctx, projectID, img.RegistryHost)
+		reg, err := s.registryAuth(ctx, projectID, img.RegistryHost, refreshNever)
 		if errors.Is(err, errDecrypt) {
 			failed = true
 		} else if err == nil {
@@ -1433,15 +1434,14 @@ func (s *Server) openEnv(projectID uuid.UUID, set string, m store.EnvMaterial) (
 	return string(plain), nil
 }
 
-func (s *Server) registryAuth(ctx context.Context, projectID uuid.UUID, host string) (any, error) {
-	mat, err := s.Store.GetRegistryMaterial(ctx, projectID, host)
+// registryAuth is the task frame's registry_auth, or nil without a stored
+// login. A github token with less than within left is refreshed first
+// (api-v1 v1.43); refreshNever opens it as stored.
+func (s *Server) registryAuth(ctx context.Context, projectID uuid.UUID, host string, within time.Duration) (any, error) {
+	mat, token, err := s.registryToken(ctx, projectID, host, within)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	token, err := s.openRegistry(projectID, mat)
 	if err != nil {
 		return nil, err
 	}

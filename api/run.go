@@ -138,6 +138,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		LatestAgentVersion: cfg.LatestAgentVersion,
 		EdgeTLSIssuer:      cfg.EdgeTLSIssuer,
 		ProblemsOff:        cfg.ProblemsOff,
+		GitHubRefreshOff:   cfg.GitHubRefreshOff,
 	}
 	if gh != nil {
 		srv.GitHub = gh
@@ -164,8 +165,20 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	// verified domains are re-checked daily.
 	hub.SetEdgeHook(srv.EdgeHook)
 	go srv.RunDomainChecks(ctx)
-	startProblems(ctx, cfg.ProblemsOff, log, func() { hub.SetDeployHook(srv.DeployHook) }, srv.RunProblems)
+	startBackground(ctx, cfg, log, func() { hub.SetDeployHook(srv.DeployHook) }, srv.RunProblems, srv.RunGitHubRefresh)
 	return d.serve(cfg.Listen, root, hub.CloseAll)
+}
+
+// startBackground starts the problem detectors (startProblems) and the
+// Connect GitHub login upkeep (api-v1 v1.43, spec §10.1). The upkeep is its
+// own loop, so it runs with BOT_API_PROBLEMS=off too; with
+// BOT_API_GITHUB_REFRESH=off it is still started and returns at once.
+func startBackground(ctx context.Context, cfg config.Config, log *slog.Logger, setDeployHook func(), sweep, upkeep func(context.Context)) {
+	startProblems(ctx, cfg.ProblemsOff, log, setDeployHook, sweep)
+	if cfg.GitHubRefreshOff {
+		log.Warn("connect github token refresh is off (BOT_API_GITHUB_REFRESH=off)")
+	}
+	go upkeep(ctx)
 }
 
 // startProblems wires the problem detectors (api-v1 v1.41): the hub's
@@ -194,7 +207,7 @@ func githubClient(cfg config.Config) (*github.Client, error) {
 	if cfg.ConsoleOrigin == "" {
 		return nil, nil
 	}
-	return github.New(github.Config{ClientID: cfg.GitHubClientID, ClientSecret: secret}), nil
+	return github.New(github.Config{ClientID: cfg.GitHubClientID, ClientSecret: secret, Now: func() time.Time { return time.Now().UTC() }}), nil
 }
 
 func housekeep(ctx context.Context, pool *db.DB, authn *auth.Service, now func() time.Time) {

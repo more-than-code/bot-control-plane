@@ -155,7 +155,9 @@ WHERE table_schema = 'app' AND table_name = 'registries' AND column_name IN ('so
 		t.Fatal(err)
 	}
 	want := 0
-	update := []string{"username", "nonce", "ciphertext", "key_version", "updated_at", "updated_by"}
+	// 0028 (refresh columns) stays applied while 0019 goes down and up.
+	update := []string{"username", "nonce", "ciphertext", "key_version", "updated_at", "updated_by",
+		"refresh_nonce", "refresh_ciphertext", "access_expires_at", "refresh_expires_at"}
 	if applied {
 		want = 2
 		update = append(update, "source", "connected_by")

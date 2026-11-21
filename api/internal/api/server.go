@@ -74,6 +74,13 @@ type Server struct {
 	ProblemsOff bool
 	// sweep is the problems sweep clock (start grace, hourly work).
 	sweep problemSweep
+	// GitHubRefreshOff is BOT_API_GITHUB_REFRESH=off (api-v1 v1.43 item 4):
+	// no Connect GitHub token is refreshed; stored material is kept.
+	GitHubRefreshOff bool
+	// refresh is the single flight of GitHub token refreshes per login.
+	refresh refreshLocks
+	// refreshSealFail, when set, fails the seal of a refreshed pair. Tests only.
+	refreshSealFail func() error
 }
 
 // delegatedPolicy says what an api_delegated session may do on a route.

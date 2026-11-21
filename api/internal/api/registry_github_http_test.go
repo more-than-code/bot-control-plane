@@ -316,7 +316,7 @@ func TestGitHubConnectAndDisconnect(t *testing.T) {
 		t.Fatalf("registries %v", items)
 	}
 	// The token reaches the deploy path exactly as a manual login does.
-	got, err := f.w.srv.registryAuth(context.Background(), f.sc.project.ID, "ghcr.io")
+	got, err := f.w.srv.registryAuth(context.Background(), f.sc.project.ID, "ghcr.io", refreshOnTask)
 	if m, _ := got.(map[string]any); err != nil || m["token"] != fakeGitHubToken+"1" || m["username"] != "octo-cat" {
 		t.Fatalf("registry_auth %v %v", got, err)
 	}

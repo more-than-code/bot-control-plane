@@ -256,9 +256,16 @@ func registrySubject(projectID uuid.UUID, host string) string {
 	return projectID.String() + ":" + host
 }
 
+// Problem detail of a refused login (api-v1 v1.43 item 3).
+const (
+	detailLoginRefused       = "Token expired or revoked. Reconnect it in Settings."
+	detailGitHubLoginRefused = "GitHub sign-in expired or was revoked. Reconnect GitHub in Settings."
+)
+
 // noteRegistryAccess is the registry_login hook on every image-access
 // answer that used a stored login: login_failed opens, private_ok resolves.
-func (s *Server) noteRegistryAccess(ctx context.Context, projectID uuid.UUID, host, access string) {
+// login is the image-access login kind (manual or github).
+func (s *Server) noteRegistryAccess(ctx context.Context, projectID uuid.UUID, host, login, access string) {
 	if !s.problemsOn() {
 		return
 	}
@@ -272,10 +279,14 @@ func (s *Server) noteRegistryAccess(ctx context.Context, projectID uuid.UUID, ho
 			return
 		}
 		id := projectID
+		detail := detailLoginRefused
+		if login == loginGitHub {
+			detail = detailGitHubLoginRefused
+		}
 		s.openProblem(ctx, store.ProblemOpen{
 			Kind: store.ProblemRegistryLogin, Subject: subject, OrgID: project.OrgID, ProjectID: &id,
 			Level: store.ProblemNeedsAction, Title: host + " login was refused",
-			Detail: "Token expired or revoked. Reconnect it in Settings.",
+			Detail: detail,
 		})
 	case accessPrivateOK:
 		// Most answers find nothing open: read before writing.

@@ -47,6 +47,13 @@ func RegistryAAD(projectID, host string) string {
 	return projectID + "|registry|" + host
 }
 
+// RegistryRefreshAAD binds a GitHub refresh token to one registry host
+// (api-v1 v1.43). It differs from RegistryAAD, so the access token and the
+// refresh token ciphertexts cannot be swapped.
+func RegistryRefreshAAD(projectID, host string) string {
+	return "registry-refresh|" + projectID + "|" + host
+}
+
 // FileAAD binds a ciphertext to one project file.
 func FileAAD(projectID, name string) string {
 	return projectID + "|file|" + name

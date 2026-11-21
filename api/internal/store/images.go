@@ -274,7 +274,7 @@ type RegistryUser struct {
 }
 
 // RegistryWrite is an encrypted registry token. An empty Source is manual.
-// ConnectedBy is stored only for a github row.
+// ConnectedBy and the refresh material are stored only for a github row.
 type RegistryWrite struct {
 	Username    string
 	Nonce       []byte
@@ -282,6 +282,24 @@ type RegistryWrite struct {
 	KeyVersion  int
 	Source      string
 	ConnectedBy *uuid.UUID
+	RegistryRefreshMaterial
+}
+
+// RegistryRefreshMaterial is the expiring GitHub token data of a github row
+// (api-v1 v1.43, migration 0028): the sealed refresh token (AAD
+// seal.RegistryRefreshAAD) and both expiry times. Empty or nil when GitHub
+// issued a long-lived token, for a manual row, and after a rejected refresh
+// (AccessExpiresAt then stays).
+type RegistryRefreshMaterial struct {
+	RefreshNonce      []byte
+	RefreshCiphertext []byte
+	AccessExpiresAt   *time.Time
+	RefreshExpiresAt  *time.Time
+}
+
+// HasRefresh reports whether a refresh token is stored.
+func (m RegistryRefreshMaterial) HasRefresh() bool {
+	return len(m.RefreshNonce) > 0 && len(m.RefreshCiphertext) > 0
 }
 
 // RegistryMaterial is one stored registry token. It is not returned over HTTP.
@@ -292,15 +310,31 @@ type RegistryMaterial struct {
 	Ciphertext []byte
 	KeyVersion int
 	Source     string
+	RegistryRefreshMaterial
 }
 
-// Norm fills in the manual source and drops ConnectedBy for a manual row.
+// RegistryRefresh is a refreshed GitHub token for RefreshRegistry: the new
+// sealed access token and the new refresh material.
+type RegistryRefresh struct {
+	Nonce      []byte
+	Ciphertext []byte
+	KeyVersion int
+	RegistryRefreshMaterial
+}
+
+// Norm fills in the manual source and drops ConnectedBy and the refresh
+// material for a manual row. A refresh nonce without a ciphertext (or the
+// reverse) is dropped.
 func (in RegistryWrite) Norm() RegistryWrite {
 	if in.Source == "" {
 		in.Source = RegistrySourceManual
 	}
 	if in.Source != RegistrySourceGitHub {
 		in.ConnectedBy = nil
+		in.RegistryRefreshMaterial = RegistryRefreshMaterial{}
+	}
+	if !in.HasRefresh() {
+		in.RefreshNonce, in.RefreshCiphertext, in.RefreshExpiresAt = nil, nil, nil
 	}
 	return in
 }
