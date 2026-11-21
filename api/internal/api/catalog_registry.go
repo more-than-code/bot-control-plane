@@ -126,7 +126,7 @@ func (s *Server) registryImage(w http.ResponseWriter, r *http.Request, id uuid.U
 func (s *Server) cachedLookup(ctx context.Context, w http.ResponseWriter, p principal, id uuid.UUID, kind, key string, ref catalog.ImageRef, mat *store.RegistryMaterial, fetch registryFetch) (any, bool) {
 	svc := s.Registry
 	if v, hit := svc.Cache.Get(key, s.now()); hit {
-		s.logLookup(kind, ref, "cache", 0, "cache")
+		s.logLookup(kind, ref, "cache", 0, "cache", nil)
 		return v, true
 	}
 	release, ok := svc.Acquire()
@@ -153,9 +153,9 @@ func (s *Server) cachedLookup(ctx context.Context, w http.ResponseWriter, p prin
 	start := time.Now()
 	v, sent, err := fetch(ctx, repo)
 	reason := "ok"
+	var rerr *registry.Error
 	if err != nil {
 		reason = registry.CodeBadResponse
-		var rerr *registry.Error
 		if errors.As(err, &rerr) {
 			reason = rerr.Code
 		}
@@ -164,7 +164,7 @@ func (s *Server) cachedLookup(ctx context.Context, w http.ResponseWriter, p prin
 	if sent {
 		auth = "stored"
 	}
-	s.logLookup(kind, ref, reason, time.Since(start), auth)
+	s.logLookup(kind, ref, reason, time.Since(start), auth, rerr)
 	if err != nil {
 		write(w, statusFor("registry_unavailable"), "registry_unavailable", "", map[string]any{"reason": reason})
 		return nil, false
@@ -174,8 +174,14 @@ func (s *Server) cachedLookup(ctx context.Context, w http.ResponseWriter, p prin
 }
 
 // logLookup never logs a token or a registry body. auth is stored,
-// anonymous, or cache.
-func (s *Server) logLookup(kind string, ref catalog.ImageRef, outcome string, took time.Duration, auth string) {
-	s.logger().Info("registry lookup", "kind", kind, "host", ref.Host, "path", ref.Path,
-		"outcome", outcome, "ms", took.Milliseconds(), "auth", auth)
+// anonymous, or cache. refused is the registry error of a lookup that sent
+// a stored credential and was refused (auth_failed), or nil; it adds the
+// status, the stage and the allowlisted OCI code (spec-registry-refusal-detail).
+func (s *Server) logLookup(kind string, ref catalog.ImageRef, outcome string, took time.Duration, auth string, refused *registry.Error) {
+	args := []any{"kind", kind, "host", ref.Host, "path", ref.Path,
+		"outcome", outcome, "ms", took.Milliseconds(), "auth", auth}
+	if refused != nil && refused.Code == registry.CodeAuthFailed {
+		args = append(args, "status", refused.Status, "stage", refused.Stage, "registry_code", refused.RegistryCode)
+	}
+	s.logger().Info("registry lookup", args...)
 }

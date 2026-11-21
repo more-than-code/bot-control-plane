@@ -116,7 +116,7 @@ func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, proje
 	if v, hit := svc.Cache.Get(key, s.now()); hit {
 		if access, ok := v.(string); ok {
 			out.Access = access
-			s.logLookup("access", ref, "cache", 0, "cache")
+			s.logLookup("access", ref, "cache", 0, "cache", nil)
 			if stored {
 				s.noteRegistryAccess(ctx, projectID, ref.Host, out.Access)
 			}
@@ -134,12 +134,13 @@ func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, proje
 		}
 	}
 	start := time.Now()
-	out.Access = s.probeAccess(ctx, projectID, ref, reference, stored, mat)
+	var refused *registry.Error
+	out.Access, refused = s.probeAccess(ctx, projectID, ref, reference, stored, mat)
 	auth := "anonymous"
 	if stored && out.Access != accessPublic {
 		auth = "stored"
 	}
-	s.logLookup("access", ref, out.Access, time.Since(start), auth)
+	s.logLookup("access", ref, out.Access, time.Since(start), auth, refused)
 	if out.Access != accessUnknown {
 		svc.Cache.Put(key, out.Access, s.now())
 	}
@@ -152,34 +153,37 @@ func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, proje
 // probeAccess runs the anonymous and then the stored-login manifest lookup.
 // A 401, 403 or 404 without a credential (registry code not_found) counts
 // as refused: the registry cannot tell private from missing without a login,
-// so not_found is only an authenticated 404.
-func (s *Server) probeAccess(ctx context.Context, projectID uuid.UUID, ref catalog.ImageRef, reference string, stored bool, mat store.RegistryMaterial) string {
+// so not_found is only an authenticated 404. For login_failed it also
+// returns the registry error, for the lookup log; otherwise nil.
+func (s *Server) probeAccess(ctx context.Context, projectID uuid.UUID, ref catalog.ImageRef, reference string, stored bool, mat store.RegistryMaterial) (string, *registry.Error) {
 	repo := registry.Repo{Host: ref.Host, Path: ref.Path}
 	_, _, err := s.Registry.Client.Digest(ctx, repo, reference)
 	if err == nil {
-		return accessPublic
+		return accessPublic, nil
 	}
 	if registryCode(err) != registry.CodeNotFound {
-		return accessUnknown
+		return accessUnknown, nil
 	}
 	if !stored {
-		return accessPrivateNoLogin
+		return accessPrivateNoLogin, nil
 	}
 	token, err := s.openRegistry(projectID, mat)
 	if err != nil {
-		return accessUnknown
+		return accessUnknown, nil
 	}
 	repo.Cred = &registry.Credential{Username: mat.Username, Token: token}
 	_, sent, err := s.Registry.Client.Digest(ctx, repo, reference)
 	switch {
 	case err == nil:
-		return accessPrivateOK
+		return accessPrivateOK, nil
 	case registryCode(err) == registry.CodeAuthFailed:
-		return accessLoginFailed
+		var rerr *registry.Error
+		errors.As(err, &rerr)
+		return accessLoginFailed, rerr
 	case registryCode(err) == registry.CodeNotFound && sent:
-		return accessNotFound
+		return accessNotFound, nil
 	default:
-		return accessUnknown
+		return accessUnknown, nil
 	}
 }
 

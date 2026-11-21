@@ -55,8 +55,37 @@ var challengeParam = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
 // Error is a lookup failure. Error() is only the reason: it never carries a
 // registry body, a URL, or a token.
+//
+// For auth_failed (a stored credential sent and answered 401 or 403) Status,
+// Stage and RegistryCode say why, for the lookup log only: the HTTP status,
+// the step that refused (StageToken, StageManifest or StageTags), and the
+// first OCI error code of the answer when it is in ociCodes, else empty.
 type Error struct {
-	Code string
+	Code         string
+	Status       int
+	Stage        string
+	RegistryCode string
+}
+
+// The step of a lookup that answered.
+const (
+	StageToken    = "token"
+	StageManifest = "manifest"
+	StageTags     = "tags"
+)
+
+// refusalBodyMax bounds the 401/403 body read for its OCI error code.
+const refusalBodyMax = 4 << 10
+
+// ociCodes are the OCI distribution error codes the log may name. Any other
+// code, and the message and detail of every error, are never kept.
+var ociCodes = map[string]bool{
+	"UNAUTHORIZED":     true,
+	"DENIED":           true,
+	"NAME_UNKNOWN":     true,
+	"MANIFEST_UNKNOWN": true,
+	"TOOMANYREQUESTS":  true,
+	"UNSUPPORTED":      true,
 }
 
 func (e *Error) Error() string { return "registry: " + e.Code }
@@ -123,6 +152,9 @@ type session struct {
 	api      string
 	auth     string
 	credUsed bool
+	// stage is the registry step of this lookup (StageManifest or
+	// StageTags); the realm request is always StageToken.
+	stage string
 }
 
 func (c *Client) session(repo Repo) *session {
@@ -135,6 +167,7 @@ func (c *Client) Tags(ctx context.Context, repo Repo) (TagList, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.lookupTimeout)
 	defer cancel()
 	s := c.session(repo)
+	s.stage = StageTags
 	next := &url.URL{Scheme: "https", Host: s.api, Path: "/v2/" + repo.Path + "/tags/list", RawQuery: "n=100"}
 	var out TagList
 	for page := 0; next != nil; page++ {
@@ -171,6 +204,7 @@ func (c *Client) Digest(ctx context.Context, repo Repo, tag string) (string, boo
 	ctx, cancel := context.WithTimeout(ctx, c.lookupTimeout)
 	defer cancel()
 	s := c.session(repo)
+	s.stage = StageManifest
 	u := &url.URL{Scheme: "https", Host: s.api, Path: "/v2/" + repo.Path + "/manifests/" + tag}
 	res, err := s.do(ctx, http.MethodHead, u, manifestAccept, 0)
 	if err != nil {
@@ -216,7 +250,40 @@ func (s *session) do(ctx context.Context, method string, u *url.URL, accept stri
 	if res.status >= 200 && res.status < 300 {
 		return res, nil
 	}
-	return response{}, s.statusErr(res.status)
+	return response{}, s.answerErr(s.stage, res)
+}
+
+// answerErr is statusErr for a full answer: an auth_failed error also gets
+// the status, the stage and the allowlisted OCI error code of the body.
+func (s *session) answerErr(stage string, res response) error {
+	err := s.statusErr(res.status)
+	var e *Error
+	if errors.As(err, &e) && e.Code == CodeAuthFailed {
+		e.Status = res.status
+		e.Stage = stage
+		e.RegistryCode = ociCode(res.body)
+	}
+	return err
+}
+
+// ociCode is the first errors[].code of an OCI error body when it is in
+// ociCodes, else empty. A body over refusalBodyMax gives empty.
+func ociCode(body []byte) string {
+	if len(body) == 0 || len(body) > refusalBodyMax {
+		return ""
+	}
+	var doc struct {
+		Errors []struct {
+			Code string `json:"code"`
+		} `json:"errors"`
+	}
+	if json.Unmarshal(body, &doc) != nil || len(doc.Errors) == 0 {
+		return ""
+	}
+	if code := doc.Errors[0].Code; ociCodes[code] {
+		return code
+	}
+	return ""
 }
 
 // statusErr maps a non-2xx answer from the registry or the realm.
@@ -257,6 +324,13 @@ func (s *session) send(ctx context.Context, method, u, accept string, max int64,
 	}
 	defer res.Body.Close()
 	out := response{status: res.StatusCode, header: res.Header}
+	if (res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden) && s.credUsed {
+		// Only for the OCI error code (answerErr), and only once a stored
+		// credential was sent; one byte over the limit marks the body as
+		// too long. A failed read leaves a partial body, which gives no code.
+		out.body, _ = io.ReadAll(io.LimitReader(res.Body, refusalBodyMax+1))
+		return out, nil
+	}
 	if max > 0 && res.StatusCode >= 200 && res.StatusCode < 300 {
 		if out.body, err = io.ReadAll(io.LimitReader(res.Body, max+1)); err != nil {
 			return response{}, netErr(err)
@@ -321,7 +395,7 @@ func (s *session) authorize(ctx context.Context, challenge string) error {
 		return err
 	}
 	if res.status < 200 || res.status >= 300 {
-		return s.statusErr(res.status)
+		return s.answerErr(StageToken, res)
 	}
 	var tok struct {
 		Token       string `json:"token"`
