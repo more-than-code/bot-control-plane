@@ -194,6 +194,12 @@ describe('host config files: helpers', () => {
 		assert.equal(text('rollback_failed').text, 'The new file failed and the previous file could not be restored. Check the host.');
 		assert.equal(text('rollback_failed').kind, 'error');
 		assert.equal(text('forbidden_spec').text, 'The host refused this file under its policy (runner.toml).');
+		assert.equal(
+			text('forbidden_spec', 'exec').text,
+			"A program this file's check runs is not safe to run (see runner.toml); fix its permissions on the host."
+		);
+		assert.equal(text('forbidden_spec', 'exec').kind, 'error');
+		assert.equal(text('forbidden_spec', 'lookup').text, 'The host refused this file under its policy (runner.toml).');
 	});
 
 	test('line diff marks removed and added lines and folds long unchanged runs', () => {

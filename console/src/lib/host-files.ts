@@ -195,6 +195,12 @@ export function applyOutcomeMessage(version: number, result: HostFileApplyResult
 		case 'rollback_failed':
 			return { kind: 'error', parts: [{ text: 'The new file failed and the previous file could not be restored. Check the host.' }] };
 		case 'forbidden_spec':
+			if (result.stage === 'exec') {
+				return {
+					kind: 'error',
+					parts: [{ text: "A program this file's check runs is not safe to run (see runner.toml); fix its permissions on the host." }]
+				};
+			}
 			return { kind: 'error', parts: [{ text: 'The host refused this file under its policy (runner.toml).' }] };
 		default:
 			return { kind: 'error', parts: [{ text: 'The host answered ' }, { text: result.outcome || 'nothing', mono: true }, { text: '.' }] };
