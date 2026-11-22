@@ -46,6 +46,8 @@ type registryRec struct {
 	// Source and ConnectedBy are api-v1 v1.29 item 5.
 	Source      string
 	ConnectedBy *uuid.UUID
+	// DeletePackages is api-v1 v1.45.
+	DeletePackages bool
 	// Refresh is the GitHub refresh material (api-v1 v1.43).
 	Refresh store.RegistryRefreshMaterial
 }
@@ -862,7 +864,7 @@ func (m *Mem) ListRegistries(_ context.Context, projectID uuid.UUID) ([]store.Re
 // registryLocked is the listed form of rec, naming the connecting user as
 // the database join does.
 func (m *Mem) registryLocked(rec registryRec) store.Registry {
-	out := store.Registry{Host: rec.Host, Username: rec.Username, UpdatedAt: rec.UpdatedAt, UpdatedBy: rec.UpdatedBy, Source: rec.Source}
+	out := store.Registry{Host: rec.Host, Username: rec.Username, UpdatedAt: rec.UpdatedAt, UpdatedBy: rec.UpdatedBy, Source: rec.Source, DeletePackages: rec.DeletePackages}
 	if rec.ConnectedBy != nil {
 		if u, ok := m.users[*rec.ConnectedBy]; ok {
 			out.ConnectedBy = &store.RegistryUser{ID: u.ID, Name: u.Name}
@@ -889,7 +891,8 @@ func (m *Mem) putRegistryLocked(projectID uuid.UUID, host string, in store.Regis
 		Host: host, Username: in.Username,
 		Nonce: append([]byte(nil), in.Nonce...), Ciphertext: append([]byte(nil), in.Ciphertext...),
 		KeyVersion: in.KeyVersion, UpdatedAt: at, UpdatedBy: actor, Source: in.Source,
-		Refresh: copyRefresh(in.RegistryRefreshMaterial),
+		DeletePackages: in.DeletePackages,
+		Refresh:        copyRefresh(in.RegistryRefreshMaterial),
 	}
 	if in.ConnectedBy != nil {
 		id := *in.ConnectedBy
@@ -919,7 +922,7 @@ func (m *Mem) GetRegistryMaterial(_ context.Context, projectID uuid.UUID, host s
 	return store.RegistryMaterial{
 		Host: rec.Host, Username: rec.Username,
 		Nonce: append([]byte(nil), rec.Nonce...), Ciphertext: append([]byte(nil), rec.Ciphertext...),
-		KeyVersion: rec.KeyVersion, Source: rec.Source,
+		KeyVersion: rec.KeyVersion, Source: rec.Source, DeletePackages: rec.DeletePackages,
 		RegistryRefreshMaterial: copyRefresh(rec.Refresh),
 	}, nil
 }

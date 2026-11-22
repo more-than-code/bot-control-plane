@@ -249,6 +249,9 @@ func contractRoutes() []route {
 		{"GET /v1/projects/{id}/hosts/{host_id}/network-snippet", false, (*Server).handleNetworkSnippet, delegatedAllow},
 		{"GET /v1/projects/{id}/image-tags", false, (*Server).handleImageTags, delegatedAllow},
 		{"GET /v1/projects/{id}/image-digest", false, (*Server).handleImageDigest, delegatedAllow},
+		// api-v1 v1.45: image versions, console only.
+		{"GET /v1/projects/{id}/image-versions", false, (*Server).handleImageVersions, delegatedDenyRead},
+		{"DELETE /v1/projects/{id}/image-versions/{version_id}", false, (*Server).handleImageVersionDelete, delegatedDeny},
 		{"GET /v1/projects/{id}/files", false, (*Server).handleFileList, delegatedAllow},
 		{"GET /v1/projects/{id}/files/{name}", false, (*Server).handleFileGet, delegatedAllow},
 		{"PUT /v1/projects/{id}/files/{name}", false, (*Server).handleFilePut, delegatedHandler},

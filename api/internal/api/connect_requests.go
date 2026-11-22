@@ -205,37 +205,42 @@ func (s *Server) handleConnectRequestDecline(w http.ResponseWriter, r *http.Requ
 // startConnectRequest reads the optional start body of item 5. It returns
 // the connect request id to keep in the OAuth state, or "" when the body
 // names none (v1.29 behaviour). ok is false when it has answered.
-func (s *Server) startConnectRequest(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID) (string, bool) {
+//
+// The body may also carry delete_packages (api-v1 v1.45): the start then
+// asks GitHub for delete:packages too; the bool returned is that flag.
+func (s *Server) startConnectRequest(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID) (string, bool, bool) {
 	var body struct {
 		ConnectRequestID *string `json:"connect_request_id"`
+		DeletePackages   bool    `json:"delete_packages"`
 	}
 	if !decodeOptionalJSON(w, r, &body) {
-		return "", false
+		return "", false, false
 	}
+	del := body.DeletePackages
 	if body.ConnectRequestID == nil {
-		return "", true
+		return "", del, true
 	}
 	id := *body.ConnectRequestID
 	// A console session may name the request by its handle (api-v1 v1.33 item 8).
 	hash, ok := requestHash(id, true)
 	if !ok {
 		writeCode(w, "not_found", "not found")
-		return "", false
+		return "", false, false
 	}
 	// The caller already passed the owner-or-admin check on this project.
 	req, err := s.Store.GetConnectRequest(r.Context(), hash)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && (req.UserID != p.User.ID || req.ProjectID != projectID)) {
 		writeCode(w, "not_found", "not found")
-		return "", false
+		return "", false, false
 	}
 	if err != nil {
 		s.writeErr(w, err, false)
-		return "", false
+		return "", false, false
 	}
 	if !s.requestOpen(w, req.RequestMeta) {
-		return "", false
+		return "", false, false
 	}
-	return id, true
+	return id, del, true
 }
 
 // decodeOptionalJSON is decodeJSON that also accepts an empty body (no

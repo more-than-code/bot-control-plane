@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -107,4 +108,16 @@ func (c *Cache) Put(key string, value any, now time.Time) {
 		}
 	}
 	c.entries[key] = cacheEntry{value: value, expires: now.Add(c.ttl)}
+}
+
+// DropPrefix removes every entry whose key starts with prefix (api-v1 v1.45:
+// a deleted package version's tags and digests are looked up again).
+func (c *Cache) DropPrefix(prefix string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k := range c.entries {
+		if strings.HasPrefix(k, prefix) {
+			delete(c.entries, k)
+		}
+	}
 }

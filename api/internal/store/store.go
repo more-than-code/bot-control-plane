@@ -854,6 +854,10 @@ type Store interface {
 	RunningImageOp(ctx context.Context, entryID, hostID uuid.UUID) (ImageDeploy, error)
 	// RollbackDigests returns up to three newest distinct succeeded or unchanged digests.
 	RollbackDigests(ctx context.Context, entryID, hostID uuid.UUID) ([]string, error)
+	// ImageDigestHolds lists the digests the given image entries hold
+	// (api-v1 v1.45 §5): a live service of the entry running it, and
+	// DeployHolds of each host's deploy rows.
+	ImageDigestHolds(ctx context.Context, entries []EntryKey) ([]DigestHold, error)
 	// AutoActionTarget resolves an auto_action's project slug and entry name
 	// for one host. ErrNotFound: unknown or deleted project, no image entry of
 	// that name, or a project without deploy access to the host. It writes nothing.

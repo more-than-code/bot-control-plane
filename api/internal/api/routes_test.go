@@ -140,6 +140,8 @@ func TestRouteTable(t *testing.T) {
 		"GET /v1/projects/{id}/hosts/{host_id}/network-snippet",
 		"GET /v1/projects/{id}/image-tags",
 		"GET /v1/projects/{id}/image-digest",
+		"GET /v1/projects/{id}/image-versions",
+		"DELETE /v1/projects/{id}/image-versions/{version_id}",
 		"GET /v1/projects/{id}/files",
 		"GET /v1/projects/{id}/files/{name}",
 		"PUT /v1/projects/{id}/files/{name}",

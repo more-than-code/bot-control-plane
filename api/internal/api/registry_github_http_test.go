@@ -40,6 +40,9 @@ type fakeGitHub struct {
 	revoked   []string
 	verifier  string
 	redirect  string
+	// packages, when set, answers the REST calls no other case takes
+	// (api-v1 v1.45 package versions).
+	packages http.HandlerFunc
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
@@ -79,6 +82,8 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 			}
 			f.revoked = append(f.revoked, body["access_token"])
 			w.WriteHeader(http.StatusNoContent)
+		case f.packages != nil:
+			f.packages(w, r)
 		default:
 			http.NotFound(w, r)
 		}

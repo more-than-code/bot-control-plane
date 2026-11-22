@@ -102,10 +102,20 @@ func New(cfg Config) *Client {
 // AuthorizeURL is GitHub's authorize URL for state, the S256 challenge of
 // verifier, and redirectURI (api-v1 v1.29 item 2).
 func (c *Client) AuthorizeURL(state, verifier, redirectURI string) string {
+	return c.AuthorizeURLScopes(state, verifier, redirectURI, false)
+}
+
+// AuthorizeURLScopes is AuthorizeURL that also asks for DeleteScope when
+// deletePackages is set (api-v1 v1.45 opt-in step).
+func (c *Client) AuthorizeURLScopes(state, verifier, redirectURI string, deletePackages bool) string {
+	scope := Scope
+	if deletePackages {
+		scope += " " + DeleteScope
+	}
 	q := url.Values{}
 	q.Set("client_id", c.cfg.ClientID)
 	q.Set("redirect_uri", redirectURI)
-	q.Set("scope", Scope)
+	q.Set("scope", scope)
 	q.Set("state", state)
 	q.Set("code_challenge", oauth2.S256ChallengeFromVerifier(verifier))
 	q.Set("code_challenge_method", "S256")
@@ -266,6 +276,11 @@ func (c *Client) Revoke(ctx context.Context, token string) error {
 
 // do sends req within the request budget and reads at most bodyMax bytes.
 func (c *Client) do(req *http.Request) ([]byte, http.Header, int, error) {
+	return c.doMax(req, bodyMax)
+}
+
+// doMax is do with its own body cap.
+func (c *Client) doMax(req *http.Request, bodyMax int) ([]byte, http.Header, int, error) {
 	ctx, cancel := context.WithTimeout(req.Context(), requestTimeout)
 	defer cancel()
 	res, err := c.http.Do(req.WithContext(ctx))
@@ -273,7 +288,7 @@ func (c *Client) do(req *http.Request) ([]byte, http.Header, int, error) {
 		return nil, nil, 0, ErrFailed
 	}
 	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, bodyMax+1))
+	body, err := io.ReadAll(io.LimitReader(res.Body, int64(bodyMax)+1))
 	if err != nil || len(body) > bodyMax {
 		return nil, nil, 0, ErrFailed
 	}

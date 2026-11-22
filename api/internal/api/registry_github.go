@@ -17,10 +17,12 @@ import (
 
 // Connect GitHub error texts (api-v1 v1.29 items 1–3).
 const (
-	msgGitHubOff    = "GitHub is not configured"
-	msgGitHubState  = "this GitHub sign-in expired or was already used; start again"
-	msgGitHubScope  = "GitHub did not grant read:packages"
-	msgGitHubFailed = "GitHub sign-in failed; try again"
+	msgGitHubOff   = "GitHub is not configured"
+	msgGitHubState = "this GitHub sign-in expired or was already used; start again"
+	msgGitHubScope = "GitHub did not grant read:packages"
+	// msgGitHubDeleteScope is the api-v1 v1.45 opt-in without the scope.
+	msgGitHubDeleteScope = "GitHub did not grant delete:packages"
+	msgGitHubFailed      = "GitHub sign-in failed; try again"
 	// msgRegistryChanged is a disconnect whose login changed meanwhile.
 	msgRegistryChanged = "The registry login changed; reload and try again"
 	githubCallPath     = "/auth/github/callback"
@@ -70,11 +72,11 @@ func (s *Server) handleGitHubStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// api-v1 v1.31 item 5: an optional connect request rides in the state.
-	requestID, ok := s.startConnectRequest(w, r, p, id)
+	requestID, deletePackages, ok := s.startConnectRequest(w, r, p, id)
 	if !ok {
 		return
 	}
-	state, verifier, err := s.GitHubStates.PutRequest(p.User.ID, id, requestID, s.now())
+	state, verifier, err := s.GitHubStates.PutStart(p.User.ID, id, requestID, deletePackages, s.now())
 	if errors.Is(err, github.ErrFull) {
 		writeCode(w, "unavailable", "unavailable")
 		return
@@ -84,7 +86,7 @@ func (s *Server) handleGitHubStart(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "error", "internal error")
 		return
 	}
-	writeOK(w, http.StatusOK, map[string]any{"authorize_url": s.GitHub.AuthorizeURL(state, verifier, s.githubRedirect())})
+	writeOK(w, http.StatusOK, map[string]any{"authorize_url": s.GitHub.AuthorizeURLScopes(state, verifier, s.githubRedirect(), deletePackages)})
 }
 
 // handleGitHubCallback is api-v1 v1.29 item 3. The token is sealed and
@@ -166,6 +168,16 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "bad_request", msgGitHubScope)
 		return
 	}
+	// api-v1 v1.45: the opt-in step must get delete:packages; the login
+	// stays as it was when GitHub left it out. A plain connect records
+	// whatever GitHub granted, so it never claims a scope it lacks.
+	canDelete := github.HasDeleteScope(scopes)
+	if taken.DeletePackages && !canDelete {
+		failed("scope", github.ReasonScopeMissing)
+		s.revokeGitHub(r.Context(), token, false)
+		writeCode(w, "bad_request", msgGitHubDeleteScope)
+		return
+	}
 	host := store.GitHubRegistry
 	nonce, ciphertext, err := s.Secrets.Seal(seal.RegistryAAD(projectID.String(), host), []byte(token))
 	if err != nil {
@@ -207,6 +219,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		KeyVersion:              seal.KeyVersion,
 		Source:                  store.RegistrySourceGitHub,
 		ConnectedBy:             &actor,
+		DeletePackages:          canDelete,
 		RegistryRefreshMaterial: refresh,
 	}
 	var reg store.Registry
@@ -236,7 +249,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		s.revokeGitHub(r.Context(), stale, false)
 	}
 	s.registryLoginChanged(r.Context(), projectID, host, false)
-	detail := map[string]any{"host": host, "login": login, "via": viaKind(p.Session.Kind)}
+	detail := map[string]any{"host": host, "login": login, "via": viaKind(p.Session.Kind), "delete_packages": canDelete}
 	out := map[string]any{
 		"project_id": projectID,
 		"host":       reg.Host,

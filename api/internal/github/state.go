@@ -34,7 +34,10 @@ type pending struct {
 	// request is the connect request id the state carries (api-v1 v1.31
 	// item 5), or "" for a start from Settings.
 	request string
-	expires time.Time
+	// deletePackages is the api-v1 v1.45 opt-in: the start asked GitHub
+	// for delete:packages too.
+	deletePackages bool
+	expires        time.Time
 	// seq orders states made at the same instant, so "oldest" is exact.
 	seq uint64
 }
@@ -62,6 +65,12 @@ func (s *States) Put(user, project uuid.UUID, now time.Time) (state, verifier st
 // PutRequest is Put for a start that names a connect request (api-v1 v1.31
 // item 5): the state also carries request, which Taken returns.
 func (s *States) PutRequest(user, project uuid.UUID, request string, now time.Time) (state, verifier string, err error) {
+	return s.PutStart(user, project, request, false, now)
+}
+
+// PutStart is PutRequest that also records whether the start asked for
+// delete:packages (api-v1 v1.45), which Taken returns.
+func (s *States) PutStart(user, project uuid.UUID, request string, deletePackages bool, now time.Time) (state, verifier string, err error) {
 	plain, _, err := secret.NewToken()
 	if err != nil {
 		return "", "", err
@@ -79,7 +88,7 @@ func (s *States) PutRequest(user, project uuid.UUID, request string, now time.Ti
 	}
 	s.dropOldestLocked(user, now)
 	s.seq++
-	s.byID[plain] = pending{user: user, project: project, verifier: verifier, request: request, expires: now.Add(StateTTL), seq: s.seq}
+	s.byID[plain] = pending{user: user, project: project, verifier: verifier, request: request, deletePackages: deletePackages, expires: now.Add(StateTTL), seq: s.seq}
 	return plain, verifier, nil
 }
 
@@ -96,6 +105,8 @@ type Taken struct {
 	Project  uuid.UUID
 	Verifier string
 	Request  string
+	// DeletePackages is true when the start asked for delete:packages.
+	DeletePackages bool
 }
 
 // TakeState is Take that also returns the state's connect request id.
@@ -110,7 +121,7 @@ func (s *States) TakeState(state string, user uuid.UUID, now time.Time) (Taken, 
 	if !now.Before(p.expires) || p.user != user {
 		return Taken{}, ErrState
 	}
-	return Taken{Project: p.project, Verifier: p.verifier, Request: p.request}, nil
+	return Taken{Project: p.project, Verifier: p.verifier, Request: p.request, DeletePackages: p.deletePackages}, nil
 }
 
 // Len is the number of held states (tests).
