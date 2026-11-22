@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
 )
@@ -24,6 +25,13 @@ var (
 // Order: semver-like tags descending, then latest, then the rest in reverse
 // lexical order. Registries list tags lexically and give no dates.
 func Order(list TagList) (tags []string, truncated bool) {
+	return OrderByTime(list, nil)
+}
+
+// OrderByTime is Order with push times from elsewhere (GitHub package
+// versions for ghcr.io): tags with a time come first, newest first, and the
+// rest follow in Order's order. Equal times keep Order's order.
+func OrderByTime(list TagList, times map[string]time.Time) (tags []string, truncated bool) {
 	seen := map[string]bool{}
 	kept := make([]string, 0, len(list.Tags))
 	for _, t := range list.Tags {
@@ -37,7 +45,17 @@ func Order(list TagList) (tags []string, truncated bool) {
 	for _, t := range kept {
 		keys[t] = keyOf(t)
 	}
-	sort.Slice(kept, func(i, j int) bool { return keys[kept[i]].before(keys[kept[j]]) })
+	sort.Slice(kept, func(i, j int) bool {
+		ti, iok := times[kept[i]]
+		tj, jok := times[kept[j]]
+		if iok != jok {
+			return iok
+		}
+		if iok && !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return keys[kept[i]].before(keys[kept[j]])
+	})
 	truncated = list.More
 	if len(kept) > MaxItems {
 		kept = kept[:MaxItems]

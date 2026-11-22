@@ -308,3 +308,36 @@ func TestImageVersionsNeedGitHubLogin(t *testing.T) {
 	status, env, _ := mustCall(t, f.w, f.owner, http.MethodGet, versionsPath(f.project), "")
 	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", msgVersionsNeedGitHub)
 }
+
+// The tag picker lists a ghcr.io image's tags newest first when the
+// project's Connect GitHub login can read the package versions; tags GitHub
+// does not know follow in the plain order.
+func TestImageTagsNewestFirstWithGitHub(t *testing.T) {
+	f := newVersionsFixture(t, false)
+	f.pkg.versions = []map[string]any{
+		pkgVersion("101", digestOf("a"), []string{"sha-a", "dev"}, f.w.now.Add(-2*time.Hour)),
+		pkgVersion("102", digestOf("b"), []string{"sha-b"}, f.w.now.Add(-48*time.Hour)),
+		pkgVersion("104", digestOf("d"), []string{"sha-d", "release-2"}, f.w.now.Add(-time.Hour)),
+	}
+	f.public([]string{"dev", "release-2", "sha-a", "sha-b", "sha-d", "zz-untracked"}, digestOf("a"))
+	status, env, _ := mustCall(t, f.w, f.owner, http.MethodGet, tagsPath(f.project, "ghcr.io/acme/web"), "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	var got []string
+	for _, item := range objectPayload(t, env)["items"].([]any) {
+		got = append(got, item.(map[string]any)["tag"].(string))
+	}
+	if want := "sha-d,release-2,sha-a,dev,sha-b,zz-untracked"; strings.Join(got, ",") != want {
+		t.Fatalf("tags %s, want %s", strings.Join(got, ","), want)
+	}
+
+	// Without GitHub's versions the plain order stays.
+	f.pkg.mu.Lock()
+	f.pkg.versions = nil
+	f.pkg.mu.Unlock()
+	f.w.srv.Registry.Cache.DropPrefix("tags|")
+	status, env, _ = mustCall(t, f.w, f.owner, http.MethodGet, tagsPath(f.project, "ghcr.io/acme/web"), "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if first := objectPayload(t, env)["items"].([]any)[0].(map[string]any)["tag"]; first != "zz-untracked" {
+		t.Fatalf("first tag %v", first)
+	}
+}

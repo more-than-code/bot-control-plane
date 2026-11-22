@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/registry"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
@@ -54,7 +55,7 @@ func (s *Server) handleImageTags(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, sent, err
 		}
-		tags, truncated := registry.Order(list)
+		tags, truncated := registry.OrderByTime(list, s.ghcrTagTimes(ctx, ref, mat, repo))
 		out := tagsPayload{Items: make([]tagItem, len(tags)), Truncated: truncated}
 		for i, t := range tags {
 			out.Items[i] = tagItem{Tag: t}
@@ -64,6 +65,39 @@ func (s *Server) handleImageTags(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		writeOK(w, http.StatusOK, v)
 	}
+}
+
+// ghcrTagTimes maps each tag of a ghcr.io image to its package version's
+// updated_at, read from GitHub with the project's Connect GitHub login, so
+// the picker lists the newest tags first. Any other image, a manual login or
+// a failed GitHub call gives nil and the plain order.
+func (s *Server) ghcrTagTimes(ctx context.Context, ref catalog.ImageRef, mat *store.RegistryMaterial, repo registry.Repo) map[string]time.Time {
+	if s.GitHub == nil || mat == nil || mat.Source != store.RegistrySourceGitHub || ref.Host != store.GitHubRegistry || repo.Cred == nil {
+		return nil
+	}
+	owner, name, ok := github.SplitGHCRPath(ref.Path)
+	if !ok {
+		return nil
+	}
+	isOrg, err := s.GitHub.OwnerIsOrg(ctx, repo.Cred.Token, owner)
+	if err != nil {
+		s.logger().Warn("tag times unavailable", "step", "owner", "host", ref.Host, "path", ref.Path)
+		return nil
+	}
+	versions, _, err := s.GitHub.Versions(ctx, repo.Cred.Token, github.Package{Owner: owner, Org: isOrg, Name: name})
+	if err != nil {
+		s.logger().Warn("tag times unavailable", "step", "versions", "host", ref.Host, "path", ref.Path)
+		return nil
+	}
+	times := make(map[string]time.Time)
+	for _, v := range versions {
+		for _, t := range v.Tags {
+			if prev, seen := times[t]; !seen || v.UpdatedAt.After(prev) {
+				times[t] = v.UpdatedAt
+			}
+		}
+	}
+	return times
 }
 
 func (s *Server) handleImageDigest(w http.ResponseWriter, r *http.Request) {
