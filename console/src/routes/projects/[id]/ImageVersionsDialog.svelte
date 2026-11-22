@@ -122,7 +122,7 @@
 				confirmLabel="Delete version"
 				rowLabel="Delete version {shortDigest(version.digest)}"
 				message={deleteMessage(version)}
-				messageClass="break-all"
+				messageClass="wrap-anywhere"
 				hidden={[
 					{ name: 'image', value: image },
 					{ name: 'version_id', value: String(version.version_id) },
