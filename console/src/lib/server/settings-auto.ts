@@ -54,9 +54,12 @@ function apiMessage(err: unknown): string {
 export async function connectGitHub(event: RequestEvent) {
 	requireUser(event);
 	const id = projectIdOf(event.params);
+	// api-v1 v1.45: "Allow deleting image versions" asks GitHub for delete:packages too.
+	const deletePackages = formText(await event.request.formData(), 'delete_packages') === '1';
 	let target: unknown;
 	try {
-		const payload = await apiFetch(event, `/v1/projects/${id}/registries/github/start`, { method: 'POST', body: '{}' });
+		const body = deletePackages ? '{"delete_packages":true}' : '{}';
+		const payload = await apiFetch(event, `/v1/projects/${id}/registries/github/start`, { method: 'POST', body });
 		target = payload != null && typeof payload === 'object' ? (payload as Record<string, unknown>).authorize_url : null;
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;

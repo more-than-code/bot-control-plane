@@ -60,7 +60,7 @@ test('the Join tokens tab offers Revoke only on an active token', () => {
 test('the Settings Delete buttons name the env set, file or registry they delete', () => {
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
 	const file: ProjectFile = { name: 'app.conf', is_secret: false, size: 12, sha256: 'ab'.repeat(32), updated_at: '2026-11-14T10:00:00Z', updated_by: 'joe' };
-	const registry: Registry = { host: 'ghcr.io', username: 'joe', updated_at: '2026-11-14T10:00:00Z', updated_by: 'joe', source: 'manual', connected_by: null };
+	const registry: Registry = { host: 'ghcr.io', username: 'joe', updated_at: '2026-11-14T10:00:00Z', updated_by: 'joe', source: 'manual', connected_by: null, delete_packages: false };
 	const envSet: EnvSet = { name: 'app', keys: [], updated_at: '2026-11-14T10:00:00Z', updated_by: 'joe' };
 	const html = render(SettingsSection, {
 		props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, envSets: [envSet], files: [file], registries: [registry] }

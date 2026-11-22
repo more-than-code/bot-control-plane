@@ -71,6 +71,7 @@ import { formText } from '$lib/server/form';
 import { catalogRoutes, catalogRoutesConfirm, catalogRoutesSave } from '$lib/server/edge-actions';
 import { catalogPrivateKeys, catalogReadiness, connectGitHub, githubRefused, hostPolicySnippet, imageAccess, networkSnippet } from '$lib/server/settings-auto';
 import { githubNoteCode, type GitHubNoteCode } from '$lib/settings-auto';
+import { catalogImageVersionDelete, catalogImageVersions } from '$lib/server/image-versions';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { isOrgAdmin, roleAtLeast, uiRole } from '$lib/server/roles';
@@ -653,6 +654,8 @@ export const actions: Actions = {
 	catalogFiles,
 	catalogImageTags,
 	catalogImageDigest,
+	catalogImageVersions,
+	catalogImageVersionDelete,
 	saveEnvSet,
 	mergeEnvSet,
 	putEnvKey,

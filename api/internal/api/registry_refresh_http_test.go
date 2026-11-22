@@ -443,7 +443,7 @@ func TestGitHubRefreshOnUse(t *testing.T) {
 	}
 	// The registry list keeps its shape and updated_at.
 	items := listRegistries(t, rf.w, rf.owner, rf.project)
-	if len(items) != 1 || len(items[0]) != 6 || items[0]["updated_at"] != rf.w.now.Format(time.RFC3339) {
+	if len(items) != 1 || len(items[0]) != 7 || items[0]["updated_at"] != rf.w.now.Format(time.RFC3339) {
 		t.Fatalf("registry list %v", items)
 	}
 	if p := rf.access(t); p != accessPrivateOK {

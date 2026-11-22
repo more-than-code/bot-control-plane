@@ -1150,7 +1150,7 @@ func (d *DB) ListRegistries(ctx context.Context, projectID uuid.UUID) ([]store.R
 		return nil, err
 	}
 	rows, err := d.pool.Query(ctx, `
-SELECT r.host, r.username, r.updated_at, r.updated_by::text, r.source, r.connected_by::text, u.name
+SELECT r.host, r.username, r.updated_at, r.updated_by::text, r.source, r.connected_by::text, u.name, r.delete_packages
 FROM app.registries AS r
 LEFT JOIN app.users AS u ON u.id = r.connected_by
 WHERE r.project_id = $1::uuid
@@ -1195,8 +1195,8 @@ func putRegistryRow(ctx context.Context, q queryer, projectID uuid.UUID, host st
 	row := q.QueryRow(ctx, `
 WITH up AS (
 INSERT INTO app.registries (project_id, host, username, nonce, ciphertext, key_version, updated_at, updated_by, source, connected_by,
-    refresh_nonce, refresh_ciphertext, access_expires_at, refresh_expires_at)
-VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10::uuid, $11, $12, $13, $14)
+    refresh_nonce, refresh_ciphertext, access_expires_at, refresh_expires_at, delete_packages)
+VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10::uuid, $11, $12, $13, $14, $15)
 ON CONFLICT (project_id, host) DO UPDATE SET
     username = EXCLUDED.username,
     nonce = EXCLUDED.nonce,
@@ -1209,13 +1209,14 @@ ON CONFLICT (project_id, host) DO UPDATE SET
     refresh_nonce = EXCLUDED.refresh_nonce,
     refresh_ciphertext = EXCLUDED.refresh_ciphertext,
     access_expires_at = EXCLUDED.access_expires_at,
-    refresh_expires_at = EXCLUDED.refresh_expires_at
-RETURNING host, username, updated_at, updated_by, source, connected_by
+    refresh_expires_at = EXCLUDED.refresh_expires_at,
+    delete_packages = EXCLUDED.delete_packages
+RETURNING host, username, updated_at, updated_by, source, connected_by, delete_packages
 )
-SELECT up.host, up.username, up.updated_at, up.updated_by::text, up.source, up.connected_by::text, u.name
+SELECT up.host, up.username, up.updated_at, up.updated_by::text, up.source, up.connected_by::text, u.name, up.delete_packages
 FROM up LEFT JOIN app.users AS u ON u.id = up.connected_by
 `, projectID.String(), host, in.Username, in.Nonce, in.Ciphertext, in.KeyVersion, at, actor.String(), in.Source, connected,
-		nilBytes(in.RefreshNonce), nilBytes(in.RefreshCiphertext), in.AccessExpiresAt, in.RefreshExpiresAt)
+		nilBytes(in.RefreshNonce), nilBytes(in.RefreshCiphertext), in.AccessExpiresAt, in.RefreshExpiresAt, in.DeletePackages)
 	item, err := scanRegistry(row)
 	if err != nil {
 		return store.Registry{}, err
@@ -1238,11 +1239,11 @@ func (d *DB) GetRegistryMaterial(ctx context.Context, projectID uuid.UUID, host 
 	var item store.RegistryMaterial
 	err := d.pool.QueryRow(ctx, `
 SELECT host, username, nonce, ciphertext, key_version, source,
-       refresh_nonce, refresh_ciphertext, access_expires_at, refresh_expires_at
+       refresh_nonce, refresh_ciphertext, access_expires_at, refresh_expires_at, delete_packages
 FROM app.registries
 WHERE project_id = $1::uuid AND host = $2
 `, projectID.String(), host).Scan(&item.Host, &item.Username, &item.Nonce, &item.Ciphertext, &item.KeyVersion, &item.Source,
-		&item.RefreshNonce, &item.RefreshCiphertext, &item.AccessExpiresAt, &item.RefreshExpiresAt)
+		&item.RefreshNonce, &item.RefreshCiphertext, &item.AccessExpiresAt, &item.RefreshExpiresAt, &item.DeletePackages)
 	if err != nil {
 		return store.RegistryMaterial{}, mapErr(err)
 	}
@@ -1324,7 +1325,7 @@ func scanRegistry(row pgx.Row) (store.Registry, error) {
 	var item store.Registry
 	var by string
 	var connected, name *string
-	if err := row.Scan(&item.Host, &item.Username, &item.UpdatedAt, &by, &item.Source, &connected, &name); err != nil {
+	if err := row.Scan(&item.Host, &item.Username, &item.UpdatedAt, &by, &item.Source, &connected, &name, &item.DeletePackages); err != nil {
 		return store.Registry{}, mapErr(err)
 	}
 	id, err := parseID(by)

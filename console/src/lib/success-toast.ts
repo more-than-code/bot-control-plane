@@ -34,3 +34,8 @@ export function toastHostRenamed(from: string, to: string): void {
 export function toastHostRemoved(name: string): void {
 	toast.success(`Removed ${name}.`);
 }
+
+/** "Deleted version sha256:… (n tags)." after an image version delete (api-v1 v1.45). */
+export function toastVersionDeleted(shortDigest: string, tags: number): void {
+	toast.success(`Deleted version ${shortDigest} (${tags} ${tags === 1 ? 'tag' : 'tags'}).`);
+}

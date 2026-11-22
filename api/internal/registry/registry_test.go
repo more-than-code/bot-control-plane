@@ -455,6 +455,24 @@ func TestOrder(t *testing.T) {
 	}
 }
 
+func TestOrderByTime(t *testing.T) {
+	day := time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC)
+	in := []string{"sha-14dc2e8", "sha-07173af", "release-2026-11-22", "main", "latest", "1.2.0", "no-time"}
+	times := map[string]time.Time{
+		"sha-07173af":        day.Add(-24 * time.Hour),
+		"release-2026-11-22": day,
+		"main":               day.Add(time.Hour),
+		"sha-14dc2e8":        day.Add(time.Hour),
+		"latest":             day.Add(-48 * time.Hour),
+		"1.2.0":              day.Add(-72 * time.Hour),
+	}
+	got, _ := registry.OrderByTime(registry.TagList{Tags: in}, times)
+	want := "sha-14dc2e8,main,release-2026-11-22,sha-07173af,latest,1.2.0,no-time"
+	if strings.Join(got, ",") != want {
+		t.Fatalf("order %s", strings.Join(got, ","))
+	}
+}
+
 func TestBlocked(t *testing.T) {
 	for _, a := range []string{
 		"127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1",

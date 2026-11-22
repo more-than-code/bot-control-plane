@@ -62,6 +62,7 @@ var delegatedDenyPatterns = []string{
 	"POST /v1/file-requests/{request_id}/fill",
 	"POST /v1/file-requests/{request_id}/decline",
 	"POST /v1/projects/{id}/registries/github/start",
+	"DELETE /v1/projects/{id}/image-versions/{version_id}",
 	"POST /v1/auth/github/callback",
 	"POST /v1/registry-connect-requests/{request_id}/decline",
 	"POST /v1/orgs/{id}/domains",
@@ -266,6 +267,10 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 			}},
 		{"POST /v1/projects/{id}/registries/github/start", http.MethodPost, "/v1/projects/" + project + "/registries/github/start",
 			"", func(t *testing.T) string {
+				return envSnap(t, w, sc.project.ID, "svc")
+			}},
+		{"DELETE /v1/projects/{id}/image-versions/{version_id}", http.MethodDelete, "/v1/projects/" + project + "/image-versions/1?image=ghcr.io/o/n",
+			`{"digest":"sha256:` + strings.Repeat("a", 64) + `","confirm":"aaaaaaaaaaaa"}`, func(t *testing.T) string {
 				return envSnap(t, w, sc.project.ID, "svc")
 			}},
 		{"POST /v1/auth/github/callback", http.MethodPost, "/v1/auth/github/callback",

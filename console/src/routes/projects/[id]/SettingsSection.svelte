@@ -328,9 +328,17 @@
 								{/await}
 							{/if}
 						</p>
+						<p class="text-muted-foreground w-full min-w-0 text-xs break-words" data-delete-packages={row.delete_packages ? 'true' : 'false'}>
+							{row.delete_packages
+								? 'Can delete image versions: org owners and admins can delete unused versions from Image versions in the catalog.'
+								: 'Cannot delete image versions. Allow it to clean up stale versions from the catalog; GitHub asks you to grant delete:packages.'}
+						</p>
 						<div class="flex flex-wrap items-center gap-2">
 							{#if githubConnect}
 								<GitHubConnect action={connectAction} label="Reconnect" />
+								{#if !row.delete_packages}
+									<GitHubConnect action={connectAction} label="Allow deleting image versions" deletePackages />
+								{/if}
 							{/if}
 							<ConfirmAction
 								id="disconnect-registry-{row.host}"

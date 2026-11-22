@@ -2,6 +2,7 @@
 	import Plug from '@lucide/svelte/icons/plug';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
 
 	/**
 	 * Connect GitHub or Reconnect (api-v1 v1.29 item 2). A plain form post: the action answers with a redirect to
@@ -12,14 +13,17 @@
 		action,
 		label = 'Connect GitHub',
 		replaces = null,
-		size = 'sm'
+		size = 'sm',
+		deletePackages = false
 	}: {
 		/** `?/connectGitHub` on the project page. */
 		action: string;
-		label?: 'Connect GitHub' | 'Reconnect';
+		label?: 'Connect GitHub' | 'Reconnect' | 'Allow deleting image versions';
 		/** The username of a manual ghcr.io login this connection would replace. */
 		replaces?: string | null;
 		size?: 'sm' | 'default';
+		/** api-v1 v1.45: the start also asks GitHub for delete:packages. */
+		deletePackages?: boolean;
 	} = $props();
 
 	let open = $state(false);
@@ -27,6 +31,9 @@
 
 {#if replaces == null}
 	<form method="POST" {action} class="inline">
+		{#if deletePackages}
+			<Input type="hidden" name="delete_packages" value="1" />
+		{/if}
 		<Button type="submit" variant="outline" {size}>
 			<Plug class="size-4" />
 			{label}

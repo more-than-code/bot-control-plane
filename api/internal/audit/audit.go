@@ -93,7 +93,11 @@ const (
 	// ActionRegistryGitHubRefreshRejected is GitHub rejecting a stored
 	// refresh token (api-v1 v1.43 item 2). Detail is {"host"}.
 	ActionRegistryGitHubRefreshRejected = "registry.github_refresh_rejected"
-	ActionFilePut                       = "file.put"
+	// ActionRegistryImageVersionDeleted is one ghcr.io package version
+	// deleted (api-v1 v1.45 §8). Detail: host, package, version_id, digest,
+	// tags, via.
+	ActionRegistryImageVersionDeleted = "registry.image_version_deleted"
+	ActionFilePut                     = "file.put"
 	// Host config files (api-v1 v1.44 item 7). Detail never holds content,
 	// a value or a secret file's hash.
 	ActionHostFileSave  = "host_file.save"

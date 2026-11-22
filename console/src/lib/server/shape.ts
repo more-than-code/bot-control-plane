@@ -1856,7 +1856,8 @@ export function parseRegistry(value: unknown): Registry | null {
 		const byName = text(value.connected_by.name, 200);
 		if (byId && isUuid(byId)) connected_by = { id: byId, name: byName ?? '' };
 	}
-	return { host, username, updated_at, updated_by, source, connected_by };
+	const delete_packages = source === 'github' && value.delete_packages === true;
+	return { host, username, updated_at, updated_by, source, connected_by, delete_packages };
 }
 
 export function parseRegistryList(payload: unknown): { items: Registry[]; omitted: number } | null {

@@ -265,6 +265,9 @@ type Registry struct {
 	// ConnectedBy is the user who connected GitHub; nil for a manual row,
 	// and nil when that user no longer exists.
 	ConnectedBy *RegistryUser `json:"connected_by"`
+	// DeletePackages is true when GitHub granted delete:packages on the
+	// row's last connect (api-v1 v1.45, migration 0030); false for a manual row.
+	DeletePackages bool `json:"delete_packages"`
 }
 
 // RegistryUser names the user who connected a registry.
@@ -282,6 +285,8 @@ type RegistryWrite struct {
 	KeyVersion  int
 	Source      string
 	ConnectedBy *uuid.UUID
+	// DeletePackages is stored only for a github row (api-v1 v1.45).
+	DeletePackages bool
 	RegistryRefreshMaterial
 }
 
@@ -310,6 +315,8 @@ type RegistryMaterial struct {
 	Ciphertext []byte
 	KeyVersion int
 	Source     string
+	// DeletePackages: GitHub granted delete:packages (api-v1 v1.45).
+	DeletePackages bool
 	RegistryRefreshMaterial
 }
 
@@ -331,6 +338,7 @@ func (in RegistryWrite) Norm() RegistryWrite {
 	}
 	if in.Source != RegistrySourceGitHub {
 		in.ConnectedBy = nil
+		in.DeletePackages = false
 		in.RegistryRefreshMaterial = RegistryRefreshMaterial{}
 	}
 	if !in.HasRefresh() {
