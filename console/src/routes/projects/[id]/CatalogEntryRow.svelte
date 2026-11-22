@@ -20,6 +20,8 @@
 	import CatalogDeployDialog from './CatalogDeployDialog.svelte';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
 	import CatalogImageDialog from './CatalogImageDialog.svelte';
+	import ImageVersionsDialog from './ImageVersionsDialog.svelte';
+	import { ghcrRepository } from '$lib/image-versions';
 
 	let {
 		entry,
@@ -77,7 +79,12 @@
 	const worst = $derived(worstState(summary));
 	const canEdit = $derived(canOwner || canAdmin);
 	const deploys = $derived(entry.kind === 'image' && entry.my_actions.includes('deploy'));
-	const menuItems = $derived(entryMenuItems({ name: entry.name, deploy: deploys, edit: canEdit, owner: canOwner }));
+	/** api-v1 v1.45: a ghcr.io image's package versions, for owners and admins. */
+	const versionsImage = $derived(entry.kind === 'image' && canEdit ? ghcrRepository(entry.spec.image) : null);
+	const menuItems = $derived(
+		entryMenuItems({ name: entry.name, deploy: deploys, edit: canEdit, owner: canOwner, versions: versionsImage != null })
+	);
+	let showVersions = $state(false);
 	const menuId = $derived(catalogEntryMenuId(entry.id));
 
 	/** A deploy, rollback or remove is running: the row's actions wait. */
@@ -94,6 +101,10 @@
 		if (key === 'permissions') {
 			// The drawer takes focus and closes back to the ⋯ button.
 			onPermissions?.();
+			return;
+		}
+		if (key === 'versions') {
+			showVersions = true;
 			return;
 		}
 		if (key === 'deploy' || key === 'edit' || key === 'delete') requests[key] += 1;
@@ -288,6 +299,17 @@
 				items={menuItems}
 				onSelect={onMenu}
 			/>
+			{#if showVersions && versionsImage}
+				<ImageVersionsDialog
+					image={versionsImage}
+					entry={entry.name}
+					{projectId}
+					readAction={actionUrlFrom(page.url, 'catalogImageVersions')}
+					deleteAction={actionUrlFrom(page.url, 'catalogImageVersionDelete')}
+					returnFocusId={menuId}
+					onClosed={() => (showVersions = false)}
+				/>
+			{/if}
 			{#if canOwner}
 				<ConfirmAction
 					id="delete-catalog-{entry.id}"

@@ -116,13 +116,18 @@ test('github helpers: only GitHub authorize URLs, short note codes', () => {
 
 test('registry rows: source and connected_by, older API is manual', () => {
 	const base = { host: 'ghcr.io', username: 'octo', updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id };
-	assert.deepEqual(parseRegistry(base), { ...base, source: 'manual', connected_by: null });
+	assert.deepEqual(parseRegistry(base), { ...base, source: 'manual', connected_by: null, delete_packages: false });
 	assert.deepEqual(parseRegistry({ ...base, source: 'github', connected_by: { id: USER.id, name: 'Ada' }, token: LEAK }), {
 		...base,
 		source: 'github',
-		connected_by: { id: USER.id, name: 'Ada' }
+		connected_by: { id: USER.id, name: 'Ada' },
+		delete_packages: false
 	});
 	assert.equal(parseRegistry({ ...base, source: 'manual', connected_by: { id: USER.id, name: 'Ada' } })?.connected_by, null);
+	// api-v1 v1.45: delete_packages only for a github row that says true.
+	assert.equal(parseRegistry({ ...base, source: 'github', delete_packages: true })?.delete_packages, true);
+	assert.equal(parseRegistry({ ...base, source: 'manual', delete_packages: true })?.delete_packages, false);
+	assert.equal(parseRegistry({ ...base, source: 'github', delete_packages: 'yes' })?.delete_packages, false);
 });
 
 describe('Connect GitHub routes', { concurrency: false }, () => {
@@ -282,9 +287,10 @@ describe('Registries card and readiness markup', () => {
 		updated_at: '2026-11-16T10:00:00Z',
 		updated_by: USER.id,
 		source: 'github',
-		connected_by: { id: USER.id, name: 'Ada' }
+		connected_by: { id: USER.id, name: 'Ada' },
+		delete_packages: false
 	};
-	const manual: Registry = { ...github, username: 'bot', source: 'manual', connected_by: null };
+	const manual: Registry = { ...github, username: 'bot', source: 'manual', connected_by: null, delete_packages: false };
 	const props = (extra: Record<string, unknown>) => ({ project: PROJECT, canOwner: true, canAdmin: true, message: null, envSets: [], files: [], ...extra });
 
 	test('a GitHub row reads as a connection, with Reconnect and Disconnect', () => {
@@ -297,6 +303,19 @@ describe('Registries card and readiness markup', () => {
 		// Connected already: no Connect GitHub button.
 		assert.equal(/>\s*Connect GitHub\s*</.test(html), false);
 		assert.match(html, /action="[^"]*connectGitHub"/);
+	});
+
+	test('api-v1 v1.45: a GitHub row says whether it can delete image versions and offers the opt-in', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(SettingsSection, { props: props({ registries: [github], githubConnect: true }) }).body;
+		assert.match(html, /data-delete-packages="false"/);
+		assert.match(html, />\s*Allow deleting image versions\s*</);
+		const hidden = /<input[^>]*name="delete_packages"[^>]*>/.exec(html)?.[0] ?? '';
+		assert.match(hidden, /value="1"/, html.slice(html.indexOf('data-delete-packages'), html.indexOf('data-delete-packages') + 4000));
+		const can = render(SettingsSection, { props: props({ registries: [{ ...github, delete_packages: true }], githubConnect: true }) }).body;
+		assert.match(can, /data-delete-packages="true"/);
+		assert.equal(can.includes('Allow deleting image versions'), false);
+		assert.equal(can.includes('name="delete_packages"'), false);
 	});
 
 	test('Connect GitHub is hidden when the console is not set up for it', () => {
@@ -412,7 +431,7 @@ describe('Used by notes and the program readiness list', () => {
 					{ name: 'spare', keys: [], updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id }
 				],
 				files: [{ name: 'conf.txt', is_secret: false, size: 3, sha256: 'ab'.repeat(32), updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id }],
-				registries: [{ host: 'ghcr.io', username: 'bot', updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id, source: 'manual', connected_by: null }]
+				registries: [{ host: 'ghcr.io', username: 'bot', updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id, source: 'manual', connected_by: null, delete_packages: false }]
 			}
 		}).body;
 		const notes = [...html.matchAll(/data-used-by="([a-z-]+)"[^>]*>([^<]*)</g)].map((m) => `${m[1]}: ${m[2]}`);
@@ -609,7 +628,7 @@ describe('rendered readiness, access line and Used by states', () => {
 
 	test('a streamed refused badge does not block the render', () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
-		const github: Registry = { host: 'ghcr.io', username: 'octo', updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id, source: 'github', connected_by: { id: USER.id, name: 'Ada' } };
+		const github: Registry = { host: 'ghcr.io', username: 'octo', updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id, source: 'github', connected_by: { id: USER.id, name: 'Ada' }, delete_packages: false };
 		const html = render(SettingsSection, {
 			props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, envSets: [], files: [], registries: [github], githubRefused: new Promise<boolean>(() => {}) }
 		}).body;
@@ -627,7 +646,7 @@ test('the refused badge checks every ghcr.io repository once', async () => {
 			asked.push(image);
 			return envelope({ registry: 'ghcr.io', access: image.startsWith('ghcr.io/joe/b') ? 'login_failed' : 'private_ok', login: 'github' });
 		});
-		const github: Registry = { host: 'ghcr.io', username: 'octo', updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id, source: 'github', connected_by: null };
+		const github: Registry = { host: 'ghcr.io', username: 'octo', updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id, source: 'github', connected_by: null, delete_packages: false };
 		const entry = (name: string, image: string) => ({ name, kind: 'image', spec: { image } }) as never;
 		const catalog = [entry('a1', 'ghcr.io/joe/a:v1'), entry('a2', 'ghcr.io/joe/a:v2'), entry('b', 'ghcr.io/joe/b:v1'), entry('hub', 'nginx')];
 		const { event } = fakeEvent({ url: `http://console.example/projects/${PROJECT.id}?tab=settings`, params: { id: PROJECT.id }, user: USER, session: TOKEN });

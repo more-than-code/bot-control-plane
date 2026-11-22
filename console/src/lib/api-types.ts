@@ -462,6 +462,8 @@ export type Registry = {
 	source: 'manual' | 'github';
 	/** Who connected GitHub, or null (a manual row, or that user is gone). */
 	connected_by: { id: string; name: string } | null;
+	/** api-v1 v1.45: GitHub granted delete:packages on the last connect. False for a manual row and older APIs. */
+	delete_packages: boolean;
 };
 
 /**

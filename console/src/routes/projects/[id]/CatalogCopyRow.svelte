@@ -147,6 +147,7 @@
 		deploy: 0,
 		edit: 0,
 		permissions: 0,
+		versions: 0,
 		delete: 0,
 		state: 0,
 		restart: 0,

@@ -3,7 +3,7 @@
  * [ ] [⋯] and a copy [Start/Stop] [Restart] [Logs] [⋯]; below `sm` only the ⋯ menu shows, so it then also
  * holds the icon actions (`phoneOnly`). Menu items are in a fixed order, destructive last.
  */
-export type MenuKey = 'deploy' | 'edit' | 'permissions' | 'delete' | 'state' | 'restart' | 'logs' | 'digest' | 'health' | 'rename';
+export type MenuKey = 'deploy' | 'edit' | 'permissions' | 'versions' | 'delete' | 'state' | 'restart' | 'logs' | 'digest' | 'health' | 'rename';
 
 export type MenuItem = {
 	key: MenuKey;
@@ -16,10 +16,12 @@ export type MenuItem = {
 };
 
 /** The entry row's menu, by what the caller may do. */
-export function entryMenuItems(input: { name: string; deploy: boolean; edit: boolean; owner: boolean }): MenuItem[] {
+export function entryMenuItems(input: { name: string; deploy: boolean; edit: boolean; owner: boolean; versions?: boolean }): MenuItem[] {
 	const items: MenuItem[] = [];
 	if (input.deploy) items.push({ key: 'deploy', label: `Deploy ${input.name}`, phoneOnly: true });
 	if (input.edit) items.push({ key: 'edit', label: `Edit ${input.name}`, phoneOnly: true });
+	// api-v1 v1.45: a ghcr.io image's package versions, for owners and admins.
+	if (input.versions) items.push({ key: 'versions', label: `Image versions ${input.name}`, phoneOnly: false });
 	if (input.owner) {
 		items.push({ key: 'permissions', label: `Permissions ${input.name}`, phoneOnly: false });
 		items.push({ key: 'delete', label: `Delete ${input.name}`, phoneOnly: false, destructive: true });
