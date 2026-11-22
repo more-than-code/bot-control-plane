@@ -12,8 +12,11 @@
 	import AddHostSection from '$lib/components/AddHostSection.svelte';
 	import CatalogSection from './CatalogSection.svelte';
 	import HostsSection from './HostsSection.svelte';
+	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
+	import type { Host } from '$lib/api-types';
+	import { fetchHosts, startHostsRefresh } from '$lib/hosts-refresh';
 	import MembersSection from './MembersSection.svelte';
 	import SettingsSection from './SettingsSection.svelte';
 
@@ -30,6 +33,27 @@
 
 	const action = $derived((form ?? null) as ProjectActionData | null);
 	const scope = $derived<ProjectScope>(action?.scope ?? data.tab ?? 'hosts');
+
+	// The Hosts tab re-reads its hosts while open (status, agent version, "Update available"). A read counts only
+	// for the load it started from (`base`, kept raw so it stays that array), so a fresh load or navigation always
+	// wins; a failed read keeps the list.
+	let refreshed = $state.raw<{ base: Host[]; hosts: Host[] } | null>(null);
+	const hosts = $derived(refreshed && refreshed.base === data.hosts ? refreshed.hosts : data.hosts);
+	const hostsMessage = $derived(hosts === data.hosts ? data.hostsMessage : null);
+	const hostsOpen = $derived(scope === 'hosts' && data.project != null);
+	$effect(() => {
+		if (!browser || !hostsOpen || !data.project) return;
+		const url = `/projects/${data.project.id}/hosts.json`;
+		return startHostsRefresh({
+			doc: document,
+			refresh: async () => {
+				const base = data.hosts;
+				const next = await fetchHosts(fetch, url);
+				if (base === data.hosts) refreshed = { base, hosts: next };
+			}
+		});
+	});
+
 	// A dialog form's message (createToken, addMember) shows in its dialog, not on the page.
 	const sectionMessage = $derived(action?.scope === scope && !action.field ? (action.message ?? null) : null);
 	const createTokenMessage = $derived(action?.field === 'createToken' ? (action.message ?? null) : null);
@@ -107,21 +131,21 @@
 
 	{#if scope === 'hosts'}
 		<HostsSection
-			hosts={data.hosts}
+			{hosts}
 			omitted={data.hostsOmitted}
 			truncated={data.hostsTruncated}
 			canAdmin={data.canAdmin}
 			canOrgAdmin={data.canOrgAdmin}
 			projectId={data.project.id}
 			orgId={data.project.org_id}
-			message={accessFailure ? null : (sectionMessage ?? data.hostsMessage)}
-			hostsMessage={data.hostsMessage}
+			message={accessFailure ? null : (sectionMessage ?? hostsMessage)}
+			{hostsMessage}
 			{accessFailure}
 		>
 			{#if data.canOrgAdmin}
 				<AddHostSection
 					tokens={data.tokens}
-					hosts={data.hosts}
+					{hosts}
 					created={action?.scope === 'hosts' ? (action.created ?? null) : null}
 					slug={data.project.slug}
 					grant="{data.project.name} (deploy)"

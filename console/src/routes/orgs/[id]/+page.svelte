@@ -1,11 +1,14 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/state';
+	import type { Host } from '$lib/api-types';
 	import AddHostSection from '$lib/components/AddHostSection.svelte';
 	import NewProject from '$lib/components/NewProject.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { accessFailureOf } from '$lib/host-access';
+	import { fetchHosts, startHostsRefresh } from '$lib/hosts-refresh';
 	import { joinGrantText, type OrgActionData, type OrgScope } from '$lib/org-view';
 	import { actionUrlFrom } from '$lib/url';
 	import OrgDomainsSection from './OrgDomainsSection.svelte';
@@ -21,6 +24,27 @@
 	const accessFailure = $derived(accessFailureOf(form));
 	const renameFailure = $derived(action?.field === 'renameHost' && action.hostId ? { hostId: action.hostId, message: action.message ?? null } : null);
 	const scope = $derived<OrgScope>(action?.scope ?? data.tab ?? 'projects');
+
+	// The Hosts tab re-reads its hosts while open (status, agent version, "Update available"). A read counts only
+	// for the load it started from (`base`, kept raw so it stays that array), so a fresh load or navigation always
+	// wins; a failed read keeps the list.
+	let refreshed = $state.raw<{ base: Host[]; hosts: Host[] } | null>(null);
+	const hosts = $derived(refreshed && refreshed.base === data.hosts.items ? refreshed.hosts : data.hosts.items);
+	const hostsMessage = $derived(hosts === data.hosts.items ? data.hosts.message : null);
+	const hostsOpen = $derived(scope === 'hosts' && data.org != null);
+	$effect(() => {
+		if (!browser || !hostsOpen || !data.org) return;
+		const url = `/orgs/${data.org.id}/hosts.json`;
+		return startHostsRefresh({
+			doc: document,
+			refresh: async () => {
+				const base = data.hosts.items;
+				const next = await fetchHosts(fetch, url);
+				if (base === data.hosts.items) refreshed = { base, hosts: next };
+			}
+		});
+	});
+
 	// A dialog form's message shows in its dialog, not on the page.
 	const sectionMessage = $derived(action?.scope === scope && !action.field && !accessFailure ? (action.message ?? null) : null);
 	const fieldMessage = (field: OrgActionData['field']) => (action?.field === field ? (action?.message ?? null) : null);
@@ -78,17 +102,17 @@
 		/>
 	{:else if scope === 'hosts'}
 		<OrgHostsSection
-			hosts={data.hosts.items}
+			{hosts}
 			omitted={data.hosts.omitted}
 			truncated={data.hosts.truncated}
 			projects={accessProjects}
-			message={sectionMessage ?? data.hosts.message ?? data.projects.message}
+			message={sectionMessage ?? hostsMessage ?? data.projects.message}
 			{accessFailure}
 			{renameFailure}
 		>
 			<AddHostSection
 				tokens={data.tokens.items}
-				hosts={data.hosts.items}
+				{hosts}
 				created={action?.field === 'createToken' ? (action.created ?? null) : null}
 				slug={action?.field === 'createToken' ? (action.createdSlug ?? null) : null}
 				grant={action?.field === 'createToken' ? joinGrantText(action.createdGrant ?? null, projectNames) : null}
