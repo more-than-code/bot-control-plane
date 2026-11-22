@@ -28,7 +28,7 @@ const listCatalogSchema = `{
 func registerListCatalog(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "list_catalog",
-		Description: "List catalog entries in a project. Returns name, kind, command_display, last_deployed_at (RFC3339 time of the newest deploy or run by a person or AI agent, or null), and the actions the caller may take. An image entry also returns the image reference, service or job, ports, volume short names, managed file names, env key names, env set names, healthcheck true or false (not the healthcheck command), and logging as max_size_mb and max_files or null. It does not return env values, file contents, or file targets. Does not return the program spec or its environment. Does not contact the host.",
+		Description: "List catalog entries in a project. Returns name, kind, command_display, last_deployed_at (RFC3339 time of the newest deploy or run by a person or AI agent, or null), and the actions the caller may take. An image entry also returns the image reference, service or job, ports, volume short names, managed file names, env key names, env set names, healthcheck true or false (not the healthcheck command), and logging as max_size_mb and max_files or null. It does not return env values, file contents, or file targets. Does not return the program spec or its environment. get_catalog_entry returns one image entry's full spec. Does not contact the host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(listCatalogSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
