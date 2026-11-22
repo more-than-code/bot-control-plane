@@ -170,7 +170,7 @@ func TestTools(t *testing.T) {
 	closed := map[string]bool{
 		"list_orgs": true, "list_projects": true, "list_hosts": true, "list_services": true,
 		"query_metrics": true, "list_processes": true, "service_health_history": true,
-		"get_health_checks": true, "list_catalog": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
+		"get_health_checks": true, "list_catalog": true, "get_catalog_entry": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
 		"get_registry_connect_request": true,
 		"check_readiness":              true, "image_access": true, "host_policy_snippet": true, "shared_network_snippet": true,
 		"whats_new":     true,
@@ -240,7 +240,7 @@ func TestTools(t *testing.T) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
 			}
-		case tool.Name == "create_catalog_entry" || tool.Name == "update_catalog_entry" || tool.Name == "delete_catalog_entry":
+		case tool.Name == "create_catalog_entry" || tool.Name == "update_catalog_entry" || tool.Name == "delete_catalog_entry" || tool.Name == "set_entry_image":
 			if readOnly || open {
 				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
 			}
@@ -254,7 +254,7 @@ func TestTools(t *testing.T) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
 			}
-			if tool.Name != "delete_catalog_entry" && !strings.Contains(tool.Description, "env sets") {
+			if tool.Name != "delete_catalog_entry" && tool.Name != "set_entry_image" && !strings.Contains(tool.Description, "env sets") {
 				t.Errorf("%s description %q missing env sets", tool.Name, tool.Description)
 			}
 			if tool.Name == "delete_catalog_entry" && !strings.Contains(tool.Description, "not stopped") {
@@ -368,6 +368,7 @@ func TestTools(t *testing.T) {
 		"list_catalog", "run_entry", "stop_entry", "restart_entry",
 		"deploy_entry", "rollback_entry", "set_health_checks",
 		"create_catalog_entry", "update_catalog_entry", "delete_catalog_entry",
+		"get_catalog_entry", "set_entry_image",
 		"confirm", "entry_logs", "entry_status", "create_env_set", "list_env_sets",
 		"request_env_value", "get_env_value_request", "request_file", "get_file_request",
 		"connect_registry", "get_registry_connect_request",
@@ -380,8 +381,9 @@ func TestTools(t *testing.T) {
 		}
 	}
 	// 37 before api-v1 v1.34 and v1.35, plus whats_new, set_routes and
-	// list_routes, plus list_problems (v1.41).
-	if len(seen) != 41 {
+	// list_routes, plus list_problems (v1.41), plus get_catalog_entry and
+	// set_entry_image.
+	if len(seen) != 43 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -2045,6 +2047,10 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 			}}
 		}
 		return http.StatusOK, "ok", "", map[string]any{"items": catalogItems(images)}
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/catalog/"+imageEntry:
+		return http.StatusOK, "ok", "", fullImageEntry()
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/catalog/"+entryName:
+		return http.StatusOK, "ok", "", programCatalogItem()
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/projects/"+projectID+"/catalog/") && strings.HasSuffix(r.URL.Path, "/deploys"):
 		if mode == "history-down" {
 			return http.StatusInternalServerError, "error", "history down", nil
