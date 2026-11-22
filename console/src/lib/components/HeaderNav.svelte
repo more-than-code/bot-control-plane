@@ -3,6 +3,7 @@
 	import Check from '@lucide/svelte/icons/check';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Plus from '@lucide/svelte/icons/plus';
+	import NewOrganization from '$lib/components/NewOrganization.svelte';
 	import NewProject from '$lib/components/NewProject.svelte';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -27,6 +28,7 @@
 	const nav = $derived(headerNav({ path: page.url.pathname, orgs, projects, pageOrgId }));
 	const creatable = $derived(nav.canCreateProject && nav.org ? [{ id: nav.org.id, name: nav.org.name }] : []);
 
+	const ORG_ID = 'header-org';
 	const PROJECT_ID = 'header-project';
 	const PROJECT_MOBILE_ID = 'header-project-mobile';
 	let newProjectRequest = $state(0);
@@ -35,6 +37,14 @@
 	function newProject(from: string) {
 		newProjectFrom = from;
 		newProjectRequest += 1;
+	}
+
+	let newOrgRequest = $state(0);
+	let newOrgFrom = $state(ORG_ID);
+
+	function newOrg(from: string) {
+		newOrgFrom = from;
+		newOrgRequest += 1;
 	}
 
 	// 44 px touch targets below sm (like RowMenu), the normal size from sm.
@@ -48,7 +58,7 @@
 	<span aria-hidden="true" class={cn('text-muted-foreground shrink-0', extra)}>/</span>
 {/snippet}
 
-{#snippet orgItems()}
+{#snippet orgItems(from: string)}
 	{#each nav.orgs as org (org.id)}
 		<DropdownMenu.Item>
 			{#snippet child({ props })}
@@ -60,6 +70,8 @@
 			{/snippet}
 		</DropdownMenu.Item>
 	{/each}
+	<!-- spec-new-org: any signed-in user; offered wherever these org items render (and always on /projects). -->
+	<DropdownMenu.Item onSelect={() => newOrg(from)}><Plus class="size-4" />New organization</DropdownMenu.Item>
 	{#if nav.orgs.length > 0}
 		<DropdownMenu.Separator />
 	{/if}
@@ -102,12 +114,12 @@
 		{@render slash('hidden sm:inline')}
 		{#if nav.org.menu}
 			<DropdownMenu.Root>
-				<DropdownMenu.Trigger class={cn(trigger, 'hidden sm:inline-flex')} aria-label={orgTriggerName(nav.org.name)}>
+				<DropdownMenu.Trigger id={ORG_ID} class={cn(trigger, 'hidden sm:inline-flex')} aria-label={orgTriggerName(nav.org.name)}>
 					<span class="min-w-0 truncate">{nav.org.name}</span>
 					<ChevronDown class="size-4" />
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Content align="start" class={menu}>
-					{@render orgItems()}
+					{@render orgItems(ORG_ID)}
 				</DropdownMenu.Content>
 			</DropdownMenu.Root>
 		{:else}
@@ -140,7 +152,7 @@
 			{#if mobileOrgItems(nav)}
 				<DropdownMenu.Group data-menu-group="orgs">
 					<DropdownMenu.GroupHeading>Organizations</DropdownMenu.GroupHeading>
-					{@render orgItems()}
+					{@render orgItems(PROJECT_MOBILE_ID)}
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />
 			{/if}
@@ -165,3 +177,5 @@
 		/>
 	{/key}
 {/if}
+<!-- spec-new-org: posts to /projects like New project; a success lands on the new org's Projects tab. -->
+<NewOrganization action="/projects?/createOrg" showTrigger={false} openRequest={newOrgRequest} fallbackFocusId={newOrgFrom} ownResult />

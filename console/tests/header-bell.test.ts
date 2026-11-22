@@ -292,7 +292,7 @@ describe("header render", () => {
     // The phone menu starts with the org name and the org items.
     const mobile = source.slice(source.indexOf("id={PROJECT_MOBILE_ID}"));
     assert.ok(
-      mobile.indexOf("{@render orgItems()}") <
+      mobile.indexOf("{@render orgItems(PROJECT_MOBILE_ID)}") <
         mobile.indexOf("{@render projectItems(PROJECT_MOBILE_ID)}"),
     );
     assert.match(
@@ -413,7 +413,7 @@ describe("header render", () => {
     const mobile = source.slice(source.indexOf("id={PROJECT_MOBILE_ID}"));
     assert.match(
       mobile,
-      /\{#if mobileOrgItems\(nav\)\}\s*<DropdownMenu\.Group data-menu-group="orgs">\s*<DropdownMenu\.GroupHeading>Organizations<\/DropdownMenu\.GroupHeading>\s*\{@render orgItems\(\)\}/,
+      /\{#if mobileOrgItems\(nav\)\}\s*<DropdownMenu\.Group data-menu-group="orgs">\s*<DropdownMenu\.GroupHeading>Organizations<\/DropdownMenu\.GroupHeading>\s*\{@render orgItems\(PROJECT_MOBILE_ID\)\}/,
     );
     assert.match(
       mobile,

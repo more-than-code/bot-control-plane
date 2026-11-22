@@ -7,6 +7,7 @@
 	import type { Project } from '$lib/api-types';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
+	import NewOrganization from '$lib/components/NewOrganization.svelte';
 	import NewProject from '$lib/components/NewProject.svelte';
 
 	let { data, form } = $props();
@@ -31,6 +32,8 @@
 		{:else}
 			<NewProject action={actionUrlFrom(page.url, 'create')} failed={Boolean(form?.message)} message={form?.message ?? null} orgs={data.orgs} />
 		{/if}
+		<!-- spec-new-org: any signed-in user. ownResult keeps its failures out of the page form New project reads. -->
+		<NewOrganization action={actionUrlFrom(page.url, 'createOrg')} ownResult />
 	{/snippet}
 </PageHeader>
 {#if data.message}

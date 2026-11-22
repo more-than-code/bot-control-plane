@@ -101,8 +101,9 @@ export function headerNav(input: {
 }
 
 /**
- * The phone Project ▾ menu starts with the org items (the caller's orgs, the org page link, All projects) only when
- * the caller is in some org; a project-only member with no org gets the project items alone.
+ * The phone Project ▾ menu starts with the org items (the caller's orgs, New organization, the org page link,
+ * All projects) only when the caller is in some org. New organization (spec-new-org, any signed-in user) is offered
+ * wherever the Org menu or the phone org items render, and always on /projects; a project-only member with no org gets the project items alone.
  */
 export function mobileOrgItems(nav: HeaderNav): boolean {
 	return nav.orgs.length > 0;

@@ -4,7 +4,7 @@ import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { isOrgAdmin } from '$lib/server/roles';
-import { parseProject } from '$lib/server/shape';
+import { parseOrg, parseProject } from '$lib/server/shape';
 import { cleanName } from '$lib/server/validate';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -44,6 +44,20 @@ export const actions: Actions = {
 			const project = parseProject(await apiFetch(event, path, { method: 'POST', body: JSON.stringify({ name }) }));
 			if (!project) return fail(502, present(event, { message: 'The API returned an unexpected response.' }));
 			redirect(303, `/projects/${project.id}`);
+		} catch (err) {
+			return actionFailure(event, err);
+		}
+	},
+	// spec-new-org: any signed-in user may create an org (POST /v1/orgs) and becomes its owner.
+	createOrg: async (event) => {
+		requireUser(event);
+		const form = await event.request.formData();
+		const name = cleanName(formText(form, 'name'));
+		if (!name) return fail(400, present(event, { message: 'Enter an organization name (1–80 characters).' }));
+		try {
+			const org = parseOrg(await apiFetch(event, '/v1/orgs', { method: 'POST', body: JSON.stringify({ name }) }));
+			if (!org) return fail(502, present(event, { message: 'The API returned an unexpected response.' }));
+			redirect(303, `/orgs/${org.id}?tab=projects`);
 		} catch (err) {
 			return actionFailure(event, err);
 		}

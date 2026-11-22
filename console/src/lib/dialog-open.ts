@@ -209,3 +209,30 @@ export function focusFallbackAfterClose(id: string | null | undefined, doc: Pick
 		doc.getElementById(id)?.focus();
 	}, 0);
 }
+
+/** A create dialog's submit guard: a second submit while one is pending is cancelled. */
+export function startSubmit(saving: boolean): { cancel: boolean; saving: boolean } {
+	return saving ? { cancel: true, saving: true } : { cancel: false, saving: true };
+}
+
+export type SubmitResultStep = {
+	/** The message the dialog shows itself (`ownResult` failures), or null. */
+	ownMessage: string | null;
+	/** Call `update()` (follow a redirect, refresh `form`). */
+	update: boolean;
+	/** After `update()`, settle the dialog with this outcome; null when there is no update. */
+	settle: DialogOutcome | null;
+	/** Stays true through a redirect, so Create stays disabled while the page navigates. */
+	saving: boolean;
+};
+
+/**
+ * What a create dialog does with its `use:enhance` result (New organization, spec-new-org). With `ownResult`, a
+ * failure stays in the dialog with its message (or `fallback`) and the typed values, and nothing is updated.
+ */
+export function submitResultStep(input: { type: string; ownResult: boolean; message: unknown; fallback: string }): SubmitResultStep {
+	if (input.ownResult && input.type === 'failure') {
+		return { ownMessage: typeof input.message === 'string' ? input.message : input.fallback, update: false, settle: null, saving: false };
+	}
+	return { ownMessage: null, update: true, settle: formDialogOutcome(input.type), saving: input.type === 'redirect' };
+}
