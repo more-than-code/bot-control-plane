@@ -19,7 +19,13 @@
 	 * deployed here. Org owners and admins turn it on or off; the host's root must first allow it in runner.toml. A
 	 * refusal (the runner.toml line, another process on 80 or 443) is the API's own text.
 	 */
-	let { hostName, edge, loadMessage = null, actionMessage = null }: { hostName: string; edge: HostEdge | null; loadMessage?: string | null; actionMessage?: string | null } = $props();
+	let {
+		hostName,
+		edge,
+		loadMessage = null,
+		actionMessage = null,
+		policyHref = null
+	}: { hostName: string; edge: HostEdge | null; loadMessage?: string | null; actionMessage?: string | null; policyHref?: string | null } = $props();
 
 	const badge = $derived(edge ? edgeStatusBadge(edge.status) : null);
 	const EDGE_ERROR_ID = 'edge-error';
@@ -62,6 +68,11 @@
 					This host does not allow the edge yet. Its root adds this line to /etc/bot-agent/runner.toml and restarts bot-agent (version 0.2.11 or later):
 				</p>
 				<CommandBlock command={EDGE_POLICY_LINE} label="Copy runner.toml line" ariaLabel="runner.toml line" />
+				{#if policyHref}
+					<p class="text-sm" data-edge-policy-link>
+						If the host lets the console change its policy, <a class="underline underline-offset-4" href={policyHref}>allow the edge on the Policy tab</a> instead.
+					</p>
+				{/if}
 			</div>
 		{/if}
 		<div class="flex flex-wrap gap-2">

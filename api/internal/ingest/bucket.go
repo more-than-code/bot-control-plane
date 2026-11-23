@@ -72,10 +72,10 @@ func Bucket(m string, from, to time.Time, stepSec int, samples []store.Sample) (
 			avgSeries("used_percent", "%", from, step, n, samples, floatField("used_percent")),
 			avgSeries("used", "bytes", from, step, n, samples, intField("used")),
 			avgSeries("total", "bytes", from, step, n, samples, intField("total")),
+			avgSeries("available", "bytes", from, step, n, samples, intField("available")),
 		}, nil
 	case "disk":
-		filtered := filterTags(samples, func(s store.Sample) bool { return s.Tags["path"] == "/" })
-		return []Series{avgSeries("used_percent", "%", from, step, n, filtered, floatField("used_percent"))}, nil
+		return BucketDisk("/", from, to, stepSec, samples)
 	case "diskio":
 		return []Series{
 			rateSeries("read_bps", "bytes/s", from, step, n, samples, "name", "read_bytes"),
@@ -99,6 +99,18 @@ func Bucket(m string, from, to time.Time, stepSec int, samples []store.Sample) (
 	default:
 		return nil, &Reject{Reason: "unknown_measurement"}
 	}
+}
+
+// BucketDisk is the disk chart of one mount (api-v1 v1.49 item 4; "" is
+// "/"). An unknown mount gives an empty series.
+func BucketDisk(path string, from, to time.Time, stepSec int, samples []store.Sample) ([]Series, error) {
+	if path == "" {
+		path = "/"
+	}
+	step := time.Duration(stepSec) * time.Second
+	n := bucketCount(from, to, step)
+	filtered := filterTags(samples, func(s store.Sample) bool { return s.Tags["path"] == path })
+	return []Series{avgSeries("used_percent", "%", from, step, n, filtered, floatField("used_percent"))}, nil
 }
 
 func bucketCount(from, to time.Time, step time.Duration) int {

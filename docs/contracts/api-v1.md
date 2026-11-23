@@ -1221,3 +1221,74 @@ Summary from bot-control-plane `AGENTS.md`: `ImageDeploy.reason` and `final_stat
    - The "Update available" badge offers **Upgrade** when `agent_upgrade_allowed` is true. Otherwise the tooltip says how to opt in.
    - Upgrade opens a confirm dialog, then shows a running state and the outcome.
    - The host Overview lists the history.
+
+## v1.49 host resource alerts (2026-11-23, approved spec `docs/spec-host-resource-alerts.md` rev 1; migration 0033; additive; implemented on bot-control-plane `dev` 2026-11-23, not yet released; ships with v1.50)
+1. **Problem kind `host_resource`.**
+   - Audience: org owners and admins of the host's org.
+   - Subjects: `<host_id>:mem`, `<host_id>:disk:<path>`, `<host_id>:cpu`, `<host_id>:load`.
+   - Levels: `needs_action` for mem and disk, `heads_up` for cpu and load.
+   - The href is `/hosts/<id>?range=1h`.
+   - Title and detail carry only the host name, the mount path and numbers.
+2. **Sweep** (inside the 1-minute problems sweep, after the 5-minute grace; off with `BOT_API_PROBLEMS=off`).
+   - Watched hosts are always-on, not revoked, online, with the newest sample under 2 minutes old and alerts enabled.
+   - The sweep runs one grouped query per measurement over 15 minutes.
+   - Default thresholds:
+
+     | Check | Opens | Resolves |
+     |---|---|---|
+     | mem | avg `available` < max(15 % of total, 96 MiB) over 10 min | ≥ max(20 %, 128 MiB) over 5 min |
+     | disk (each mount) | `used_percent` ≥ 90 for 10 min, latest included | < 85 over 5 min |
+     | cpu | avg busy (100 − idle) ≥ 90 % over 15 min | < 75 % over 5 min |
+     | load | avg load5 / `n_cpus` ≥ 2.0 over 15 min | < 1.2 over 5 min |
+
+   - A mount no longer reported, a host no longer watched, or alerts switched off resolves the open problem with "No longer checked".
+3. **`GET /v1/hosts/{id}/alert-settings`** (anyone who can see the host) and **`PUT …/alert-settings`** (org owner or admin; console sessions and MCP-delegated tokens).
+   - Body: `{"alerts_enabled":bool, "mem_min_available_percent":5–50|null, "disk_max_used_percent":50–99|null, "cpu_max_busy_percent":50–100|null}`. Null means the default.
+   - With an override, the resolve point is the override plus 5 points for memory, or minus 5 for disk and cpu.
+   - Out-of-range values → `bad_request`.
+   - Audit `host.alert_settings {"host", changed fields}`.
+4. **Metrics query:**
+   - `m=mem` adds `available` (average bytes per step).
+   - `m=disk` accepts `&path=<mount>`, default `/`. An unknown path returns an empty series.
+   - `GET /v1/hosts/{id}/disks` lists the mounts seen in the last 24 h: `{"items":[{"path","fstype"}]}`.
+5. **Migration 0033:**
+   - `app.host_alert_settings` (host_id pk, fk cascade; the four columns with checks; updated_at; updated_by);
+   - the problems kind check gains `host_resource`;
+   - narrow grants.
+   - The down script deletes `host_resource` problems, restores the previous kind check and drops the table.
+6. **MCP:**
+   - `list_problems` describes `host_resource`;
+   - new tools `get_alert_settings {host_id}` and `set_alert_settings {host_id, …}`, the latter through `confirm`;
+   - `query_metrics` accepts `path` for disk.
+7. **Implementation notes (2026-11-23):**
+   - `PUT …/alert-settings`: `alerts_enabled` is required; the body holds only the four fields (unknown fields, an `idempotency_key` or a fractional number → `bad_request`). A revoked host → `conflict`. A PUT that changes nothing writes and audits nothing. MCP-delegated tokens call it directly (the MCP server keeps the confirm step, as for v1.48).
+   - Memory floors: the 96 MiB open and 128 MiB resolve floors apply only to the default. With `mem_min_available_percent` set, the percent alone decides.
+   - For an open problem the resolve test runs first, so 5 minutes of recovery resolve it even while the longer open window still holds the bad minutes.
+   - Coverage: a window opens or resolves only with at least half the samples the metrics interval (10 s) gives it: 15 of 30 for 5 minutes, 30 of 60 for 10, 45 of 90 for 15.
+   - Disk: at most 50 mounts per host are judged, in path order. A mount the host stops reporting resolves with "No longer reported: the host no longer reports this mount."; other cases keep "No longer checked: …".
+   - Disk subject: `<host_id>:disk:<path>` when the path is printable and the subject stays within 300 characters; otherwise `<host_id>:disk:#<first 16 hex digits of sha256(path)>`. Titles show the mount with control characters replaced and cut to 64 characters with "…".
+   - Disk href: `/hosts/<id>?range=1h&disk=<url-escaped path>` (for a hashed subject, the path from the host's mounts of the last 24 h; without a match, no `disk`).
+   - Metrics `path`: more than 1024 characters or a control character → `bad_request` "invalid path"; ignored for other `m`.
+   - `GET /v1/hosts/{id}/disks`: anyone who can see the host, MCP-delegated too; at most 200 mounts, sorted by path.
+
+## v1.50 Deploybot on containers (2026-11-23, approved spec `docs/spec-deploybot-on-containers.md` rev 1; additive; migration 0034_deploy_task; ships with v1.49; implemented on work-api-containers, not yet merged)
+1. **ImageSpec `network`** (agent-protocol v1.21 item 3): optional, absent or `"host"`; any other value is `bad_request`. Stored and returned with the entry (REST and MCP `create_catalog_entry`, `update_catalog_entry`, `get_catalog_entry`). With `"host"`, `networks` must be empty (`bad_request`). A deploy, rollback or run of such an entry on a host whose hello lacks `programs.host_network: true` is refused `409 unsupported_agent` ("this host does not allow host networking (runner.toml host_network_projects)") before any task is sent; the agent's own `policy_denied` still applies per project.
+2. **Secrets as env values:** each of `BOT_SECRETS_KEY`, `BOT_API_MCP_CLIENT_SECRET`, `BOT_API_GITHUB_CLIENT_SECRET` and `BOT_MCP_CLIENT_SECRET` may be given as an env value instead of its `*_FILE`. Setting both forms is a start-up error naming the variable. The same length and format checks apply; the files keep their 0600 rule. Values are never logged.
+3. **Late deploy results:**
+   - A task result for an image deploy, rollback or run whose `image_deploys` row is still `in_flight`, or was settled `timeout`, settles it with the reported outcome (and v1.47 reason, final status and log tail), whichever API process receives it, including after an API restart. A row already settled otherwise is left alone. The API answers every such result with `task_result_ack {"task_id"}`.
+   - The settle is audited like an on-time result, with `"late": true`.
+   - A result for an unknown task id is acked and dropped (logged with the id only).
+4. **`deploybot-server health <url>`:** exits 0 when a GET answers 2xx within 3 s, else 1. Only `http://127.0.0.1:<port>/…` and `http://localhost:<port>/…` are accepted (else exit 2). For the image's Docker `healthcheck`, since the base image has no curl.
+5. **Images** (not a contract surface, recorded here for consumers): `ghcr.io/more-than-code/deploybot-server` (static binary, distroless nonroot) and `ghcr.io/more-than-code/deploybot-console` (node 24 slim, `NODE_OPTIONS=--max-old-space-size=160` in its `CMD`), public, built reproducibly from the release tag and deployed by digest.
+6. **`env_hash` on every image task (clarification, 2026-11-23):** to an agent whose hello has `programs.env_hash: true`, the API sends `env_hash` on every `image_deploy` and `image_rollback`, also for an entry with no env set (the hash of its empty env), so a changed host env file (agent-protocol v1.21 item 6) is never `unchanged`.
+7. **Ack on a store error (clarification, 2026-11-23):** the API withholds `task_result_ack` only when settling the result hits a store error, so the agent keeps its file and resends after the next hello. Every other result, including unknown task ids and rows already settled, is acked.
+8. **A dropped connection keeps the row (amends v1.47, 2026-11-23):** when the agent connection drops while the API waits for an image deploy or rollback result, and the task frame was already written to the agent, the `image_deploys` row stays `in_flight` (the caller still gets `unavailable`); a later result settles it (item 3), else a stateless sweep (every minute, any API process) settles `in_flight` rows whose `in_flight_until` has passed (task budget + 30 s result margin + 120 s grace, the v1.42 lock deadline) as `timeout`, audited with `"swept": true`. When the frame was never written, the row is recorded `refused` as in v1.47 (the host never ran it), so it is never left in flight. Late `image_start` (run) results have no row and are acked and dropped. Migration **0034_deploy_task** stores the task id and action on the row (`task_id uuid`, `task_action` deploy|rollback, partial unique index), so any API process can settle it.
+9. **Review changes (2026-11-23, before release):**
+   - `env_hash` (item 6) is sent when the API has a secrets key (`BOT_SECRETS_KEY[_FILE]`), as since v1.27; production always has one. Without a key, a changed host env file is not detected.
+   - The ack (item 7) for an image deploy or rollback, on time or late, is sent only after the row is written; on a store error the row stays `in_flight` (swept later) and no ack is sent.
+   - A `timeout` row is re-settled only by a different outcome; a repeated `timeout` result is acked and dropped without audit. A result settles only the same host's task (the live waiter checks the delivering connection too).
+   - A late result's log tail is redacted against the entry found by its id; when its secrets cannot be resolved, the tail is stored withheld. A late `refused` is audited as a denial with its error code.
+   - When the live waiter finds its row already settled by a late result, it answers from the stored row.
+   - `deploybot-server health` dials 127.0.0.1 for `localhost`. The server image has no baked HEALTHCHECK; each entry sets its own (e.g. `["/usr/local/bin/deploybot-server","health","http://127.0.0.1:8190/health"]`), so another process on a default port cannot mask a broken container.
+   - Readiness checks host networking for `network: "host"` entries; MCP `list_catalog` shows `network`; delegated deploy, rollback and run plans say "runs on the host network".
+

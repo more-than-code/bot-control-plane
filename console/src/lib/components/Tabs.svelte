@@ -6,6 +6,7 @@
 	import Library from '@lucide/svelte/icons/library';
 	import Server from '@lucide/svelte/icons/server';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import Users from '@lucide/svelte/icons/users';
 	import type { Component } from 'svelte';
 
@@ -26,6 +27,7 @@
 		'Catalog & services': Library,
 		Processes: Cpu,
 		'Config files': FileCog,
+		Policy: ShieldCheck,
 		Members: Users,
 		'Join tokens': KeyRound,
 		Settings: SettingsIcon

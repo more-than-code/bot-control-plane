@@ -20,6 +20,9 @@ const (
 	// ProblemAgentUpgrade is an agent upgrade that did not succeed (api-v1
 	// v1.48 item 6).
 	ProblemAgentUpgrade = "agent_upgrade"
+	// ProblemHostResource is a host short of memory or disk, or overloaded
+	// (api-v1 v1.49 item 1).
+	ProblemHostResource = "host_resource"
 )
 
 // Problem levels.
@@ -100,7 +103,7 @@ type RegistryLogin struct {
 // title of 1 to 300 and a detail of at most 300.
 func ValidProblemOpen(in ProblemOpen) bool {
 	switch in.Kind {
-	case ProblemHostOffline, ProblemRegistryLogin, ProblemDeploy, ProblemHostFile, ProblemAgentUpgrade:
+	case ProblemHostOffline, ProblemRegistryLogin, ProblemDeploy, ProblemHostFile, ProblemAgentUpgrade, ProblemHostResource:
 	default:
 		return false
 	}

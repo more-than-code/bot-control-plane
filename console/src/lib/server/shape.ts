@@ -1501,6 +1501,9 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 	if (health_policy === undefined) return null;
 	const networks = parseNetworks(Object.hasOwn(value, 'networks') ? value.networks : null);
 	if (networks === undefined) return null;
+	// api-v1 v1.50 item 1: absent, null or "host", and "host" never with shared networks.
+	const network = Object.hasOwn(value, 'network') ? value.network : null;
+	if (network != null && (network !== 'host' || networks.length > 0)) return null;
 	const spec: ImageSpec = {
 		kind: workload,
 		image,
@@ -1522,6 +1525,7 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 		health_policy
 	};
 	if (networks.length > 0) spec.networks = networks;
+	if (network === 'host') spec.network = 'host';
 	return spec;
 }
 

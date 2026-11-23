@@ -52,3 +52,21 @@ func ReadMCPClientSecret(path string) (string, error) {
 	}
 	return line, nil
 }
+
+// LoadMCPClientSecret is the MCP client secret from BOT_API_MCP_CLIENT_SECRET
+// (value) or, when that is empty, BOT_API_MCP_CLIENT_SECRET_FILE (path;
+// api-v1 v1.50 item 2). The value has the file line's rules: one line of at
+// least 32 characters.
+func LoadMCPClientSecret(value, path string) (string, error) {
+	if value == "" {
+		return ReadMCPClientSecret(path)
+	}
+	const name = "BOT_API_MCP_CLIENT_SECRET"
+	if err := envSecretLine(value, name); err != nil {
+		return "", err
+	}
+	if len(value) < 32 {
+		return "", errors.New(name + " is too short")
+	}
+	return value, nil
+}

@@ -44,3 +44,8 @@ export function toastVersionDeleted(shortDigest: string, tags: number): void {
 export function toastDomainVerified(name: string): void {
 	toast.success(`Verified ${name}.`);
 }
+
+/** "Saved alerts." after a host's Alerts card is saved (api-v1 v1.49). */
+export function toastAlertsSaved(): void {
+	toast.success('Saved alerts.');
+}

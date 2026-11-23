@@ -144,6 +144,7 @@
 			logMaxSizeMb: spec.logging ? String(spec.logging.max_size_mb) : '',
 			logMaxFiles: spec.logging ? String(spec.logging.max_files) : '',
 			networks: (spec.networks ?? []).join(', '),
+			...(spec.network === 'host' ? { network: 'host' as const } : {}),
 			healthOnDeployFailure: policy.on_deploy_failure,
 			healthOnUnhealthy: policy.on_unhealthy,
 			healthUnhealthyAfter: storedAfter,
@@ -912,6 +913,13 @@
 			<Input id="{fieldId}-memory" name="memory_mb" bind:value={draft.memoryMb} inputmode="numeric" maxlength={5} placeholder="Suggested {SUGGESTED_MEMORY_MB}" aria-invalid={invalid('memory_mb')} aria-describedby={describedBy('memory_mb')} />
 		</Label>
 		{@render fieldNotice('memory_mb')}
+		{#if draft.network === 'host'}
+			<!-- api-v1 v1.50: set over MCP or the API; posted back unchanged so an edit keeps it. -->
+			<Input type="hidden" name="network" value="host" />
+			<p class="text-sm" data-image-network="host">
+				<span class="font-medium">Network:</span> host. The container shares the host's network and binds its loopback; ports are not published. A host deploys it only when its runner.toml allows this project (host_network_projects).
+			</p>
+		{/if}
 		<div class="grid gap-1.5" role="group" aria-labelledby="{fieldId}-networks-label" aria-describedby={networksDescribedBy()}>
 			<p id="{fieldId}-networks-label" class="text-sm font-medium">Shared networks</p>
 			<!-- The chosen names, posted as the comma-separated field the server reads. -->

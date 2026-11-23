@@ -152,7 +152,7 @@ func (s *Server) RunProblems(ctx context.Context) {
 }
 
 // SweepProblems is one sweep: nothing in the first 5 minutes after start;
-// then host_offline and the deploy check every call, and once an hour (in
+// then host_offline, the deploy, host file and host resource checks every call, and once an hour (in
 // its own goroutine, never two at once) the registry check and the prune
 // of resolved problems older than 30 days.
 func (s *Server) SweepProblems(ctx context.Context) {
@@ -181,6 +181,7 @@ func (s *Server) SweepProblems(ctx context.Context) {
 	s.sweepHosts(ctx, now)
 	s.sweepDeploys(ctx)
 	s.sweepHostFiles(ctx, now)
+	s.sweepHostResources(ctx, now)
 }
 
 // hourlyProblems is the hourly work, within problemsHourlyDeadline.
@@ -542,6 +543,8 @@ type problemReader struct {
 	roles     map[uuid.UUID]string
 	grants    map[uuid.UUID][]store.CatalogGrant
 	names     map[uuid.UUID]map[uuid.UUID]string
+	// disks is each host's mounts, read for a hashed disk subject's link.
+	disks map[uuid.UUID][]store.HostDisk
 }
 
 func (s *Server) newProblemReader(ctx context.Context, userID uuid.UUID) (*problemReader, error) {
@@ -599,11 +602,11 @@ func (r *problemReader) list(ctx context.Context, since *time.Time) ([]store.Pro
 	return out, nil
 }
 
-// sees: host_offline for org owners and admins; registry_login for project
+// sees: host_offline, host_file and host_resource for org owners and admins; registry_login for project
 // owners and admins (org owners and admins are project admins); deploy for
 // those plus anyone holding the entry's deploy action.
 func (r *problemReader) sees(ctx context.Context, p store.Problem) (bool, error) {
-	if p.Kind == store.ProblemHostOffline || p.Kind == store.ProblemHostFile || p.Kind == store.ProblemAgentUpgrade {
+	if p.Kind == store.ProblemHostOffline || p.Kind == store.ProblemHostFile || p.Kind == store.ProblemAgentUpgrade || p.Kind == store.ProblemHostResource {
 		return r.adminOrgs[p.OrgID], nil
 	}
 	if p.ProjectID == nil {
@@ -639,6 +642,8 @@ func (r *problemReader) href(ctx context.Context, p store.Problem) string {
 	case p.Kind == store.ProblemHostFile && p.HostID != nil:
 		_, name, _ := strings.Cut(p.Subject, ":")
 		return hostFileHref(*p.HostID, name)
+	case p.Kind == store.ProblemHostResource && p.HostID != nil:
+		return r.resourceHref(ctx, p)
 	case p.Kind == store.ProblemHostOffline && p.HostID != nil:
 		return "/hosts/" + p.HostID.String()
 	case p.Kind == store.ProblemAgentUpgrade && p.HostID != nil:

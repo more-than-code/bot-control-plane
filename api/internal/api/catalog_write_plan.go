@@ -66,6 +66,9 @@ func catalogCreatePlan(project, name string, img catalog.Image) string {
 	if len(img.Networks) > 0 {
 		parts = append(parts, "shared networks: "+listPhrase(img.Networks))
 	}
+	if img.Network != "" {
+		parts = append(parts, "network "+img.Network)
+	}
 	if len(parts) == 0 {
 		return head
 	}
@@ -104,6 +107,7 @@ func catalogUpdatePlan(name string, old, next catalog.Image) string {
 	add("memory", memoryPhrase(old.MemoryMB), memoryPhrase(next.MemoryMB))
 	add("timeout_sec", strconv.Itoa(old.TimeoutSec), strconv.Itoa(next.TimeoutSec))
 	add("shared networks", listOrNone(old.Networks), listOrNone(next.Networks))
+	add("network", textOrNone(old.Network), textOrNone(next.Network))
 	head := "will update image entry " + planText(name) + ":"
 	if len(parts) == 0 {
 		return head + " no field changes"

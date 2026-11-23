@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -28,7 +29,7 @@ const listHostsSchema = `{
 func registerListHosts(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "list_hosts",
-		Description: "List hosts for a project or an organization; pass exactly one of project_id or org_id. Hosts belong to an organization, and projects get access to them. With project_id, the hosts that project may use, each with access_level (metrics: status, charts and processes; deploy: also its services, logs and catalog runs). With org_id (organization owners and admins only), every host of the organization; project access per host is shown in the console, not here. Revoked hosts list with status revoked until an org admin removes them in the console; removed (archived) hosts are not listed. Reads stored host records (id, name, status, last seen, agent_version, and related fields); update_available is true when a newer bot-agent (latest_agent_version) exists (false for a revoked host), and the summary then says so. The summary lists, per host, the shared networks and subnets open to the caller (the host's administrator (root) opened them in runner.toml), and whether the host's Deploybot edge is on (it serves set_routes routes; an org admin turns it on in the console). Does not contact the hosts.",
+		Description: "List hosts for a project or an organization; pass exactly one of project_id or org_id. Hosts belong to an organization, and projects get access to them. With project_id, the hosts that project may use, each with access_level (metrics: status, charts and processes; deploy: also its services, logs and catalog runs). With org_id (organization owners and admins only), every host of the organization; project access per host is shown in the console, not here. Revoked hosts list with status revoked until an org admin removes them in the console; removed (archived) hosts are not listed. Reads stored host records (id, name, status, last seen, agent_version, and related fields); update_available is true when a newer bot-agent (latest_agent_version) exists (false for a revoked host), and the summary then says so. The summary lists, per host, the shared networks and subnets open to the caller (the host's administrator (root) opened them in runner.toml), and whether the host's Deploybot edge is on (it serves set_routes routes; an org admin turns it on in the console), and each host's console page, where an org owner or admin manages its edge, policy and access; post that link for the person rather than describing clicks. Does not contact the hosts.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(listHostsSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -59,6 +60,33 @@ func registerListHosts(server *mcp.Server, api *apiclient.Client) {
 		if fail != nil {
 			return fail
 		}
-		return present(payload, summarizeHosts(payload, org))
+		return present(payload, summarizeHosts(payload, org)+hostLinks(api, payload))
 	})
+}
+
+// hostLinks is a summary line with each host's console page, or "" when
+// there is no console origin.
+func hostLinks(api *apiclient.Client, payload json.RawMessage) string {
+	var body struct {
+		Items []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(payload, &body) != nil {
+		return ""
+	}
+	parts := []string{}
+	for i, h := range body.Items {
+		if i == maxListItems {
+			break
+		}
+		if link := hostURL(api, h.ID, ""); link != "" {
+			parts = append(parts, summaryField(h.Name)+" "+link)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\nHost pages: " + strings.Join(parts, ", ")
 }

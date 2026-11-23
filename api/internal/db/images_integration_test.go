@@ -762,7 +762,7 @@ WHERE table_schema = 'app' AND table_name = 'services' AND column_name = 'image_
 `).Scan(&digest); err != nil || digest == nil || *digest != "text" {
 		t.Fatalf("image_digest %v %v", digest, err)
 	}
-	assertTablePrivs(t, d, ctx, "image_deploys", true, true, false, true, []string{"digest", "outcome", "exit_code", "finished_at", "in_flight", "reason", "final_status", "log_tail"})
+	assertTablePrivs(t, d, ctx, "image_deploys", true, true, false, true, []string{"digest", "outcome", "exit_code", "finished_at", "in_flight", "reason", "final_status", "log_tail", "task_id", "task_action"})
 	assertTablePrivs(t, d, ctx, "env_sets", true, true, false, true, []string{"updated_at", "updated_by"})
 	assertTablePrivs(t, d, ctx, "env_values", true, true, false, true, []string{"is_secret", "value", "nonce", "ciphertext", "key_version", "reveal_pending", "needs_value", "generated"})
 	assertTablePrivs(t, d, ctx, "registries", true, true, false, true, []string{"username", "nonce", "ciphertext", "key_version", "updated_at", "updated_by", "source", "connected_by",
