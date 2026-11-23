@@ -18,6 +18,10 @@ import (
 
 const edgeMigration = "0023_domains_edge_routes.sql"
 
+// domainNamesMigration changes a 0023 constraint, so it is applied again
+// whenever a test rolls 0023 back and forward.
+const domainNamesMigration = "0036_domain_assignment_names.sql"
+
 // TestParityDomains runs the domain store rules against memstore and,
 // with a test database, Postgres.
 func TestParityDomains(t *testing.T) {
@@ -445,7 +449,7 @@ func TestDomainsEdgeRoutesMigration(t *testing.T) {
 	if edgeTables(t, d, ctx) != 0 {
 		t.Fatal("down left tables")
 	}
-	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+edgeMigration+`'`); err != nil {
+	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name IN ('`+edgeMigration+`', '`+domainNamesMigration+`')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := Migrate(ctx, url); err != nil {
@@ -472,7 +476,7 @@ func restoreEdgeMigration(url string) {
 	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'app' AND table_name = 'routes'`).Scan(&n); err != nil || n == 1 {
 		return
 	}
-	if _, err := d.pool.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+edgeMigration+`'`); err != nil {
+	if _, err := d.pool.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name IN ('`+edgeMigration+`', '`+domainNamesMigration+`')`); err != nil {
 		return
 	}
 	_ = Migrate(ctx, url)

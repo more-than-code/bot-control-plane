@@ -304,6 +304,7 @@ func TestOrgsMigration(t *testing.T) {
 			assertNewestProblemsSchema(t, cctx, d)
 		}
 	})
+	clearOrgsBeforeDown(t, ctx, d)
 	// 0016 dropped what the down script needs: start from phase 1.
 	restorePhase1Schema(t, ctx, url)
 	at := time.Now().UTC().Truncate(time.Microsecond)
@@ -512,7 +513,8 @@ func runDown(t *testing.T, ctx context.Context, url string) {
 }
 
 // dropEdgeSchema clears the 0023 rows and runs its down script on conn
-// (already deploybot_owner), then forgets 0023 so Migrate applies it again.
+// (already deploybot_owner), then forgets 0023 and 0036 (which changes a
+// 0023 constraint) so Migrate applies them again.
 // A database without 0023 is left as it is.
 func dropEdgeSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 	t.Helper()
@@ -535,7 +537,7 @@ func dropEdgeSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 	if _, err := conn.PgConn().Exec(ctx, string(body)).ReadAll(); err != nil {
 		t.Fatalf("0023 down: %v", err)
 	}
-	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+edgeMigration+`'`); err != nil {
+	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name IN ('`+edgeMigration+`', '`+domainNamesMigration+`')`); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -670,6 +672,7 @@ func TestOrgsMigrationProductionShape(t *testing.T) {
 			assertNewestProblemsSchema(t, cctx, d)
 		}
 	})
+	clearOrgsBeforeDown(t, ctx, d)
 	restorePhase1Schema(t, ctx, url)
 	runDown(t, ctx, url)
 	tag := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
@@ -912,4 +915,16 @@ func tryDown(ctx context.Context, url string) error {
 	}
 	_, err = conn.PgConn().Exec(ctx, string(body)).ReadAll()
 	return err
+}
+
+// clearOrgsBeforeDown removes the rows other tests in this package left
+// behind. The 0015 down script refuses while a host sits in an org that never
+// had a project, and earlier tests (the agent upgrades parity test among
+// them) leave such hosts. Truncating users and orgs cascades to every row that
+// refers to them, hosts and metrics included.
+func clearOrgsBeforeDown(t *testing.T, ctx context.Context, d *DB) {
+	t.Helper()
+	if _, err := d.pool.Exec(ctx, `TRUNCATE TABLE app.orgs, app.users CASCADE`); err != nil {
+		t.Fatalf("clear rows other tests left: %v", err)
+	}
 }
