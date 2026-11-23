@@ -48,7 +48,7 @@ func jsonOf(v any) string {
 	return string(b)
 }
 
-// api-v1 v1.52: an org that has not granted the app is named, with the
+// api-v1 v1.53: an org that has not granted the app is named, with the
 // GitHub page where it is granted, in image-access, readiness and the
 // registry_login problem; reconnecting is not suggested.
 func TestRegistryRefusalOrgRestricted(t *testing.T) {

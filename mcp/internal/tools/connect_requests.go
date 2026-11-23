@@ -61,7 +61,7 @@ func registerConnectRequests(server *mcp.Server, api *apiclient.Client) {
 		Description: connectRule + " Ask the signed-in person to connect GitHub for a project, so Deploybot can pull private ghcr.io images. " +
 			"Deploybot makes a one-time link, valid for 15 minutes, that only that person can use; they open it in their own browser, " +
 			"continue to github.com and approve read:packages there. The login is stored encrypted for the project and replaces any ghcr.io login it has. " +
-			"The result always has the link as text, alone on its first line; show it to the person. " + severalLinks + " A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
+			"The result always has the link as text, alone on its first line, and the call returns at once; show it to the person. " + severalLinks + " " +
 			"Needs owner or admin on the project, and Connect GitHub configured on the server. Asking again for the same project replaces your earlier link, which then stops working. " +
 			"Check the outcome with get_registry_connect_request. Does not contact any host.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, OpenWorldHint: &closedWorld},
@@ -140,9 +140,6 @@ func connectRegistry(ctx context.Context, api *apiclient.Client, call requestCal
 	created, ok := connectRequestKind.parseCreated(payload)
 	if !ok {
 		return toolError("error", errStatusShape.Error())
-	}
-	if call.wantsURLInput() {
-		return connectRequestKind.inputRequired(created, "Deploybot asks you to connect GitHub for this project so it can pull private ghcr.io images. Open this link in your browser; the agent never sees the token.")
 	}
 	return connectResult(created, "", elicitNotSupported)
 }

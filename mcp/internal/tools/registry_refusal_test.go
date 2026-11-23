@@ -8,7 +8,7 @@ import (
 
 const testGrantURL = "https://github.com/settings/connections/applications/Iv1.abc123"
 
-// api-v1 v1.52: the org_restricted fix passes the GitHub link, never a
+// api-v1 v1.53: the org_restricted fix passes the GitHub link, never a
 // console link, and Next tells the agent not to ask for a reconnect.
 func TestReadinessGitHubOrgAccess(t *testing.T) {
 	payload, _ := json.Marshal(map[string]any{

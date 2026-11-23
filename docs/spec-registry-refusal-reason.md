@@ -1,4 +1,4 @@
-# Say why ghcr.io refused the GitHub connection (api-v1 v1.52)
+# Say why ghcr.io refused the GitHub connection (api-v1 v1.53)
 
 Status: rev 1, as implemented (2026-11-23). Covers DD item
 DEF-20261123-registry-refused-gives-no-reason-when-gi-ogc2, under the

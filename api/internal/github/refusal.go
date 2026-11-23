@@ -1,6 +1,6 @@
 package github
 
-// Why ghcr.io refused a Connect GitHub login (api-v1 v1.52): the registry
+// Why ghcr.io refused a Connect GitHub login (api-v1 v1.53): the registry
 // answers only "denied", so the API asks the GitHub REST API with the same
 // token. No GitHub body is returned, logged or echoed; the only thing read
 // from one is whether a 403 names OAuth App access restrictions.

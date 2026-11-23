@@ -41,7 +41,7 @@ const (
 	msgDomainTaken  = "this domain is verified by another organization"
 	msgDomainAdded  = "this domain is already added"
 	msgDomainName   = "invalid domain name: a lowercase domain such as example.com (IDNA A-labels), not an IP address"
-	msgAssignShape  = "assignments name projects of this organization with pattern @ (the name itself) or * (one label below it)"
+	msgAssignShape  = "assignments name projects of this organization, each once per pattern; a pattern is @ (the name itself), * (one label below it), a name below it such as app or api.dev, or *. and such a name (one label below that name), at most 253 characters written out"
 	msgAssignTooBig = "at most 64 assignments per domain"
 )
 
@@ -218,6 +218,11 @@ func (s *Server) handleDomainVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
+		// Last check shows this attempt (pending or lapsed only; a verified
+		// domain's daily re-check keeps its own clock).
+		if err := s.Store.TouchDomainCheck(r.Context(), orgID, d.ID, s.now()); err != nil {
+			s.logger().Error("domain check time not stored")
+		}
 		writeCode(w, "conflict", fmt.Sprintf("TXT record not found yet: add %s = %s", txtPrefix+d.Name, txtValuePrefix+d.Token))
 		return
 	}
@@ -267,7 +272,7 @@ func (s *Server) handleDomainAssign(w http.ResponseWriter, r *http.Request) {
 	in := make([]store.DomainAssignment, 0, len(body.Assignments))
 	for _, a := range body.Assignments {
 		id, err := uuid.Parse(a.ProjectID)
-		if err != nil || (a.Pattern != "@" && a.Pattern != "*") {
+		if err != nil || !store.ValidPattern(d.Name, a.Pattern) {
 			writeCode(w, "bad_request", msgAssignShape)
 			return
 		}

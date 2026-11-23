@@ -267,7 +267,7 @@ const (
 )
 
 // refusalText is the person-facing reason a GitHub connection was refused
-// (api-v1 v1.52), with the GitHub page that fixes it; "" when the reason
+// (api-v1 v1.53), with the GitHub page that fixes it; "" when the reason
 // is unknown or is the sign-in itself (the v1.43 detail says that).
 func refusalText(r *accessRefusal) string {
 	if r == nil {

@@ -38,13 +38,13 @@ type imageAccess struct {
 	Access   string `json:"access"`
 	Login    string `json:"login"`
 	// Refusal says why a GitHub-connection login was refused (api-v1
-	// v1.52): only with access login_failed, login github, and only when
+	// v1.53): only with access login_failed, login github, and only when
 	// GitHub told the reason.
 	Refusal *accessRefusal `json:"refusal,omitempty"`
 }
 
 // accessRefusal is the reason ghcr.io refused the GitHub connection
-// (api-v1 v1.52). URL is the GitHub page that fixes org_restricted.
+// (api-v1 v1.53). URL is the GitHub page that fixes org_restricted.
 type accessRefusal struct {
 	Reason  string `json:"reason"`
 	Owner   string `json:"owner,omitempty"`
@@ -179,7 +179,7 @@ func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, proje
 // as refused: the registry cannot tell private from missing without a login,
 // so not_found is only an authenticated 404. For login_failed it also
 // returns the registry error, for the lookup log, and the token that was
-// refused, for the refusal reason (api-v1 v1.52); otherwise nil and "".
+// refused, for the refusal reason (api-v1 v1.53); otherwise nil and "".
 func (s *Server) probeAccess(ctx context.Context, projectID uuid.UUID, ref catalog.ImageRef, reference string, stored bool, mat store.RegistryMaterial) (string, *registry.Error, string) {
 	repo := registry.Repo{Host: ref.Host, Path: ref.Path}
 	_, _, err := s.Registry.Client.Digest(ctx, repo, reference)
@@ -221,7 +221,7 @@ func registryCode(err error) string {
 }
 
 // diagnoseGitHubRefusal asks GitHub, with the token ghcr.io refused, why
-// it refused the project's GitHub connection for ref (api-v1 v1.52). nil
+// it refused the project's GitHub connection for ref (api-v1 v1.53). nil
 // when it cannot tell: no GitHub client, a failed call or no clear reason.
 // The answer is cached with the access answer (60 s).
 func (s *Server) diagnoseGitHubRefusal(ctx context.Context, token string, ref catalog.ImageRef) *accessRefusal {

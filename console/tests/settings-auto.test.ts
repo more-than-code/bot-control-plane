@@ -662,7 +662,7 @@ test('the refused badge checks every ghcr.io repository once', async () => {
 	}
 });
 
-// api-v1 v1.52: why ghcr.io refused the GitHub connection.
+// api-v1 v1.53: why ghcr.io refused the GitHub connection.
 const GRANT = 'https://github.com/settings/connections/applications/Iv1.abc123';
 
 test('image access keeps an allowlisted refusal on a refused GitHub connection only', () => {

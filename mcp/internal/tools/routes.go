@@ -108,6 +108,46 @@ func confirmationRoutes(status int, payload json.RawMessage) *mcp.CallToolResult
 	return finishConfirmation(encoded, nil)
 }
 
+// assignLinkPattern is an assignment pattern of the refusal payload: "@",
+// "*", a relative name or "*." and one.
+var assignLinkPattern = regexp.MustCompile(`^@$|^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+
+// assignLinkSentence reads the payload of an unassigned-hostname refusal
+// (api-v1 v1.52) and returns the sentence that tells the agent who assigns
+// that one name, with console_url's link when BOT_MCP_CONSOLE_ORIGIN is
+// set. Assigning a domain is console only, so the agent never does it: it
+// posts the link. The link is built here from checked ids, never taken from
+// the payload.
+func assignLinkSentence(api *apiclient.Client, payload json.RawMessage, projectID string) string {
+	var in struct {
+		Hostname string `json:"hostname"`
+		Domain   string `json:"domain"`
+		DomainID string `json:"domain_id"`
+		OrgID    string `json:"org_id"`
+		Pattern  string `json:"pattern"`
+		Name     string `json:"name"`
+	}
+	if len(payload) == 0 || json.Unmarshal(payload, &in) != nil {
+		return ""
+	}
+	if !routeHostPattern.MatchString(in.Hostname) || !routeHostPattern.MatchString(in.Domain) ||
+		!assignLinkPattern.MatchString(in.Pattern) || len(in.Pattern) > 253 ||
+		in.Name != patternFullName(in.Domain, in.Pattern) ||
+		!uuidPattern.MatchString(in.DomainID) || !uuidPattern.MatchString(in.OrgID) {
+		return ""
+	}
+	text := fmt.Sprintf(" %s is under domain %s, which an org owner or admin can assign to this project (assigning a domain is console only): ask the person to assign %s, then set the routes again.", in.Hostname, in.Domain, in.Name)
+	return withLink(text, domainAssignURL(api, in.OrgID, in.DomainID, projectID, in.Pattern))
+}
+
+// patternFullName writes an assignment pattern out, as the API does.
+func patternFullName(domain, pattern string) string {
+	if pattern == "@" {
+		return domain
+	}
+	return pattern + "." + domain
+}
+
 func validateRoutes(routes []routeArg) error {
 	if routes == nil {
 		return errors.New("routes is required; [] removes all routes")
@@ -144,7 +184,7 @@ func registerRoutes(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name: "set_routes",
 		Description: "Replace a catalog entry's public routes (hostname and optional path to a port), served over HTTPS with automatic certificates by the Deploybot edge on the host where the entry runs. Nothing changes until confirm after the user agrees; the plan names every address that goes live or stops, one per line. " +
-			"Each hostname must be under a domain an org admin verified and assigned to the project in the console (domains and turning the edge on are console only). For an image entry the port is a container port the entry publishes in ports (127.0.0.1 is enough). " +
+			"Each hostname must be under a domain an org admin verified and assigned to the project in the console (domains and turning the edge on are console only). A hostname that is under a verified domain of the org but not assigned yet is refused with a console link an org owner or admin opens to assign that one name; show them the link, and never try to assign a domain yourself. For an image entry the port is a container port the entry publishes in ports (127.0.0.1 is enough). " +
 			"A hostname and path already routed elsewhere is refused. A route stays pending until the entry runs on a host whose edge is on; check_readiness reports what is missing. Routes never change the entry's spec or restart it. " +
 			"Needs project owner or admin. Does not contact any host; after confirm the API updates the host's edge.",
 		Annotations: mutatingAnnotations(false),
@@ -175,8 +215,13 @@ func registerRoutes(server *mcp.Server, api *apiclient.Client) {
 			Routes         []routeArg `json:"routes"`
 			IdempotencyKey string     `json:"idempotency_key"`
 		}{in.Routes, in.IdempotencyKey}
-		status, payload, fail := callStatus(ctx, api, http.MethodPut, idPath("v1", "projects", in.ProjectID, "catalog", in.Entry, "routes"), nil, body)
+		status, payload, fail, apiErr := callStatusErr(ctx, api, http.MethodPut, idPath("v1", "projects", in.ProjectID, "catalog", in.Entry, "routes"), nil, body)
 		if fail != nil {
+			if apiErr != nil && apiErr.Code == "bad_request" {
+				if link := assignLinkSentence(api, apiErr.Payload, in.ProjectID); link != "" {
+					return toolError(apiErr.Code, redactText(apiErr.Msg)+link)
+				}
+			}
 			return fail
 		}
 		return confirmationRoutes(status, payload)

@@ -10,7 +10,7 @@ export const IMAGE_LOGINS = ['none', 'manual', 'github'] as const;
 export type ImageLogin = (typeof IMAGE_LOGINS)[number];
 
 /**
- * Why ghcr.io refused the GitHub connection (api-v1 v1.52), when GitHub told: the sign-in itself, an organization that
+ * Why ghcr.io refused the GitHub connection (api-v1 v1.53), when GitHub told: the sign-in itself, an organization that
  * has not granted the Deploybot GitHub app (`url` is GitHub's page where an org owner clicks Grant), or an account that
  * cannot see the package.
  */
@@ -69,7 +69,7 @@ export function parseRefusal(value: unknown): AccessRefusal | null {
 }
 
 /**
- * The Registries card's refused-login state: false, true (refused, no reason), or the reasons GitHub told (api-v1 v1.52).
+ * The Registries card's refused-login state: false, true (refused, no reason), or the reasons GitHub told (api-v1 v1.53).
  */
 export type GitHubRefused = boolean | { refusals: AccessRefusal[] };
 
@@ -166,7 +166,7 @@ export const FIX_ACTIONS = [
 ] as const;
 export type FixAction = (typeof FIX_ACTIONS)[number];
 
-/** `owner` and `url` are a github_org_access fix's organization and GitHub's grant page (api-v1 v1.52). */
+/** `owner` and `url` are a github_org_access fix's organization and GitHub's grant page (api-v1 v1.53). */
 export type ReadinessFix = { action: FixAction; set?: string; key?: string; name?: string; registry?: string; host_id?: string; owner?: string; url?: string };
 export type ReadinessCheck = { check: ReadyCheckName; status: ReadyStatus; message: string; fix: ReadinessFix };
 export type Readiness = { ready: boolean; checks: ReadinessCheck[] };

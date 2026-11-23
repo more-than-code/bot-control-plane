@@ -28,7 +28,7 @@
 <p {id} role="status" class="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm break-words" data-image-access>
 	<span class="min-w-0">{line.text}</span>
 	{#if line.github}
-		<!-- api-v1 v1.52: an organization has not granted the GitHub app; the fix is on GitHub, not here. -->
+		<!-- api-v1 v1.53: an organization has not granted the GitHub app; the fix is on GitHub, not here. -->
 		<a class="text-foreground underline underline-offset-3" href={line.github} rel="noopener noreferrer" target="_blank"
 			>Grant on GitHub<span class="sr-only">{' (opens in a new tab)'}</span></a
 		>

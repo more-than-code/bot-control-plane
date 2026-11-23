@@ -98,7 +98,7 @@ func summarizeProblems(payload json.RawMessage) string {
 		line := summaryField(p.Title) + " since " + p.OpenedAt.UTC().Format("2006-01-02 15:04") + " UTC (" + summaryField(p.Level) + ")"
 		fix, ok := problemFix[p.Kind]
 		if p.Kind == "registry_login" && p.Detail != "" {
-			// api-v1 v1.52: the detail says why; for an organization that has
+			// api-v1 v1.53: the detail says why; for an organization that has
 			// not granted the app it carries the GitHub link that fixes it.
 			line += ": " + strings.TrimSuffix(clampField(p.Detail, 320), ".")
 			if strings.Contains(p.Detail, "https://github.com/settings/connections/applications/") {

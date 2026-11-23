@@ -81,7 +81,21 @@ const catalogWriteSchema = `{
         "image": {"type": "string"},
         "command": {"type": ["array", "null"], "items": {"type": "string"}},
         "entrypoint": {"type": ["array", "null"], "items": {"type": "string"}},
-        "ports": {"type": "array"},
+        "ports": {
+          "type": ["array", "null"],
+          "description": "Published ports, at most 16. Each is {\"host\": N, \"container\": N} with an optional \"public\". public false (the default) binds 127.0.0.1 on the host, which is enough for a route (set_routes) or another service on the host; public true binds 0.0.0.0 and needs allow_public_ports = true in the host's runner.toml. Host ports are unique within the entry. Strings like \"80:80\" are not accepted.",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host", "container"],
+            "properties": {
+              "host": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "Port on the host."},
+              "container": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "Port inside the container (TCP)."},
+              "public": {"type": "boolean", "default": false, "description": "false binds 127.0.0.1; true binds 0.0.0.0 (needs allow_public_ports on the host)."}
+            }
+          }
+        },
         "env": {"type": "object"},
         "env_sets": {"type": "array", "items": {"type": "string"}},
         "secret_env": {
@@ -110,8 +124,35 @@ const catalogWriteSchema = `{
             ]
           }
         },
-        "volumes": {"type": "array"},
-        "files": {"type": "array"},
+        "volumes": {
+          "type": ["array", "null"],
+          "description": "Named volumes, at most 8. Each is {\"name\": \"data\", \"target\": \"/var/lib/app\"} with an optional \"read_only\". The host volume is <project>-<name>, kept across deploys. Targets are unique.",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "target"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"},
+              "target": {"type": "string", "maxLength": 255, "description": "Absolute path in the container, with no . or .. segment."},
+              "read_only": {"type": "boolean", "default": false}
+            }
+          }
+        },
+        "files": {
+          "type": ["array", "null"],
+          "description": "Project files mounted read-only, at most 16. Each is {\"file\": \"<project file name>\", \"target\": \"/etc/app/config.yaml\"}. The file must already exist in the project (request_file adds one). A file target may not sit at, under or above a volume target.",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "target"],
+            "properties": {
+              "file": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+              "target": {"type": "string", "maxLength": 255, "description": "Absolute path in the container: no empty, . or .. segment, no trailing /, not under /proc, /sys or /dev."}
+            }
+          }
+        },
         "healthcheck": {
           "type": ["object", "null"],
           "additionalProperties": false,
@@ -256,7 +297,7 @@ func requireCatalogName(value string) error {
 }
 
 // validateImageSpec accepts an ImageSpec object and rejects unknown keys.
-// It checks the healthcheck and logging shapes. It does not apply image rules 1–13, fill
+// It checks the healthcheck, logging, ports, volumes and files shapes. It does not apply the other image rules, fill
 // healthcheck defaults, or compare timeout_sec with interval_sec. The API does,
 // and names the field. A rejected healthcheck does not include the argv.
 func validateImageSpec(raw json.RawMessage) error {
@@ -306,6 +347,24 @@ func validateImageSpec(raw json.RawMessage) error {
 	}
 	if network, ok := fields["network"]; ok {
 		if err := validateNetwork(network, fields["networks"]); err != nil {
+			return err
+		}
+	}
+	if ports, ok := fields["ports"]; ok {
+		if err := validatePorts(ports); err != nil {
+			return err
+		}
+	}
+	var volumeTargets []string
+	if volumes, ok := fields["volumes"]; ok {
+		targets, err := validateVolumes(volumes)
+		if err != nil {
+			return err
+		}
+		volumeTargets = targets
+	}
+	if files, ok := fields["files"]; ok {
+		if err := validateFiles(files, volumeTargets); err != nil {
 			return err
 		}
 	}

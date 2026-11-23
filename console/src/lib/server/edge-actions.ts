@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { error, fail, isHttpError, isRedirect, redirect, type RequestEvent } from '@sveltejs/kit';
 import type { DomainPattern, EdgeRoute } from '$lib/api-types';
 import { isCatalogName, isIdempotencyKey } from '$lib/catalog';
-import { ASSIGNMENTS_MAX, cleanDomainName, isDomainPattern, routesFromField, type DomainPlan } from '$lib/edge-routes';
+import { ASSIGNMENTS_MAX, cleanDomainName, cleanDomainPattern, isDomainPattern, routesFromField, type DomainPlan } from '$lib/edge-routes';
 import { isConfirmationId } from '$lib/image-spec';
 import { ApiError, apiFetch } from '$lib/server/api';
 import { formText } from '$lib/server/form';
@@ -70,10 +70,20 @@ export async function verifyDomain(event: RequestEvent) {
 		await apiFetch(event, `/v1/orgs/${orgId}/domains/${domainId}/verify`, { method: 'POST', body: '{}' });
 	} catch (err) {
 		rethrow(err);
-		// "TXT record not found yet: add … = …" is the API's own text.
-		return domainFailure(event, apiStatus(err), apiMessage(err), 'domain', domainId);
+		return domainFailure(event, apiStatus(err), verifyFailureText(err), 'domain', domainId);
 	}
-	redirect(303, backTo(event.url));
+	// No redirect: the row learns the outcome at once and the page re-reads the list in the background, so the
+	// Verify button never waits on that reload (the stuck "Verifying…" of the bug).
+	return present(event, { scope: 'settings' as const, field: 'domainVerified' as const, domainId, message: null });
+}
+
+/** The API's "TXT record not found yet: add … = …", followed by when it was looked up and that DNS can lag. */
+export const TXT_NOT_FOUND_HINT = 'Deploybot looked up that TXT record just now and did not find it. A new DNS record can take a few minutes to show up; try Verify again then.';
+
+function verifyFailureText(err: unknown): string {
+	const text = apiMessage(err);
+	if (err instanceof ApiError && err.code === 'conflict' && text.startsWith('TXT record not found yet')) return `${text.replace(/\.?$/, '.')} ${TXT_NOT_FOUND_HINT}`;
+	return text;
 }
 
 /** `project_id` and `pattern` come as parallel lists, one pair per row. */
@@ -83,10 +93,14 @@ export function assignmentsFromForm(form: FormData): { ok: true; assignments: Ar
 	if (projects.length !== patterns.length || projects.length > ASSIGNMENTS_MAX) return { ok: false, message: 'The assignments are not valid.' };
 	const assignments: Array<{ project_id: string; pattern: DomainPattern }> = [];
 	const seen = new Set<string>();
+	// The domain's name only tidies a typed full name back to a pattern; the API checks the pattern against the domain.
+	const rawDomain = form.get('domain_name');
+	const domainName = typeof rawDomain === 'string' ? cleanDomainName(rawDomain) : null;
 	for (const [index, project] of projects.entries()) {
-		const pattern = patterns[index];
+		const raw = patterns[index];
+		const pattern = domainName ? cleanDomainPattern(domainName, raw) : isDomainPattern(raw) ? raw : null;
 		if (typeof project !== 'string' || !isUuid(project)) return { ok: false, message: `Row ${index + 1}: choose a project.` };
-		if (!isDomainPattern(pattern)) return { ok: false, message: `Row ${index + 1}: choose the domain itself or its subdomains.` };
+		if (pattern === null) return { ok: false, message: `Row ${index + 1}: enter @ for the domain itself, * for any name one label below it, a name such as app, or *.dev for any name one label below dev.` };
 		const pair = `${project} ${pattern}`;
 		if (seen.has(pair)) continue;
 		seen.add(pair);

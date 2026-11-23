@@ -74,7 +74,7 @@
 		githubConnect?: boolean;
 		/** The note after Connect GitHub (`?github=`) or a Disconnect whose revoke failed. */
 		githubNote?: GitHubNoteCode | null;
-		/** ghcr.io refused the GitHub connection for an image in this project's catalog, with GitHub's reasons (api-v1 v1.52). */
+		/** ghcr.io refused the GitHub connection for an image in this project's catalog, with GitHub's reasons (api-v1 v1.53). */
 		/** Streamed: its registry lookups never hold up the tab. */
 		githubRefused?: GitHubRefused | Promise<GitHubRefused>;
 		/** The catalog, for each card's "Used by" note (names only). */
@@ -111,7 +111,7 @@
 	<Badge variant="destructive" class="ml-1" title={refusedTitle(state)}>Refused</Badge>
 {/snippet}
 
-<!-- api-v1 v1.52: why ghcr.io refused, when GitHub told; an organization's grant is on GitHub, not here. -->
+<!-- api-v1 v1.53: why ghcr.io refused, when GitHub told; an organization's grant is on GitHub, not here. -->
 {#snippet refusalLines(state: GitHubRefused)}
 	{#if typeof state === 'object'}
 		{#each state.refusals as refusal (`${refusal.reason}|${refusal.owner ?? ''}`)}

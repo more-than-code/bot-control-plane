@@ -194,7 +194,7 @@ async function githubConnectFor(event: RequestEvent, id: string): Promise<boolea
  * Whether ghcr.io refuses the project's GitHub connection, for the Registries card badge. Only with a GitHub row, it
  * asks image-access once per ghcr.io repository in the catalog (cached lookups, in parallel); any `login_failed` is a
  * refusal. No such image, or a failed lookup, does not count. A refusal comes with the reasons GitHub told (api-v1
- * v1.52), one per reason and owner, organizations that have not granted the app first.
+ * v1.53), one per reason and owner, organizations that have not granted the app first.
  */
 export async function githubRefused(event: RequestEvent, id: string, registries: Registry[], catalog: CatalogEntry[]): Promise<GitHubRefused> {
 	if (!registries.some((row) => row.host === GITHUB_REGISTRY && row.source === 'github')) return false;
