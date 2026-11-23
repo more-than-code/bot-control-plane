@@ -241,8 +241,11 @@ export type HostEdgePolicy = {
 /** Domain verification state (api-v1 v1.35 item 1). */
 export type DomainStatus = 'pending' | 'verified' | 'lapsed';
 
-/** `@` is the domain itself; `*` is one label below it. */
-export type DomainPattern = '@' | '*';
+/**
+ * Relative to the domain, like a DNS zone file (api-v1 v1.52): `@` is the domain itself, `*` is one label below it, a
+ * name such as `app` or `api.dev` is exactly that name below it, and `*.dev` is one label below `dev.<domain>`.
+ */
+export type DomainPattern = string;
 
 export type DomainAssignment = {
 	project_id: string;

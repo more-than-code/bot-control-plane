@@ -37,6 +37,8 @@ const (
 	fixVerifyDomain = "verify_domain"
 	fixAllowEdge    = "allow_edge"
 	fixTurnOnEdge   = "turn_on_edge"
+	// api-v1 v1.52: assign one name of a verified domain to the project.
+	fixAssignDomain = "assign_domain"
 )
 
 // readyCheck is one readiness row. Message names keys, sets, files, hosts
@@ -60,8 +62,13 @@ type readyFix struct {
 	// ImagePattern is the repository a host_policy_snippet fix allows
 	// (api-v1 v1.51).
 	ImagePattern string `json:"image_pattern,omitempty"`
-	// OrgID is the org whose Domains a verify_domain fix opens.
+	// OrgID is the org whose Domains a verify_domain or assign_domain fix
+	// opens.
 	OrgID *uuid.UUID `json:"org_id,omitempty"`
+	// DomainID and Pattern are the domain and the pattern an assign_domain
+	// fix fills in (api-v1 v1.52); Name is that pattern written out.
+	DomainID *uuid.UUID `json:"domain_id,omitempty"`
+	Pattern  string     `json:"pattern,omitempty"`
 }
 
 type readyList struct {

@@ -72,6 +72,22 @@ func orgDomainsURL(api *apiclient.Client, orgID string) string {
 	return api.ConsoleURL("/orgs/" + orgID + "?tab=settings#domains")
 }
 
+// domainAssignURL opens the org's Domains with that domain's Assign dialog
+// holding one more row: this project and pattern (api-v1 v1.52). The
+// person reviews it and taps Save; the link never assigns anything.
+func domainAssignURL(api *apiclient.Client, orgID, domainID, projectID, pattern string) string {
+	if !uuidPattern.MatchString(orgID) || !uuidPattern.MatchString(domainID) || !uuidPattern.MatchString(projectID) ||
+		len(pattern) > 253 || !assignLinkPattern.MatchString(pattern) {
+		return ""
+	}
+	q := url.Values{}
+	q.Set("tab", "settings")
+	q.Set("domains.assign", domainID)
+	q.Set("domains.project", projectID)
+	q.Set("domains.pattern", pattern)
+	return api.ConsoleURL("/orgs/" + orgID + "?" + q.Encode())
+}
+
 // fixURL is the console page for a readiness fix the person does, or "".
 func fixURL(api *apiclient.Client, fix map[string]any, projectID string) string {
 	str := func(k string) string { s, _ := fix[k].(string); return s }
@@ -97,6 +113,8 @@ func fixURL(api *apiclient.Client, fix map[string]any, projectID string) string 
 		return hostURL(api, str("host_id"), "edge")
 	case "verify_domain":
 		return orgDomainsURL(api, str("org_id"))
+	case "assign_domain":
+		return domainAssignURL(api, str("org_id"), str("domain_id"), projectID, str("pattern"))
 	default:
 		return ""
 	}
