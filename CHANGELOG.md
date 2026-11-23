@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.46 — 2026-11-24
+- Host resource alerts: Deploybot opens a problem when an always-on host runs low on memory or disk, or stays busy on CPU or load, and resolves it after recovery. Org owners and admins can set per-host thresholds on the host page, and the memory chart shows available memory.
+- Deploybot can run its own server in containers: image entries can use the host's network when the host's owner allows it, secrets can come from root-only files on the host, and a deploy started before the server goes away is still recorded when the host reports back. This needs bot-agent 0.2.15.
+- Host settings from the console: a host's owner can let org owners and admins change its edge, images and projects in the console. This needs a bot-agent that supports it.
+- Assign one name of a domain (for example api.example.com) to a project, not only the whole domain or a wildcard.
+- When ghcr.io refuses a GitHub connection, the console says why (for example, the GitHub organization has not approved the app).
+- Regenerate a generated secret value from the console.
+- MCP: request tools return their console link at once, results link to the console page they concern, a step only the person can do (such as revealing a generated value) comes with the link to send them, and an invalid image entry names the field that is wrong.
+
 ## v0.2.45 — 2026-11-23
 - Delete stale image versions from the image picker: an org owner or admin can remove a ghcr.io version after allowing it in the GitHub connection. A version that is running, is a rollback target or is among the last 5 deploys is kept, and the message says why.
 - The image picker lists ghcr.io tags newest first.

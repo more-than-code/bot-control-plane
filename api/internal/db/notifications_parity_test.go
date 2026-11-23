@@ -345,6 +345,10 @@ func TestParityHostUpdateNotices(t *testing.T) {
 	runParity(t, func(p parity) {
 		u := p.user("hun")
 		org := p.org(u.ID)
+		// A project in the org, so the 0015 down script that TestOrgsMigration
+		// runs on the shared test database finds an owner for these hosts (it
+		// refuses a host in an org that never had a project).
+		p.project(org, u.ID, "hun")
 		a, b := p.enroll(org, nil, u.ID, "hun-a"), p.enroll(org, nil, u.ID, "hun-b")
 		ghost := uuid.New()
 		got, err := p.st.NoticeHostUpdates(p.ctx, []uuid.UUID{a.ID, ghost}, "0.3.0", p.at)
