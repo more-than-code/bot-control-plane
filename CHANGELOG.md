@@ -6,6 +6,9 @@
 - New MCP tools `get_catalog_entry` and `set_entry_image`: read one entry in full, and move an image entry to a new version without rewriting the rest of its spec.
 - Create an organization from the console, in the header's Org menu or on the projects page.
 - The project and organization Hosts tabs keep host status and "Update available" current while open.
+- New MCP tool `list_image_tags` lists an image's registry tags, newest first, so an agent can pick a version to deploy.
+- A failed deploy now says why: Deploybot keeps the reason, the final container status and the end of its log, and shows them in the deploy history. This needs bot-agent 0.2.15 on the host.
+- Upgrade a host's agent from the console or MCP. The host owner turns this on in `runner.toml`. The agent checks the release's signature, installs it, and goes back to the previous version if the new one does not come up. This needs bot-agent 0.2.15 on the host.
 
 ## v0.2.44 — 2026-11-22
 - Edit, version and apply a host's config files from the console. The host owner chooses which files in `runner.toml`, and only organization owners and admins can change them.
