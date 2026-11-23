@@ -1206,7 +1206,7 @@ Summary from bot-control-plane `AGENTS.md`: `ImageDeploy.reason` and `final_stat
 5. **Audit:**
    - `host.agent_upgrade {"host","from","to"}` when an upgrade is started;
    - `host.agent_upgrade_result {"host","to","state","reason"}` when it settles.
-6. **Problems:** kind `agent_upgrade`, needs_action, for org owners and admins.
+6. **Problems:** kind `agent_upgrade`, needs_action, for org owners and admins. Its `href` is `/hosts/<id>#agent-upgrade`; the fragment lets a client tell it from `host_offline`, since bell items carry no kind (amended before release, 2026-11-23, spec-release-v0245 §8 question 2).
    - It opens when a row settles `rolled_back`, `failed` from a host result, or `unknown`.
    - It does **not** open for a synchronous refusal from the agent: `busy`, `not_newer`, `bad_spec`, `forbidden`, `policy_denied` or `helper_unavailable`. The admin already saw the 409, and the row still records it.
    - It closes on the next `succeeded` for that host, or when the host reports an `agent_version` at or above `latest_agent_version`, or equal to the newest row's `to`. An `unknown` row with that `to` then becomes `succeeded`.

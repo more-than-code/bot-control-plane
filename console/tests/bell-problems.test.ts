@@ -114,6 +114,28 @@ describe('bell: host config file problems (api-v1 v1.44 item 8)', () => {
 	});
 });
 
+describe('bell: agent upgrade problems (api-v1 v1.48 item 6)', () => {
+	const UPGRADE_OPEN: Notification = {
+		...HOST_OPEN,
+		key: 'problem:00000000-0000-4000-8000-0000000000f5',
+		title: 'pi3 agent upgrade to 0.2.15 rolled back',
+		detail: 'The new agent did not come up.',
+		href: `/hosts/${HOST}#agent-upgrade`
+	};
+
+	test('a host link ending #agent-upgrade is agent_upgrade, a plain host link stays host_offline', () => {
+		assert.equal(problemKindOf(UPGRADE_OPEN), 'agent_upgrade');
+		assert.equal(problemKindOf(HOST_OPEN), 'host_offline');
+	});
+
+	test('its row has the upgrade icon, not the offline one, and links to the host', () => {
+		const html = render(NotificationsList, { props: { items: [UPGRADE_OPEN] } }).body;
+		assert.match(html, /lucide-circle-arrow-up/);
+		assert.doesNotMatch(html, /lucide-server-off/);
+		assert.match(html, new RegExp(`href="/hosts/${HOST}#agent-upgrade"`));
+	});
+});
+
 describe('bell dot and label', () => {
 	test('"N unread, M need action", without the second part at 0', () => {
 		assert.equal(bellLabel(3, 2), 'Notifications, 3 unread, 2 need action');

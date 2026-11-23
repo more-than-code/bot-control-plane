@@ -639,8 +639,11 @@ func (r *problemReader) href(ctx context.Context, p store.Problem) string {
 	case p.Kind == store.ProblemHostFile && p.HostID != nil:
 		_, name, _ := strings.Cut(p.Subject, ":")
 		return hostFileHref(*p.HostID, name)
-	case (p.Kind == store.ProblemHostOffline || p.Kind == store.ProblemAgentUpgrade) && p.HostID != nil:
+	case p.Kind == store.ProblemHostOffline && p.HostID != nil:
 		return "/hosts/" + p.HostID.String()
+	case p.Kind == store.ProblemAgentUpgrade && p.HostID != nil:
+		// The fragment lets the console tell it from host_offline (bell items carry no kind).
+		return "/hosts/" + p.HostID.String() + "#agent-upgrade"
 	case p.ProjectID == nil:
 		return "/projects"
 	case p.Kind == store.ProblemRegistryLogin:
