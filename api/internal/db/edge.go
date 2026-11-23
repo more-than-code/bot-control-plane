@@ -448,7 +448,14 @@ func routesUnder(ctx context.Context, q queryer, orgID, domainID uuid.UUID) ([]s
 	sql := `SELECT ` + routeCols + routeFrom + `
 JOIN app.org_domains d ON d.id = $2::uuid AND d.org_id = $1::uuid
 WHERE p.org_id = $1::uuid
-  AND (r.hostname = d.name OR right(r.hostname, length(d.name) + 1) = '.' || d.name)
+  AND (r.hostname = d.name OR substr(r.hostname, strpos(r.hostname, '.') + 1) = d.name
+    -- Deeper names (api-v1 v1.52) only when no more specific domain of the
+    -- org holds them: such a route was never this domain's.
+    OR (right(r.hostname, length(d.name) + 1) = '.' || d.name
+      AND NOT EXISTS (
+        SELECT 1 FROM app.org_domains d3
+        WHERE d3.org_id = $1::uuid AND d3.id <> d.id AND length(d3.name) > length(d.name)
+          AND (r.hostname = d3.name OR right(r.hostname, length(d3.name) + 1) = '.' || d3.name))))
   AND NOT EXISTS (
     SELECT 1 FROM app.org_domains d2
     JOIN app.domain_assignments a2 ON a2.domain_id = d2.id AND a2.project_id = r.project_id

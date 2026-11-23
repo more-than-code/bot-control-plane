@@ -692,6 +692,15 @@ func TestParityDomainScopeAndProjectDelete(t *testing.T) {
 		if under, err = p.st.RoutesUnderDomain(p.ctx, orgA, domA.ID); err != nil || len(under) != 1 || under[0].Hostname != "app."+base {
 			p.t.Fatalf("under with a deep name %#v %v", under, err)
 		}
+		// A deep route held by a more specific domain of the org was never
+		// the parent's, even once that domain's assignment is gone: the
+		// parent's delete leaves it alone.
+		if _, err := p.st.PutDomainAssignments(p.ctx, orgA, www.ID, []store.DomainAssignment{{ProjectID: projA.ID, Pattern: "@"}}); err != nil {
+			p.t.Fatal(err)
+		}
+		if under, err = p.st.RoutesUnderDomain(p.ctx, orgA, domA.ID); err != nil || len(under) != 1 || under[0].Hostname != "app."+base {
+			p.t.Fatalf("under after unassigning the deep name %#v %v", under, err)
+		}
 		del := putPlan(p, store.EdgeConfirmation{UserID: a.ID, Kind: store.EdgePlanDomainDelete, OrgID: &orgA, DomainID: &domA.ID})
 		if _, err := p.st.DeleteOrgDomain(p.ctx, orgA, domA.ID, store.RouteKeys(under), del, a.ID, p.at); err != nil {
 			p.t.Fatal(err)

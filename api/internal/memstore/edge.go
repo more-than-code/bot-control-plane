@@ -354,6 +354,9 @@ func (m *Mem) routesUnderLocked(d store.OrgDomain) []store.Route {
 		if !store.UnderDomain(d.Name, r.Hostname) || !m.projectAliveLocked(r.ProjectID) {
 			continue
 		}
+		if !store.OneLabelUnder(d.Name, r.Hostname) && m.deeperDomainLocked(d, r.Hostname) {
+			continue
+		}
 		if m.projects[r.ProjectID].OrgID != d.OrgID || m.coveredElsewhereLocked(d, r) {
 			continue
 		}
@@ -362,6 +365,18 @@ func (m *Mem) routesUnderLocked(d store.OrgDomain) []store.Route {
 	}
 	sortRoutesByHost(out)
 	return out
+}
+
+// deeperDomainLocked reports whether another domain of d's org, more
+// specific than d, holds hostname (api-v1 v1.52): a route that deep was
+// never d's, whatever that domain's status or assignments.
+func (m *Mem) deeperDomainLocked(d store.OrgDomain, hostname string) bool {
+	for _, other := range m.edgeLocked().domains {
+		if other.ID != d.ID && other.OrgID == d.OrgID && len(other.Name) > len(d.Name) && store.UnderDomain(other.Name, hostname) {
+			return true
+		}
+	}
+	return false
 }
 
 // coveredElsewhereLocked reports whether another verified or lapsed domain

@@ -137,6 +137,12 @@ func UnderDomain(domain, hostname string) bool {
 	return hostname == domain || strings.HasSuffix(hostname, "."+domain)
 }
 
+// OneLabelUnder reports whether hostname is the domain or exactly one label
+// below it: what @ and * reach.
+func OneLabelUnder(domain, hostname string) bool {
+	return Covers(domain, "@", hostname) || Covers(domain, "*", hostname)
+}
+
 // AssignPattern is the narrowest pattern that assigns exactly hostname
 // under domain: "@" for the name itself, else the relative name. ok is false
 // when hostname is not under the domain.
