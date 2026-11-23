@@ -209,6 +209,17 @@ WHERE id = $1::uuid
 	return dom, nil
 }
 
+func (d *DB) TouchDomainCheck(ctx context.Context, orgID, domainID uuid.UUID, at time.Time) error {
+	dom, err := getDomain(ctx, d.pool, orgID, domainID, false)
+	if err != nil {
+		return err
+	}
+	return mapErr(exec(ctx, d.pool, `
+UPDATE app.org_domains SET last_check_at = $2
+WHERE id = $1::uuid AND status <> 'verified'
+`, dom.ID.String(), at))
+}
+
 func (d *DB) RecordDomainCheck(ctx context.Context, domainID uuid.UUID, ok bool, at time.Time) (store.OrgDomain, bool, error) {
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {

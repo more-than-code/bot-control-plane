@@ -25,10 +25,10 @@ export function cleanOrgMemberRole(value: string): 'admin' | 'member' | null {
 export type OrgActionData = {
 	scope?: OrgScope;
 	message?: string | null;
-	field?: 'createToken' | 'addMember' | 'createProject' | 'addDomain' | 'domain' | 'assignments' | 'renameHost';
+	field?: 'createToken' | 'addMember' | 'createProject' | 'addDomain' | 'domain' | 'domainVerified' | 'assignments' | 'renameHost';
 	/** The host a `renameHost` message belongs to (api-v1 v1.38): its Rename dialog opens again with it. */
 	hostId?: string | null;
-	/** The domain a `domain` or `assignments` message belongs to (api-v1 v1.35). */
+	/** The domain a `domain` or `assignments` message belongs to, or that `domainVerified` just verified (api-v1 v1.35). */
 	domainId?: string | null;
 	/** A domain's Delete plan (202), shown in its row with Confirm. */
 	domainPlan?: DomainPlan;

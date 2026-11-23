@@ -70,10 +70,20 @@ export async function verifyDomain(event: RequestEvent) {
 		await apiFetch(event, `/v1/orgs/${orgId}/domains/${domainId}/verify`, { method: 'POST', body: '{}' });
 	} catch (err) {
 		rethrow(err);
-		// "TXT record not found yet: add … = …" is the API's own text.
-		return domainFailure(event, apiStatus(err), apiMessage(err), 'domain', domainId);
+		return domainFailure(event, apiStatus(err), verifyFailureText(err), 'domain', domainId);
 	}
-	redirect(303, backTo(event.url));
+	// No redirect: the row learns the outcome at once and the page re-reads the list in the background, so the
+	// Verify button never waits on that reload (the stuck "Verifying…" of the bug).
+	return present(event, { scope: 'settings' as const, field: 'domainVerified' as const, domainId, message: null });
+}
+
+/** The API's "TXT record not found yet: add … = …", followed by when it was looked up and that DNS can lag. */
+export const TXT_NOT_FOUND_HINT = 'Deploybot looked up that TXT record just now and did not find it. A new DNS record can take a few minutes to show up; try Verify again then.';
+
+function verifyFailureText(err: unknown): string {
+	const text = apiMessage(err);
+	if (err instanceof ApiError && err.code === 'conflict' && text.startsWith('TXT record not found yet')) return `${text.replace(/\.?$/, '.')} ${TXT_NOT_FOUND_HINT}`;
+	return text;
 }
 
 /** `project_id` and `pattern` come as parallel lists, one pair per row. */

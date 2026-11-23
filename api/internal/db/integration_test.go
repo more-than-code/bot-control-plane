@@ -123,6 +123,7 @@ TRUNCATE TABLE
     app.oauth_grants,
     app.problems,
     app.notification_reads,
+    app.host_update_notices,
     app.host_file_applies,
     app.host_file_versions,
     app.host_agent_upgrades,

@@ -65,7 +65,7 @@ func registerFileRequests(server *mcp.Server, api *apiclient.Client) {
 		Description: fileRule + " Ask the signed-in person to add one managed file to a project in the Deploybot console. " +
 			"Deploybot makes a one-time link, valid for 15 minutes, that only that person can use; they paste the content or pick a text file " +
 			"from their computer in their own browser, and it is stored (encrypted when secret, the default). You get the link, never the content. " +
-			"The result always has the link as text, alone on its first line; show it to the person. " + severalLinks + " A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
+			"The result always has the link as text, alone on its first line, and the call returns at once; show it to the person. " + severalLinks + " " +
 			"Needs owner or admin on the project. The file must not exist yet; an existing file is replaced in the console. Files are UTF-8 text of at most 64 KiB, at most 64 per project. " +
 			"Asking again for the same name replaces your earlier link, which then stops working. " +
 			"Check the outcome with get_file_request or check_readiness. Does not contact any host.",
@@ -149,9 +149,6 @@ func requestFile(ctx context.Context, api *apiclient.Client, call requestCall) *
 	if !ok {
 		return toolError("error", errStatusShape.Error())
 	}
-	if call.wantsURLInput() {
-		return fileRequestKind.inputRequired(created, fileFillMessage(in))
-	}
 	return fileRequestKind.result(created, in.Name, "", elicitNotSupported)
 }
 
@@ -176,10 +173,6 @@ func requestFileRetry(ctx context.Context, api *apiclient.Client, in requestFile
 	}
 	created.ExpiresAt = view.expiresAt
 	return fileRequestKind.result(created, in.Name, view.state, elicitOutcome(call.responses[fillInputID]))
-}
-
-func fileFillMessage(in requestFileArgs) string {
-	return fmt.Sprintf("Deploybot needs the file %s. Open this link in your browser to paste it or choose it from your computer; the agent never sees the content.", in.Name)
 }
 
 type fileRequestView struct {

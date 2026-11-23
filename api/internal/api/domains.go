@@ -218,6 +218,11 @@ func (s *Server) handleDomainVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
+		// Last check shows this attempt (pending or lapsed only; a verified
+		// domain's daily re-check keeps its own clock).
+		if err := s.Store.TouchDomainCheck(r.Context(), orgID, d.ID, s.now()); err != nil {
+			s.logger().Error("domain check time not stored")
+		}
 		writeCode(w, "conflict", fmt.Sprintf("TXT record not found yet: add %s = %s", txtPrefix+d.Name, txtValuePrefix+d.Token))
 		return
 	}
