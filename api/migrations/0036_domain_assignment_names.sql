@@ -1,7 +1,7 @@
 -- Narrower domain assignments (api-v1 v1.52, spec
 -- docs/spec-domain-assign-names.md rev 1). Applied only by `bot-api-server
 -- --migrate` (SET ROLE deploybot_owner). The matching rollback is
--- 0035_domain_assignment_names.down.sql. --migrate does not apply
+-- 0036_domain_assignment_names.down.sql. --migrate does not apply
 -- *.down.sql. (No semicolon or apostrophe in these comments: splitSQL does
 -- not skip comments.)
 --

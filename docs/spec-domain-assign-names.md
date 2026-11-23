@@ -1,6 +1,6 @@
 # Spec: assign one name of a domain, and the Assign link in MCP
 
-Rev 1 (2026-11-23). Joe asked that an org be able to give a project a single hostname (or a narrower wildcard) instead of only the apex or `*.<domain>`, and that domain assignment reach MCP. api-v1 **v1.52** (renumbered from v1.49 when v1.49–v1.51 landed first), migration **0035**. No agent-protocol change.
+Rev 1 (2026-11-23). Joe asked that an org be able to give a project a single hostname (or a narrower wildcard) instead of only the apex or `*.<domain>`, and that domain assignment reach MCP. api-v1 **v1.52** (renumbered from v1.49 when v1.49–v1.51 landed first), migration **0036**. No agent-protocol change.
 
 ## 1. Problem
 
@@ -18,7 +18,7 @@ The second half of the ask, "expose domain assignment over MCP with plan + confi
    Labels are lowercase LDH (IDNA A-labels included), each ≤ 63 characters, and the name written out is ≤ 253 characters. `PUT …/domains/{id}/assignments` refuses anything else as `bad_request` with the shape message, which now names all four forms. The same project and pattern twice in one body is still refused. At most 64 assignments per domain, unchanged.
 2. **A route is allowed** when a `verified` domain assigned to the project covers its hostname under one of its patterns. `*` still matches exactly one label; `*.dev` matches exactly one label below `dev.<domain>`; a relative name matches only itself. No new DNS record is needed, because the parent domain is already verified.
 3. **A domain delete** plans and removes the routes on the domain and one label below it, as before, and since v1.52 also the routes deeper below it that no more specific domain of the org holds (whatever that domain's status or assignments). It still leaves a route that another verified or lapsed domain assigned to the same project covers, under any of the four patterns.
-4. **Migration 0035** only relaxes `domain_assignments_pattern_chk`; no row changes. Its down script deletes the assignments that are not `@` or `*` and restores the old check. Routes one label below a domain keep serving until that domain is deleted. Routes two or more labels below every domain of their org are listed and removed, since the older API cannot stop them on a domain delete; hosts drop them from the edge when they reconnect. Roll the API back to v1.51 first.
+4. **Migration 0036** only relaxes `domain_assignments_pattern_chk`; no row changes. Its down script deletes the assignments that are not `@` or `*` and restores the old check. Routes one label below a domain keep serving until that domain is deleted. Routes two or more labels below every domain of their org are listed and removed, since the older API cannot stop them on a domain delete; hosts drop them from the edge when they reconnect. Roll the API back to v1.51 first.
 
 ## 3. The Assign link (api-v1 v1.52)
 
