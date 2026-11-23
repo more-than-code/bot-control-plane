@@ -93,6 +93,11 @@ export type ImageDraft = {
 	healthMaxActions: string;
 	/** Shared networks (api-v1 v1.25), comma-separated as typed. Blank means none. */
 	networks: string;
+	/**
+	 * The stored ImageSpec `network` (api-v1 v1.50 item 1). The form shows it read-only and posts it back, so an
+	 * edit keeps it; it is set over MCP or the API. Absent means the project network.
+	 */
+	network?: 'host';
 	/** Keys the stored entry had that an edit must keep (see storedHealthKeys). */
 	healthKeepKeys: HealthKeepKey[];
 	/** Stored numbers, sent under Do nothing when a keep key names them. The visible fields may have been edited. */
@@ -640,6 +645,9 @@ export function imageSpecFromDraft(
 	if (!logs.ok) return logs;
 	const networks = cleanNetworks(draft.networks);
 	if (!networks.ok) return networks;
+	if (draft.network === 'host' && networks.networks.length > 0) {
+		return fail('networks', 'An entry on the host network cannot join shared networks.');
+	}
 	let healthPolicy: ImageHealthPolicy | null = null;
 	if (workload === 'service') {
 		const policy = cleanHealthPolicy(draft, healthcheck);
@@ -667,6 +675,7 @@ export function imageSpecFromDraft(
 		health_policy: healthPolicy
 	};
 	if (networks.networks.length > 0) spec.networks = networks.networks;
+	if (draft.network === 'host') spec.network = 'host';
 	return { ok: true, spec, name };
 }
 
@@ -1426,6 +1435,7 @@ export function imageRequestBody(spec: ImageSpec, name: string | null): Record<s
 	if (spec.kind === 'service' && spec.healthcheck) payload.healthcheck = spec.healthcheck;
 	if (spec.logging) payload.logging = spec.logging;
 	if (spec.networks && spec.networks.length > 0) payload.networks = spec.networks;
+	if (spec.network === 'host') payload.network = 'host';
 	if (spec.kind === 'service' && spec.health_policy && Object.keys(spec.health_policy).length > 0) payload.health_policy = spec.health_policy;
 	const body: Record<string, unknown> = { kind: 'image', spec: payload };
 	if (name) body.name = name;
@@ -1505,6 +1515,7 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	draft.logMaxSizeMb = cappedDigits(formText(form, 'log_max_size_mb'), 6);
 	draft.logMaxFiles = cappedDigits(formText(form, 'log_max_files'), 4);
 	draft.networks = formText(form, 'networks').slice(0, 200);
+	if (formText(form, 'network') === 'host') draft.network = 'host';
 	const onDeployFailure = formText(form, 'health_on_deploy_failure');
 	const onUnhealthy = formText(form, 'health_on_unhealthy');
 	draft.healthOnDeployFailure = isDeployFailureAction(onDeployFailure) ? onDeployFailure : 'rollback';

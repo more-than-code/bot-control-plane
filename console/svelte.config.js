@@ -5,7 +5,11 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 const config = {
 	preprocess: vitePreprocess(),
 	kit: {
-		adapter: adapter()
+		adapter: adapter(),
+		// A release build with SOURCE_DATE_EPOCH (the container image, docs/containers.md)
+		// gets a fixed app version name, so the same tag builds the same files. Without it
+		// SvelteKit uses the build time, as before.
+		...(process.env.SOURCE_DATE_EPOCH ? { version: { name: process.env.SOURCE_DATE_EPOCH } } : {})
 	}
 };
 

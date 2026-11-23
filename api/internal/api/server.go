@@ -685,12 +685,14 @@ type hostView struct {
 func (s *Server) withUpdateHint(h store.Host, last *store.AgentUpgrade) hostView {
 	allowed := agentUpgradeAllowed(h)
 	// api-v1 v1.44: host files are listed by their own route, never on a
-	// Host; v1.48: nor is programs.agent_upgrade. Every Host answer goes
-	// through here (hostViews, hostRead).
-	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade) {
+	// Host; v1.48: nor is programs.agent_upgrade; v1.50: nor is
+	// programs.host_network. Every Host answer goes through here
+	// (hostViews, hostRead).
+	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.HostNetwork) {
 		cp := *h.Programs
 		cp.HostFiles = nil
 		cp.AgentUpgrade = false
+		cp.HostNetwork = false
 		h.Programs = &cp
 	}
 	v := hostView{Host: h, AgentUpgradeAllowed: allowed}

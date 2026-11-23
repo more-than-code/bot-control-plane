@@ -63,6 +63,10 @@ type HostPrograms struct {
 	// item 2); absent = false. The API never puts it on a Host answer; the
 	// Host carries agent_upgrade_allowed instead (api-v1 v1.48 item 4).
 	AgentUpgrade bool `json:"agent_upgrade,omitempty"`
+	// HostNetwork is hello.programs.host_network (agent-protocol v1.21 item
+	// 2); absent = false. It gates ImageSpec network "host" (api-v1 v1.50
+	// item 1). The API never puts it on a Host answer.
+	HostNetwork bool `json:"host_network,omitempty"`
 }
 
 // HostEdgePolicy is the runner.toml edge switch and the Caddy image digest

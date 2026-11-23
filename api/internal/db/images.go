@@ -161,6 +161,120 @@ func (d *DB) ReleaseImageOp(ctx context.Context, id uuid.UUID) error {
 	return mapErr(exec(ctx, d.pool, `DELETE FROM app.image_deploys WHERE id = $1::uuid AND in_flight`, id.String()))
 }
 
+func (d *DB) SetImageOpTask(ctx context.Context, id, taskID uuid.UUID, action string) error {
+	tag, err := execTag(ctx, d.pool, `
+UPDATE app.image_deploys
+SET task_id = $2::uuid, task_action = $3
+WHERE id = $1::uuid AND in_flight
+`, id.String(), taskID.String(), action)
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag == "UPDATE 0" {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (d *DB) ImageDeployByTask(ctx context.Context, hostID, taskID uuid.UUID) (store.DeployTask, error) {
+	var row deployScan
+	var out store.DeployTask
+	var projectID string
+	err := d.pool.QueryRow(ctx, `
+SELECT `+deployCols+`, task_action, entry_project, entry_name
+FROM (
+    SELECT dep.*, e.project_id::text AS entry_project, e.name AS entry_name
+    FROM app.image_deploys dep
+    JOIN app.catalog_entries e ON e.id = dep.entry_id
+    WHERE dep.host_id = $1::uuid AND dep.task_id = $2::uuid
+) row
+`, hostID.String(), taskID.String()).Scan(append(deployDest(&row), &out.Action, &projectID, &out.Entry)...)
+	if err != nil {
+		return store.DeployTask{}, mapErr(err)
+	}
+	if err := row.finish(); err != nil {
+		return store.DeployTask{}, err
+	}
+	if out.ProjectID, err = parseID(projectID); err != nil {
+		return store.DeployTask{}, err
+	}
+	out.Deploy = row.ImageDeploy
+	return out, nil
+}
+
+func (d *DB) TimeoutStaleImageOps(ctx context.Context, at time.Time) ([]store.DeployTask, error) {
+	rows, err := d.pool.Query(ctx, `
+WITH done AS (
+    UPDATE app.image_deploys
+    SET outcome = 'timeout', finished_at = $1, in_flight = false
+    WHERE in_flight AND in_flight_until < $1
+    RETURNING *
+)
+SELECT `+deployCols+`, COALESCE(task_action, ''), entry_project, entry_name
+FROM (
+    SELECT done.*, e.project_id::text AS entry_project, e.name AS entry_name
+    FROM done JOIN app.catalog_entries e ON e.id = done.entry_id
+) row
+`, at)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []store.DeployTask{}
+	for rows.Next() {
+		var row deployScan
+		var task store.DeployTask
+		var projectID string
+		if err := rows.Scan(append(deployDest(&row), &task.Action, &projectID, &task.Entry)...); err != nil {
+			return nil, mapErr(err)
+		}
+		if err := row.finish(); err != nil {
+			return nil, err
+		}
+		if task.ProjectID, err = parseID(projectID); err != nil {
+			return nil, err
+		}
+		task.Deploy = row.ImageDeploy
+		out = append(out, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err)
+	}
+	return out, nil
+}
+
+func (d *DB) SettleLateImageDeploy(ctx context.Context, id uuid.UUID, in store.DeployFinish) (store.ImageDeploy, error) {
+	digest := in.Digest
+	if digest != nil && !catalog.ValidDigest(*digest) {
+		digest = nil
+	}
+	var final, tail []byte
+	if in.FinalStatus != nil {
+		b, err := json.Marshal(in.FinalStatus)
+		if err != nil {
+			return store.ImageDeploy{}, err
+		}
+		final = b
+	}
+	if in.LogTail != nil {
+		b, err := json.Marshal(in.LogTail)
+		if err != nil {
+			return store.ImageDeploy{}, err
+		}
+		tail = b
+	}
+	// SET reads the old row, so finished_at moves only for an in-flight row.
+	return scanDeploy(d.pool.QueryRow(ctx, `
+UPDATE app.image_deploys
+SET digest = $2, outcome = $3, exit_code = $4,
+    finished_at = CASE WHEN in_flight THEN $5 ELSE finished_at END,
+    in_flight = false,
+    reason = $6, final_status = $7::jsonb, log_tail = $8::jsonb
+WHERE id = $1::uuid AND (in_flight OR (outcome = 'timeout' AND $3 <> 'timeout'))
+RETURNING `+deployCols+`
+`, id.String(), digest, in.Outcome, in.ExitCode, in.At, in.Reason, nullJSON(final), nullJSON(tail)))
+}
+
 func (d *DB) ListImageDeploys(ctx context.Context, entryID, hostID uuid.UUID) ([]store.ImageDeploy, error) {
 	var exists bool
 	if err := d.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM app.catalog_entries WHERE id = $1::uuid)`, entryID.String()).Scan(&exists); err != nil {

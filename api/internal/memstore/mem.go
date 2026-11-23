@@ -84,7 +84,10 @@ type Mem struct {
 	registries   map[string]registryRec
 	projectFiles map[string]fileRec
 	imageDeploys map[uuid.UUID]imageDeployRec
-	autoActions  map[uuid.UUID]struct{}
+	// deployTasks is the task id and action of a deploy row, keyed by the
+	// row id (migration 0034 columns task_id and task_action).
+	deployTasks map[uuid.UUID]deployTaskRec
+	autoActions map[uuid.UUID]struct{}
 	// valueRequests is keyed by hashKey(id hash); see value_requests.go.
 	valueRequests map[string]store.ValueRequest
 	// fileRequests is keyed by hashKey(id hash); see file_requests.go.
@@ -199,6 +202,7 @@ func New() *Mem {
 		registries:                map[string]registryRec{},
 		projectFiles:              map[string]fileRec{},
 		imageDeploys:              map[uuid.UUID]imageDeployRec{},
+		deployTasks:               map[uuid.UUID]deployTaskRec{},
 		autoActions:               map[uuid.UUID]struct{}{},
 	}
 }

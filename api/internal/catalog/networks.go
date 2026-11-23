@@ -56,3 +56,35 @@ func checkNetworks(items []string) error {
 	}
 	return nil
 }
+
+// NetworkHost is the only ImageSpec network value (api-v1 v1.50 item 1,
+// agent-protocol v1.21 item 3): the container shares the host's network.
+const NetworkHost = "host"
+
+// decodeNetwork reads the optional ImageSpec network. Absent and null are
+// "". Any value but "host" is "invalid network", and so is "host" with
+// shared networks.
+func decodeNetwork(fields map[string]json.RawMessage, networks []string) (string, error) {
+	network, set, err := decodeOptionalString(fields, "network")
+	if err != nil || (set && network == "") {
+		return "", fieldErr("invalid network")
+	}
+	if err := checkNetwork(network, networks); err != nil {
+		return "", err
+	}
+	return network, nil
+}
+
+// checkNetwork is the network rule. ParseStored runs it too.
+func checkNetwork(network string, networks []string) error {
+	if network == "" {
+		return nil
+	}
+	if network != NetworkHost {
+		return fieldErr("invalid network")
+	}
+	if len(networks) > 0 {
+		return fieldErr("network host cannot join shared networks")
+	}
+	return nil
+}

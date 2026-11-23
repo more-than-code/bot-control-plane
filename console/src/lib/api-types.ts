@@ -393,6 +393,8 @@ export type ImageSpec = {
 	health_policy: ImageHealthPolicy | null;
 	/** Shared networks the container also joins (api-v1 v1.25). Present only when set: 1–4 names. */
 	networks?: string[];
+	/** The container shares the host's network (api-v1 v1.50 item 1). Present only when set; set over MCP or the API. */
+	network?: 'host';
 };
 
 type CatalogEntryBase = {

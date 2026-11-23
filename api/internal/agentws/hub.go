@@ -63,6 +63,9 @@ type Hub struct {
 	deployHook DeployHook
 	// upgradeHook settles agent upgrade rows (api-v1 v1.48); nil when unset.
 	upgradeHook UpgradeHook
+	// lateHook settles a deploy from a result no waiter took (api-v1 v1.50
+	// item 3); nil when unset.
+	lateHook LateHook
 	// hooks counts deploy hook calls still running off the read loop.
 	hooks sync.WaitGroup
 }
@@ -70,6 +73,9 @@ type Hub struct {
 type waiter struct {
 	conn *agentConn
 	ch   chan taskOut
+	// kind is the task kind; image deploy, rollback and start results are
+	// answered with task_result_ack (agent-protocol v1.21 item 5).
+	kind string
 }
 
 type taskOut struct {

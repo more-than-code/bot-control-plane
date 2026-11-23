@@ -854,6 +854,24 @@ type Store interface {
 	GetImageDeploy(ctx context.Context, entryID, hostID, id uuid.UUID) (ImageDeploy, error)
 	// ReleaseImageOp deletes an in-flight row. A finished row is left as it is.
 	ReleaseImageOp(ctx context.Context, id uuid.UUID) error
+	// SetImageOpTask records the agent task id and action (deploy or
+	// rollback) on an in-flight row before the task is sent (api-v1 v1.50
+	// item 3). ErrNotFound when the row is not in flight.
+	SetImageOpTask(ctx context.Context, id, taskID uuid.UUID, action string) error
+	// ImageDeployByTask returns the row of host whose task id is taskID,
+	// with its action, project and entry name, or ErrNotFound.
+	ImageDeployByTask(ctx context.Context, hostID, taskID uuid.UUID) (DeployTask, error)
+	// SettleLateImageDeploy stores a late result on a row that is still in
+	// flight (finished_at becomes in.At) or was settled timeout by a
+	// different outcome (finished_at is kept, so history order does not
+	// move). Any other row, and a timeout row given timeout again, is
+	// ErrNotFound and left alone (api-v1 v1.50 items 3 and 9).
+	SettleLateImageDeploy(ctx context.Context, id uuid.UUID, in DeployFinish) (ImageDeploy, error)
+	// TimeoutStaleImageOps settles every in-flight row whose in_flight_until
+	// is before at as outcome timeout with finished_at at, and returns those
+	// rows with their project and entry name (api-v1 v1.50; Action is the
+	// stored task action or ""). It holds no state outside the store.
+	TimeoutStaleImageOps(ctx context.Context, at time.Time) ([]DeployTask, error)
 	// ListImageDeploys returns finished rows newest first: the newest 50
 	// non-automatic rows, plus at most the newest 20 automatic (via agent)
 	// rows newer than the oldest of those (v1.15 rev 2 item 5).
