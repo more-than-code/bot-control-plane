@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -197,7 +198,12 @@ func (s *Server) routesFit(w http.ResponseWriter, ctx context.Context, projectID
 				writeCode(w, "bad_request", fmt.Sprintf("domain %s has lapsed; verify it again before adding routes under it", d.Name))
 				return false
 			}
-			writeCode(w, "bad_request", fmt.Sprintf("%s is not under a verified domain assigned to this project", r.Hostname))
+			msg := fmt.Sprintf("%s is not under a verified domain assigned to this project", r.Hostname)
+			if link, ok := s.assignLink(ctx, projectID, r.Hostname); ok {
+				write(w, statusFor("bad_request"), "bad_request", msg, link)
+				return false
+			}
+			writeCode(w, "bad_request", msg)
 			return false
 		}
 		if entry.Kind == "program" && entry.Spec.Port == nil {
@@ -780,7 +786,12 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 		d, ok := routeDomain(domains, r.Hostname, true)
 		switch {
 		case !ok:
-			warn(fmt.Sprintf("%s is not under a verified domain assigned to this project", r.Hostname))
+			msg := fmt.Sprintf("%s is not under a verified domain assigned to this project", r.Hostname)
+			if link, ok := s.assignLink(ctx, rd.projectID, r.Hostname); ok && link.URL != "" {
+				list.add("routes", readyWarn, msg, readyFix{Action: fixAssignDomain, Name: link.Name, URL: link.URL})
+				return nil
+			}
+			warn(msg)
 			return nil
 		case d.Status == store.DomainLapsed:
 			warn(fmt.Sprintf("domain %s has lapsed; its routes keep serving but no new route is accepted until it verifies again", d.Name))
@@ -828,4 +839,55 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 	}
 	list.add("routes", readyOK, "every route has a verified domain, a published port and the edge on", readyFix{})
 	return nil
+}
+
+// domainAssignLink is the payload of a refused hostname that sits under a
+// verified domain of the project's org (api-v1 v1.49): the name an org
+// owner or admin would assign, written out and as a pattern, and, when the
+// console origin is set, the console link that opens the domain's Assign
+// dialog with this project and pattern already filled in.
+type domainAssignLink struct {
+	Hostname string    `json:"hostname"`
+	Domain   string    `json:"domain"`
+	DomainID uuid.UUID `json:"domain_id"`
+	Pattern  string    `json:"pattern"`
+	Name     string    `json:"name"`
+	URL      string    `json:"assign_url,omitempty"`
+}
+
+// assignLink finds the most specific verified domain of the project's org
+// that hostname is under. ok is false when there is none or the lookup
+// fails: the refusal then stays as it was.
+func (s *Server) assignLink(ctx context.Context, projectID uuid.UUID, hostname string) (domainAssignLink, bool) {
+	project, err := s.Store.GetProject(ctx, projectID)
+	if err != nil {
+		return domainAssignLink{}, false
+	}
+	domains, err := s.Store.ListOrgDomains(ctx, project.OrgID)
+	if err != nil {
+		return domainAssignLink{}, false
+	}
+	var best store.OrgDomain
+	for _, d := range domains {
+		if d.Status == store.DomainVerified && store.UnderDomain(d.Name, hostname) && len(d.Name) > len(best.Name) {
+			best = d
+		}
+	}
+	pattern, ok := store.AssignPattern(best.Name, hostname)
+	if best.Name == "" || !ok || !store.ValidPattern(best.Name, pattern) {
+		return domainAssignLink{}, false
+	}
+	link := domainAssignLink{
+		Hostname: hostname, Domain: best.Name, DomainID: best.ID, Pattern: pattern,
+		Name: store.PatternName(best.Name, pattern),
+	}
+	if prefix, ok := consolePagePrefix(s.ConsoleOrigin, "/orgs/"); ok {
+		q := url.Values{}
+		q.Set("tab", "settings")
+		q.Set("domains.assign", best.ID.String())
+		q.Set("domains.project", projectID.String())
+		q.Set("domains.pattern", pattern)
+		link.URL = prefix + project.OrgID.String() + "?" + q.Encode()
+	}
+	return link, true
 }

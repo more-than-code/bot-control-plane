@@ -348,7 +348,7 @@ func readinessMessage(msg string) string {
 func projectFix(in map[string]any) map[string]any {
 	action, _ := in["action"].(string)
 	switch action {
-	case "create_env_set", "fill_value", "add_file", "connect_github", "add_registry_login", "grant_deploy_access", "host_policy_snippet", "none":
+	case "create_env_set", "fill_value", "add_file", "connect_github", "add_registry_login", "grant_deploy_access", "host_policy_snippet", "assign_domain", "none":
 	default:
 		return map[string]any{"action": "none"}
 	}
@@ -363,6 +363,19 @@ func projectFix(in map[string]any) map[string]any {
 	keep("name", fileNamePattern)
 	keep("registry", registryHostPattern)
 	keep("host_id", uuidPattern)
+	if action == "assign_domain" {
+		// Only the name and the link mean anything on this fix.
+		out = map[string]any{"action": action}
+		// The console link an org owner or admin opens to assign the name
+		// (api-v1 v1.49). Kept only when it is an http(s) URL with no
+		// userinfo; the agent shows it and never assigns anything itself.
+		keep("name", routeHostPattern)
+		if u, ok := in["url"].(string); ok && len(u) <= 2048 {
+			if parsed, err := url.Parse(u); err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" && parsed.User == nil {
+				out["url"] = parsed.String()
+			}
+		}
+	}
 	return out
 }
 
@@ -396,6 +409,11 @@ func nextStep(fix map[string]any, projectID, entry string) string {
 		return fmt.Sprintf("ask the person to add file %s in the console (%s, Files).", str("name"), settingsHint)
 	case "grant_deploy_access":
 		return "ask an org owner or admin to grant this project deploy access to the host in the console (the host's Access section)."
+	case "assign_domain":
+		if str("url") != "" && str("name") != "" {
+			return fmt.Sprintf("ask an org owner or admin to open %s and save the row that assigns %s to this project (assigning a domain is console only).", str("url"), str("name"))
+		}
+		return "ask an org owner or admin to assign that name to this project in the console (Organization settings, Domains, Assign)."
 	case "host_policy_snippet":
 		return fmt.Sprintf("call host_policy_snippet with project_id %s, entry %s and host_id %s, and show the person the snippet.", projectID, entry, str("host_id"))
 	default:

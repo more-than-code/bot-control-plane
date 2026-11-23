@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -70,31 +71,84 @@ type OrgDomain struct {
 	Assignments []DomainAssignment
 }
 
-// DomainAssignment lets a project route under a domain. Pattern is "@" (the
-// name itself) or "*" (one label below it).
+// DomainAssignment lets a project route under a domain. Pattern is
+// relative to the domain name, like a DNS zone file (api-v1 v1.49): "@" (the
+// name itself), "*" (one label below it), a relative name such as
+// "marketingos" or "api.dev" (exactly that name below the domain), or "*."
+// and a relative name such as "*.dev" (one label below that name).
 type DomainAssignment struct {
 	ProjectID   uuid.UUID `json:"project_id"`
 	ProjectName string    `json:"project_name"`
 	Pattern     string    `json:"pattern"`
 }
 
+// patternLabelRe is one LDH label of a relative assignment name.
+var patternLabelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// ValidPattern reports whether pattern is an assignment pattern of the
+// domain: "@", "*", a relative name or "*." and a relative name, whose full
+// name is at most 253 characters.
+func ValidPattern(domain, pattern string) bool {
+	if pattern == "@" || pattern == "*" {
+		return true
+	}
+	rel := strings.TrimPrefix(pattern, "*.")
+	if rel == "" || len(PatternName(domain, pattern)) > 253 {
+		return false
+	}
+	for _, l := range strings.Split(rel, ".") {
+		if !patternLabelRe.MatchString(l) {
+			return false
+		}
+	}
+	return true
+}
+
+// PatternName is the name a pattern assigns, written out: "example.com",
+// "*.example.com", "app.example.com" or "*.dev.example.com".
+func PatternName(domain, pattern string) string {
+	if pattern == "@" {
+		return domain
+	}
+	return pattern + "." + domain
+}
+
 // Covers reports whether hostname falls under the domain through pattern.
 func Covers(domain, pattern, hostname string) bool {
-	switch pattern {
-	case "@":
+	switch {
+	case pattern == "@":
 		return hostname == domain
-	case "*":
+	case pattern == "*":
 		label, rest, ok := strings.Cut(hostname, ".")
 		return ok && label != "" && rest == domain
-	default:
+	case strings.HasPrefix(pattern, "*."):
+		label, rest, ok := strings.Cut(hostname, ".")
+		return ok && label != "" && rest == pattern[2:]+"."+domain
+	case pattern == "" || strings.Contains(pattern, "*"):
 		return false
+	default:
+		return hostname == pattern+"."+domain
 	}
 }
 
-// UnderDomain reports whether hostname is the domain or one label below it:
+// UnderDomain reports whether hostname is the domain or any name below it:
 // the routes a domain's assignments can cover.
 func UnderDomain(domain, hostname string) bool {
-	return Covers(domain, "@", hostname) || Covers(domain, "*", hostname)
+	return hostname == domain || strings.HasSuffix(hostname, "."+domain)
+}
+
+// AssignPattern is the narrowest pattern that assigns exactly hostname
+// under domain: "@" for the name itself, else the relative name. ok is false
+// when hostname is not under the domain.
+func AssignPattern(domain, hostname string) (string, bool) {
+	if hostname == domain {
+		return "@", true
+	}
+	rel, ok := strings.CutSuffix(hostname, "."+domain)
+	if !ok || rel == "" {
+		return "", false
+	}
+	return rel, true
 }
 
 // Route is one public address of a catalog entry. PathPrefix is "/" or

@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { replaceState } from '$app/navigation';
+	import { page } from '$app/state';
 	import Plus from '@lucide/svelte/icons/plus';
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { DomainPattern, OrgDomain, Project } from '$lib/api-types';
-	import { ASSIGNMENTS_MAX, assignmentText } from '$lib/edge-routes';
+	import { ASSIGNMENTS_MAX, assignLinkRow, assignmentText, cleanDomainPattern, withoutAssignLink } from '$lib/edge-routes';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -13,8 +15,10 @@
 
 	/**
 	 * Which projects of the org may route under a domain (api-v1 v1.35 item 1): one row per project and pattern, `@` for
-	 * the domain itself and `*` for one label below it. Save replaces the whole list. A refusal shows here; it is only
-	 * the one from a save made since the dialog opened.
+	 * the domain itself, `*` for one label below it, and since v1.49 a name below it (`app`, `api.dev`) or a narrower
+	 * wildcard (`*.dev`). Save replaces the whole list. A refusal shows here; it is only the one from a save made since
+	 * the dialog opened. An `assign_url` (`domains.assign`, `domains.project`, `domains.pattern`) opens it once with
+	 * that row added, for an org admin to check and save.
 	 */
 	let { domain, projects, action }: { domain: OrgDomain; projects: Project[]; action: string } = $props();
 
@@ -37,6 +41,26 @@
 		if (!next) saving = false;
 	}
 
+	onMount(() => {
+		const linked = assignLinkRow(page.url.searchParams, domain, projects.map((project) => project.id));
+		if (!linked && page.url.searchParams.get('domains.assign') !== domain.id) return;
+		// A macrotask, so the router has started when this runs during hydration.
+		const timer = setTimeout(() => replaceState(withoutAssignLink(new URL(location.href)), page.state));
+		if (!linked) return () => clearTimeout(timer);
+		const current = saved();
+		const present = current.some((row) => row.project_id === linked.project_id && row.pattern === linked.pattern);
+		rows = present ? current : [...current, linked];
+		message = null;
+		open = true;
+		return () => clearTimeout(timer);
+	});
+
+	/** The full name a typed pattern assigns, or null while it is not a pattern yet. */
+	function preview(pattern: string): string | null {
+		const clean = cleanDomainPattern(domain.name, pattern);
+		return clean === null ? null : assignmentText(domain.name, clean);
+	}
+
 	function projectLabel(id: string): string {
 		return projects.find((project) => project.id === id)?.name ?? (domain.assignments.find((item) => item.project_id === id)?.project_name || 'Choose a project');
 	}
@@ -55,7 +79,7 @@
 		<Dialog.Header class="pr-8">
 			<Dialog.Title class="break-all">Assign {domain.name}</Dialog.Title>
 			<Dialog.Description>
-				A project may add public addresses only under the names assigned to it. "{domain.name}" is the name itself; "*.{domain.name}" is any name one label below it.
+				A project may add public addresses only under the names assigned to it. Names are relative to {domain.name}: @ is the name itself, * is any name one label below it, a name such as app assigns only app.{domain.name}, and *.dev is any name one label below dev.{domain.name}.
 			</Dialog.Description>
 		</Dialog.Header>
 		<form
@@ -82,6 +106,7 @@
 			}}
 		>
 			<Input type="hidden" name="domain_id" value={domain.id} />
+			<Input type="hidden" name="domain_name" value={domain.name} />
 			{#if message}
 				<div class="max-w-full min-w-0 break-words" data-assignments-error><Notice kind="error">{message}</Notice></div>
 			{/if}
@@ -103,15 +128,22 @@
 					</div>
 					<div class="grid gap-1.5">
 						<Label for="{triggerId}-pattern-{index}">Names</Label>
-						<Select.Root type="single" name="pattern" bind:value={rows[index].pattern}>
-							<Select.Trigger id="{triggerId}-pattern-{index}" class="w-full font-mono">{assignmentText(domain.name, row.pattern)}</Select.Trigger>
-							<Select.Content>
-								<Select.Item value="@" label={domain.name}>{domain.name}</Select.Item>
-								<Select.Item value="*" label="*.{domain.name}">*.{domain.name}</Select.Item>
-							</Select.Content>
-						</Select.Root>
+						<Input
+							id="{triggerId}-pattern-{index}"
+							name="pattern"
+							class="font-mono"
+							autocomplete="off"
+							autocapitalize="none"
+							spellcheck={false}
+							maxlength={253}
+							aria-describedby="{triggerId}-pattern-{index}-hint"
+							bind:value={rows[index].pattern}
+						/>
 					</div>
 					<Button type="button" variant="outline" aria-label="Remove row {index + 1}" onclick={() => removeRow(index)}>Remove</Button>
+					<p id="{triggerId}-pattern-{index}-hint" class="text-muted-foreground min-w-0 text-xs break-all sm:col-span-3">
+						{#if preview(row.pattern)}Assigns <span class="font-mono">{preview(row.pattern)}</span>{:else}Enter @, *, a name such as app, or *.dev{/if}
+					</p>
 				</div>
 			{/each}
 			<div>

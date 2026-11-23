@@ -245,10 +245,10 @@ func (m *Mem) PutDomainAssignments(_ context.Context, orgID, domainID uuid.UUID,
 	next := make([]store.DomainAssignment, 0, len(in))
 	for _, a := range in {
 		p, ok := m.projects[a.ProjectID]
-		if !ok || p.DeletedAt != nil || p.OrgID != orgID || (a.Pattern != "@" && a.Pattern != "*") {
+		if !ok || p.DeletedAt != nil || p.OrgID != orgID || !store.ValidPattern(d.Name, a.Pattern) {
 			return store.OrgDomain{}, store.ErrInvalid
 		}
-		key := a.ProjectID.String() + a.Pattern
+		key := a.ProjectID.String() + " " + a.Pattern
 		if seen[key] {
 			return store.OrgDomain{}, store.ErrInvalid
 		}

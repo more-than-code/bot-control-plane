@@ -159,9 +159,17 @@ func call(ctx context.Context, api *apiclient.Client, method, path string, query
 // callStatus is call plus the HTTP status of an ok envelope. Status 202 is
 // not a tool error here; the caller decides what it means.
 func callStatus(ctx context.Context, api *apiclient.Client, method, path string, query url.Values, body any) (int, json.RawMessage, *mcp.CallToolResult) {
+	status, payload, fail, _ := callStatusErr(ctx, api, method, path, query, body)
+	return status, payload, fail
+}
+
+// callStatusErr is callStatus and also the API refusal itself, for the one
+// caller that reads a refusal's payload (set_routes, api-v1 v1.49). It is
+// nil when the call succeeded or failed before the API answered.
+func callStatusErr(ctx context.Context, api *apiclient.Client, method, path string, query url.Values, body any) (int, json.RawMessage, *mcp.CallToolResult, *apiclient.Error) {
 	token, ok := auth.DelegatedFromContext(ctx)
 	if !ok {
-		return 0, nil, toolError("unauthorized", "missing bearer token")
+		return 0, nil, toolError("unauthorized", "missing bearer token"), nil
 	}
 	status, payload, err := api.DoStatus(ctx, token, method, path, query, body)
 	if err != nil {
@@ -169,9 +177,9 @@ func callStatus(ctx context.Context, api *apiclient.Client, method, path string,
 		if errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
 			auth.NoteRejected(ctx)
 		}
-		return 0, nil, fromAPI(err)
+		return 0, nil, fromAPI(err), apiErr
 	}
-	return status, payload, nil
+	return status, payload, nil, nil
 }
 
 func get(ctx context.Context, api *apiclient.Client, path string, query url.Values) (json.RawMessage, *mcp.CallToolResult) {

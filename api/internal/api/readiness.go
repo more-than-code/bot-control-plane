@@ -32,6 +32,7 @@ const (
 	fixRegistryLogin = "add_registry_login"
 	fixGrantDeploy   = "grant_deploy_access"
 	fixPolicySnippet = "host_policy_snippet"
+	fixAssignDomain  = "assign_domain"
 )
 
 // readyCheck is one readiness row. Message names keys, sets, files, hosts
@@ -52,6 +53,8 @@ type readyFix struct {
 	Name     string     `json:"name,omitempty"`
 	Registry string     `json:"registry,omitempty"`
 	HostID   *uuid.UUID `json:"host_id,omitempty"`
+	// URL is a console link for the person (assign_domain, api-v1 v1.49).
+	URL string `json:"url,omitempty"`
 }
 
 type readyList struct {

@@ -97,6 +97,9 @@ type Error struct {
 	Status int
 	Code   string
 	Msg    string
+	// Payload is the refusal's payload, when it had one. Only a caller that
+	// knows that refusal reads it, and never into an error string.
+	Payload json.RawMessage
 }
 
 func (e *Error) Error() string {
@@ -195,7 +198,7 @@ func decodeEnvelope(status int, data []byte) (json.RawMessage, error) {
 		return nil, &Error{Status: status, Code: code, Msg: msg}
 	}
 	if env.Code != "ok" {
-		return nil, &Error{Status: status, Code: env.Code, Msg: env.Msg}
+		return nil, &Error{Status: status, Code: env.Code, Msg: env.Msg, Payload: env.Payload}
 	}
 	if status < 200 || status >= 300 {
 		return nil, &Error{Status: status, Code: "error", Msg: "unexpected http status"}
