@@ -1584,7 +1584,31 @@ func storedSpec(img catalog.Image, host store.Host) (map[string]any, error) {
 	if !policySupported(host) {
 		delete(spec, "health_policy")
 	}
+	agentSecretRefs(spec)
 	return spec, nil
+}
+
+// agentSecretRefs rewrites entry-private secret_env references
+// ("@<entry>.KEY", api-v1 v1.33 item 6) to "<entry>.KEY" in the frame spec.
+// Every released agent checks each reference against the shared set-name
+// grammar and refuses "@" with bad_spec. The agent never resolves a
+// reference (resolved values travel only in the top-level env), so the
+// rewritten name only has to pass that check. spec_hash stays the stored
+// entry's hash; the agent keeps it as a label and does not recompute it.
+func agentSecretRefs(spec map[string]any) {
+	refs, ok := spec["secret_env"].(map[string]any)
+	if !ok {
+		return
+	}
+	for k, v := range refs {
+		ref, ok := v.(string)
+		if !ok {
+			continue
+		}
+		if set, key, ok := strings.Cut(ref, "."); ok && catalog.IsPrivateSet(set) {
+			refs[k] = catalog.PrivateEntry(set) + "." + key
+		}
+	}
 }
 
 // imageListed is the api-v1 v1.23 pre-check for image deploy, rollback and
@@ -1757,6 +1781,10 @@ func takeImage(action string, res agentws.LiveResult, err error, forms []secretF
 	return takeDeploy(res, err, forms)
 }
 
+// msgSpecRefused is the deploy and rollback message for the agent's
+// task_reject bad_spec, which carries only the code.
+const msgSpecRefused = "the host's agent refused the task as malformed (bad_spec): it did not accept a field of this entry's spec, env or files; the agent does not say which. Check that the agent is up to date (upgrade_agent), then compare the spec with the ImageSpec rules"
+
 func takeDeploy(res agentws.LiveResult, err error, forms []secretForm) imageCall {
 	if err == nil {
 		if got, ok := acceptedDeploy(res.Payload, forms); ok {
@@ -1769,6 +1797,10 @@ func takeDeploy(res agentws.LiveResult, err error, forms []secretForm) imageCall
 		return imageCall{request: true, code: "error", msg: "internal error"}
 	}
 	if hostRejection(call.Code) {
+		if call.Agent == "bad_spec" {
+			// The agent's task_reject names no field; say what the code means.
+			return imageCall{request: true, code: call.Code, msg: msgSpecRefused, reason: msgSpecRefused, maybeSent: call.MaybeSent}
+		}
 		return requestCall(call, forms)
 	}
 	if got, ok := acceptedDeploy(call.Payload, forms); ok {
