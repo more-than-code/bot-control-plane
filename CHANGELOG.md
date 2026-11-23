@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.45 — 2026-11-23
+- Delete stale image versions from the image picker: an org owner or admin can remove a ghcr.io version after allowing it in the GitHub connection. A version that is running, is a rollback target or is among the last 5 deploys is kept, and the message says why.
+- The image picker lists ghcr.io tags newest first.
+- New MCP tools `get_catalog_entry` and `set_entry_image`: read one entry in full, and move an image entry to a new version without rewriting the rest of its spec.
+- Create an organization from the console, in the header's Org menu or on the projects page.
+- The project and organization Hosts tabs keep host status and "Update available" current while open.
+
 ## v0.2.44 — 2026-11-22
 - Edit, version and apply a host's config files from the console. The host owner chooses which files in `runner.toml`, and only organization owners and admins can change them.
 - Each apply is checked by the host's own command, restarts the file's service, is confirmed healthy, and puts the previous file back if anything fails.
