@@ -17,6 +17,7 @@ import {
 	routeUrl
 } from '../src/lib/edge-routes.ts';
 import { checkLabel, parseReadiness } from '../src/lib/settings-auto.ts';
+import { TXT_NOT_FOUND_HINT } from '../src/lib/server/edge-actions.ts';
 import { parseDomainList, parseEdgePlan, parseEdgeRoute, parseHostEdge, parseOrgDomain, parseRouteList } from '../src/lib/server/edge-shape.ts';
 import { parseHostPrograms } from '../src/lib/server/shape.ts';
 import HostEdgeSection from '../src/routes/hosts/[id]/HostEdgeSection.svelte';
@@ -246,7 +247,20 @@ describe('v1.35 actions', () => {
 		const result = await orgActions.verifyDomain(orgEvent(`${settings}&/verifyDomain`, { domain_id: DOMAIN_ID }));
 		if (!isActionFailure(result)) assert.fail('expected a failure');
 		assert.equal(calls[0].url.pathname, `/v1/orgs/${ORG.id}/domains/${DOMAIN_ID}/verify`);
-		assert.deepEqual(result.data, { scope: 'settings', field: 'domain', domainId: DOMAIN_ID, message: text });
+		assert.deepEqual(result.data, { scope: 'settings', field: 'domain', domainId: DOMAIN_ID, message: `${text}. ${TXT_NOT_FOUND_HINT}` });
+	});
+
+	test('verify: another failure keeps the API text as is', async () => {
+		installFetch(() => envelope(null, 503, 'unavailable', 'the DNS lookup failed; try again'));
+		const result = await orgActions.verifyDomain(orgEvent(`${settings}&/verifyDomain`, { domain_id: DOMAIN_ID }));
+		if (!isActionFailure(result)) assert.fail('expected a failure');
+		assert.deepEqual(result.data, { scope: 'settings', field: 'domain', domainId: DOMAIN_ID, message: 'the DNS lookup failed; try again' });
+	});
+
+	test('verify: success answers on the row instead of redirecting', async () => {
+		installFetch(() => envelope({ ...RAW_DOMAIN, status: 'verified' }));
+		const result = await orgActions.verifyDomain(orgEvent(`${settings}&/verifyDomain`, { domain_id: DOMAIN_ID }));
+		assert.deepEqual(result, { scope: 'settings', field: 'domainVerified', domainId: DOMAIN_ID, message: null });
 	});
 
 	test('assignments are sent as pairs; a bad pattern or project is refused first', async () => {
@@ -404,6 +418,15 @@ describe('v1.35 renders', () => {
 		const verified = render(OrgDomainsSection, { props: { domains: [domain({ status: 'verified', verified_at: '2026-11-17T00:00:00Z' })], projects: [] } }).body;
 		assert.doesNotMatch(verified, /deploybot-verify=/);
 		assert.doesNotMatch(verified, />Verify</);
+	});
+
+	test('a domain Verify just verified shows Verified before the list is read again', () => {
+		setPageUrl(`http://console.example/orgs/${ORG.id}?tab=settings`);
+		const html = render(OrgDomainsSection, { props: { domains: [domain()], projects: [], verifiedId: DOMAIN_ID } }).body;
+		assert.match(html, /Verified/);
+		assert.doesNotMatch(html, /Pending/);
+		assert.doesNotMatch(html, /deploybot-verify=/);
+		assert.doesNotMatch(html, />Verify</);
 	});
 
 	test('row buttons name their domain; a row refusal is a focusable notice', () => {

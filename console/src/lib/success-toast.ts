@@ -39,3 +39,8 @@ export function toastHostRemoved(name: string): void {
 export function toastVersionDeleted(shortDigest: string, tags: number): void {
 	toast.success(`Deleted version ${shortDigest} (${tags} ${tags === 1 ? 'tag' : 'tags'}).`);
 }
+
+/** "Verified {domain}." after a domain's Verify finds its TXT record (api-v1 v1.35). */
+export function toastDomainVerified(name: string): void {
+	toast.success(`Verified ${name}.`);
+}
