@@ -75,32 +75,52 @@ func TestConnectRegistryOldProtocol(t *testing.T) {
 	}
 }
 
-// TestConnectRegistryInputRequest: a 2026-07-28 client that declares
-// elicitation.url gets a URL input request; its retry reads the state and
-// creates nothing.
-func TestConnectRegistryInputRequest(t *testing.T) {
+// TestConnectRegistryNoInputRequest: a 2026-07-28 client that declares elicitation.url
+// gets the link as text in the first answer, with no URL input request, so
+// a client that would wait for the person never blocks the call (DD 8hp8).
+func TestConnectRegistryNoInputRequest(t *testing.T) {
+	var got *mcp.ElicitParams
+	cs, seen := vrSessionAt(t, "2026-07-28", urlClient("accept", &got), crReply("pending"))
+	if v := cs.InitializeResult().ProtocolVersion; v != "2026-07-28" {
+		t.Fatalf("protocol %s", v)
+	}
+	res, text, out := callVR(t, cs, "connect_registry", crArgs)
+	if res.IsError || got != nil {
+		t.Fatalf("error %v elicited %#v: %s", res.IsError, got, text)
+	}
+	if !strings.HasPrefix(text, crURL+"\n") || out["elicitation"] != elicitNotSupported || out["url"] != crURL || len(out) != 4 {
+		t.Fatalf("text %s structured %v", text, out)
+	}
+	if calls := seen(); len(calls) != 1 || calls[0].Method != http.MethodPost {
+		t.Fatalf("calls %#v", calls)
+	}
+	assertNoToken(t, text, out)
+}
+
+// TestConnectRegistryLegacyRetry: a retry that carries the requestState and response of
+// an input request an older gateway sent reads the state, creates nothing,
+// and returns the link with the outcome.
+func TestConnectRegistryLegacyRetry(t *testing.T) {
 	for action, want := range map[string]string{"accept": elicitAccepted, "decline": elicitDeclined, "cancel": elicitCancelled} {
 		t.Run(action, func(t *testing.T) {
-			var got *mcp.ElicitParams
-			cs, seen := vrSessionAt(t, newProtocol, urlClient(action, &got), crReply("pending"))
-			res, text, out := callVR(t, cs, "connect_registry", crArgs)
-			if res.IsError {
-				t.Fatalf("error %s", text)
+			cs, seen := vrSession(t, nil, crReply("pending"))
+			res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:           "connect_registry",
+				Arguments:      crArgs,
+				RequestState:   encodeRequestState(createdRequest{RequestID: crID, URL: crURL}),
+				InputResponses: mcp.InputResponseMap{fillInputID: &mcp.ElicitResult{Action: action}},
+			})
+			if err != nil || res.IsError {
+				t.Fatalf("%v %v", res, err)
 			}
-			if got == nil || got.Mode != "url" || got.URL != crURL || got.ElicitationID != crID || !strings.Contains(got.Message, "never sees the token") {
-				t.Fatalf("elicit params %#v", got)
-			}
+			_, text, out := callVRResult(res)
 			calls := seen()
-			if len(calls) != 2 || calls[0].Method != http.MethodPost || calls[1].Method != http.MethodGet || calls[1].Path != "/v1/registry-connect-requests/"+crID {
+			if len(calls) != 1 || calls[0].Method != http.MethodGet || calls[0].Path != "/v1/registry-connect-requests/"+crID {
 				t.Fatalf("calls %#v", calls)
 			}
-			if out["elicitation"] != want || out["state"] != "pending" || out["url"] != crURL {
-				t.Fatalf("structured %v", out)
+			if out["elicitation"] != want || out["state"] != "pending" || !strings.HasPrefix(text, crURL+"\n") {
+				t.Fatalf("structured %v text %s", out, text)
 			}
-			if !strings.Contains(text, crURL) || !strings.Contains(text, "is pending; it can be used until 2026-11-16T10:15:00Z") {
-				t.Fatalf("text %s", text)
-			}
-			assertNoToken(t, text, out)
 		})
 	}
 }

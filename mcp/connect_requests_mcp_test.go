@@ -15,10 +15,9 @@ const connectRequestID = "Connectreqid0123456789abcdefghijklmnopq_-AB"
 
 // TestConnectRegistryThroughGateway runs connect_registry through the
 // production (stateless) gateway with an SDK client that declares
-// elicitation.url (api-v1 v1.31 item 10). On 2025-11-25 the client gets the
-// link as text only. On 2026-07-28 it also gets a URL input request
-// (SEP-2322); its retry reads the state without a second create, and the
-// final text still carries the link. A token-shaped field the fake API adds
+// elicitation.url (api-v1 v1.31 item 10). On 2025-11-25 and on 2026-07-28 the client
+// gets the link as text in one answer with one create and no URL input
+// request (DD 8hp8). A token-shaped field the fake API adds
 // is never passed on.
 func TestConnectRegistryThroughGateway(t *testing.T) {
 	if len(connectRequestID) != 43 {
@@ -48,8 +47,7 @@ func TestConnectRegistryThroughGateway(t *testing.T) {
 			t.Cleanup(func() { _ = cs.Close() })
 			res := mustCall(t, cs, "connect_registry", map[string]any{"project_id": projectID, "registry": "ghcr.io", "reason": "Private image"})
 			text := textOf(t, res)
-			newProtocol := protocol == "2026-07-28"
-			if res.IsError || elicited != newProtocol {
+			if res.IsError || elicited {
 				t.Fatalf("error %v elicited %v: %s", res.IsError, elicited, text)
 			}
 			if !strings.Contains(text, "https://console.example/connect/"+connectRequestID) || !strings.Contains(text, "No registry token is ever sent through this tool or shown to you.") {
@@ -57,9 +55,6 @@ func TestConnectRegistryThroughGateway(t *testing.T) {
 			}
 			raw, _ := json.Marshal(res.StructuredContent)
 			want := `"elicitation":"not_supported"`
-			if newProtocol {
-				want = `"elicitation":"accepted"`
-			}
 			if !strings.Contains(string(raw), want) || strings.Contains(string(raw), readinessLeak) || strings.Contains(text, readinessLeak) {
 				t.Fatalf("structured %s", raw)
 			}
@@ -72,11 +67,7 @@ func TestConnectRegistryThroughGateway(t *testing.T) {
 			if posts != 1 {
 				t.Fatalf("creates %d", posts)
 			}
-			if newProtocol {
-				assertLast(t, fake, http.MethodGet, "/v1/registry-connect-requests/"+connectRequestID, "", "")
-			} else {
-				assertLast(t, fake, http.MethodPost, "/v1/projects/"+projectID+"/registries/github/requests", "", `{"reason":"Private image"}`)
-			}
+			assertLast(t, fake, http.MethodPost, "/v1/projects/"+projectID+"/registries/github/requests", "", `{"reason":"Private image"}`)
 			res = mustCall(t, cs, "get_registry_connect_request", map[string]any{"request_id": connectRequestID})
 			raw, _ = json.Marshal(res.StructuredContent)
 			if res.IsError || strings.Contains(string(raw), readinessLeak) || textOf(t, res) != "ghcr.io: pending. The person has not connected GitHub yet." {
