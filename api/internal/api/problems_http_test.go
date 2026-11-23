@@ -1058,7 +1058,7 @@ func TestProblemsOff(t *testing.T) {
 	d.w.srv.sweep.start = d.w.now.Add(-time.Hour)
 	touchAt(t, d.w, d.host, d.w.now.Add(-time.Hour), "")
 	sweepNow(ctx, d.w.srv)
-	d.w.srv.noteRegistryAccess(ctx, d.project.ID, "ghcr.io", loginManual, accessLoginFailed)
+	d.w.srv.noteRegistryAccess(ctx, d.project.ID, "ghcr.io", loginManual, accessLoginFailed, nil)
 	if n := len(allProblems(t, d.w)); n != 0 {
 		t.Fatalf("problems written while off %d", n)
 	}

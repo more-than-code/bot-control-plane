@@ -14,6 +14,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/hostpolicy"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
@@ -37,6 +38,8 @@ const (
 	fixVerifyDomain = "verify_domain"
 	fixAllowEdge    = "allow_edge"
 	fixTurnOnEdge   = "turn_on_edge"
+	// api-v1 v1.52: an organization has not granted the GitHub app.
+	fixGitHubOrgAccess = "github_org_access"
 )
 
 // readyCheck is one readiness row. Message names keys, sets, files, hosts
@@ -62,6 +65,10 @@ type readyFix struct {
 	ImagePattern string `json:"image_pattern,omitempty"`
 	// OrgID is the org whose Domains a verify_domain fix opens.
 	OrgID *uuid.UUID `json:"org_id,omitempty"`
+	// Owner and URL are a github_org_access fix's organization and the
+	// GitHub page where it is granted (api-v1 v1.52).
+	Owner string `json:"owner,omitempty"`
+	URL   string `json:"url,omitempty"`
 }
 
 type readyList struct {
@@ -588,6 +595,21 @@ func (s *Server) checkRegistry(ctx context.Context, p principal, rd readiness, l
 		msg := "the stored login for " + host + " was refused; update the registry login"
 		if host == store.GitHubRegistry {
 			msg = "the stored login for " + host + " was refused; reconnect GitHub"
+		}
+		if r := got.Refusal; r != nil && got.Login == loginGitHub {
+			switch r.Reason {
+			case github.RefusalSignIn:
+				msg = "the GitHub sign-in for " + host + " expired, was revoked or lost read:packages; reconnect GitHub"
+			case github.RefusalOrgRestricted:
+				msg = host + " refused the GitHub connection: the " + r.Owner + " organization has not granted the Deploybot GitHub app access; an owner of " + r.Owner + " grants it on GitHub (reconnecting will not help)"
+				loginFix = readyFix{Action: fixGitHubOrgAccess, Registry: host, Owner: r.Owner, URL: r.URL}
+			case github.RefusalNoPackageAccess:
+				account := "the connected GitHub account"
+				if r.Account != "" {
+					account = "the GitHub account " + r.Account
+				}
+				msg = host + " refused the GitHub connection: " + account + " cannot see the " + r.Owner + " package; give it read access on GitHub, or reconnect GitHub as an account that can"
+			}
 		}
 		list.add("registry", readyMissing, msg, loginFix)
 	case accessNotFound:

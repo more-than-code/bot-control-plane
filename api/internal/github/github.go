@@ -224,11 +224,21 @@ func (c *Client) User(ctx context.Context, token string) (string, []string, erro
 	if err != nil || status != http.StatusOK {
 		return "", nil, ErrFailed
 	}
+	login, scopes, ok := parseUser(body, header)
+	if !ok {
+		return "", nil, ErrFailed
+	}
+	return login, scopes, nil
+}
+
+// parseUser reads the login from a GET /user body and the granted scopes
+// from its X-OAuth-Scopes header.
+func parseUser(body []byte, header http.Header) (string, []string, bool) {
 	var u struct {
 		Login string `json:"login"`
 	}
 	if json.Unmarshal(body, &u) != nil || !loginRe.MatchString(u.Login) {
-		return "", nil, ErrFailed
+		return "", nil, false
 	}
 	var scopes []string
 	for _, part := range strings.Split(header.Get("X-OAuth-Scopes"), ",") {
@@ -236,7 +246,7 @@ func (c *Client) User(ctx context.Context, token string) (string, []string, erro
 			scopes = append(scopes, part)
 		}
 	}
-	return u.Login, scopes, nil
+	return u.Login, scopes, true
 }
 
 // HasScope reports whether scopes holds Scope.
