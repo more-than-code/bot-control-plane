@@ -49,4 +49,9 @@ type NotificationStore interface {
 	MarkNotificationsRead(ctx context.Context, userID uuid.UUID, keys, keep []string, at time.Time) error
 	// NotificationReads returns the subset of keys the user marked read.
 	NotificationReads(ctx context.Context, userID uuid.UUID, keys []string) (map[string]bool, error)
+	// NoticeHostUpdates returns, for each host, when the API first saw it
+	// behind version (migration 0035): a host with no row for version gets
+	// one at at, and its rows for other versions are deleted; an existing
+	// row keeps its time. Unknown hosts are skipped.
+	NoticeHostUpdates(ctx context.Context, hostIDs []uuid.UUID, version string, at time.Time) (map[uuid.UUID]time.Time, error)
 }
