@@ -1,4 +1,4 @@
-import type { AgentUpgrade, Host, HostAccess, HostEdge, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
+import type { AgentUpgrade, Host, HostAccess, HostAlertSettings, HostDisk, HostEdge, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
 import type { HostFilesTab } from './host-files';
 import { isCatalogHost } from './catalog';
 import { parseRange, type RangeKey } from './ranges';
@@ -40,7 +40,11 @@ export const METRIC_SPECS: readonly MetricSpec[] = [
 		yMin: 0,
 		yMax: 100,
 		format: 'percent',
-		series: [{ name: 'used_percent', label: 'Memory', color: 'var(--chart-2)' }]
+		series: [
+			{ name: 'used_percent', label: 'Used', color: 'var(--chart-2)' },
+			// Worked out from `available` and `total` (api-v1 v1.49 item 4), see withAvailablePercent.
+			{ name: 'available_percent', label: 'Available', color: 'var(--chart-4)' }
+		]
 	},
 	{
 		m: 'disk',
@@ -96,6 +100,38 @@ export const METRIC_SPECS: readonly MetricSpec[] = [
 
 export type MetricPoint = { t: string; value: number | null };
 
+/** The API series names the memory chart reads; `available_percent` is derived from the last two. */
+export const MEM_API_SERIES = ['used_percent', 'available', 'total'] as const;
+
+/**
+ * The memory chart series: `used_percent` as sent, plus `available_percent` = available / total × 100 per bucket
+ * (a gap when either is missing or total is not positive). The raw byte series are dropped.
+ */
+export function withAvailablePercent(series: ReadonlyArray<{ name: string; points: MetricPoint[] }>): Array<{ name: string; points: MetricPoint[] }> {
+	const used = series.find((item) => item.name === 'used_percent');
+	const available = series.find((item) => item.name === 'available');
+	const total = series.find((item) => item.name === 'total');
+	const out: Array<{ name: string; points: MetricPoint[] }> = used ? [used] : [];
+	if (available && total) {
+		const totals = new Map(total.points.map((point) => [point.t, point.value]));
+		out.push({
+			name: 'available_percent',
+			points: available.points.map((point) => {
+				const whole = totals.get(point.t);
+				const value = point.value != null && whole != null && whole > 0 ? (point.value / whole) * 100 : null;
+				return { t: point.t, value };
+			})
+		});
+	}
+	return out;
+}
+
+/** The disk mount of `?disk=`: a non-empty path of at most 1024 characters without control characters, else `/`. */
+export function parseDiskPath(value: string | null): string {
+	if (value == null || value === '' || value.length > 1024 || /[\u0000-\u001F\u007F]/.test(value)) return '/';
+	return value;
+}
+
 export type MetricChart = {
 	m: MetricName;
 	message: string | null;
@@ -139,6 +175,16 @@ export type HostPage = {
 	upgrades?: AgentUpgrade[];
 	/** The upgrade history read failed. */
 	upgradesMessage?: string | null;
+	/** Resource alert settings (api-v1 v1.49), read for anyone who sees the host. */
+	alerts?: HostAlertSettings | null;
+	/** The alert settings read failed. */
+	alertsMessage?: string | null;
+	/** Org owner or admin: the Alerts card can be edited. */
+	canEditAlerts?: boolean;
+	/** The host's mounts (overview only), for the disk chart picker. */
+	disks?: HostDisk[];
+	/** The mount the disk chart shows (`?disk=`, default `/`). */
+	diskPath?: string;
 };
 
 export function parseHostTab(value: string | null): HostTab {
@@ -162,12 +208,20 @@ export function processRequestSort(params: URLSearchParams): ProcessSort {
 	return parseProcessSort(params.get('sort'));
 }
 
-export function hostQuery(url: URL): { tab: HostTab; range: RangeKey; processSort: ProcessSort } {
+export function hostQuery(url: URL): { tab: HostTab; range: RangeKey; processSort: ProcessSort; diskPath: string } {
 	return {
 		tab: parseHostTab(url.searchParams.get('tab')),
 		range: parseRange(url.searchParams.get('range')),
-		processSort: processRequestSort(url.searchParams)
+		processSort: processRequestSort(url.searchParams),
+		diskPath: parseDiskPath(url.searchParams.get('disk'))
 	};
+}
+
+/** An Overview link that keeps the range and the chosen mount. */
+export function overviewHref(range: RangeKey, diskPath: string): string {
+	const params = new URLSearchParams({ tab: 'overview', range });
+	if (diskPath !== '/') params.set('disk', diskPath);
+	return `?${params.toString()}`;
 }
 
 export function serviceDomId(serviceId: string): string {

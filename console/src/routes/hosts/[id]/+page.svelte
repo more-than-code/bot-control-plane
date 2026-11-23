@@ -12,6 +12,7 @@
 	import { page } from '$app/state';
 	import { actionUrlFrom } from '$lib/url';
 	import { accessFailureOf } from '$lib/host-access';
+	import HostAlertsSection from './HostAlertsSection.svelte';
 	import HostEdgeSection from './HostEdgeSection.svelte';
 	import ConfigFilesTab from './ConfigFilesTab.svelte';
 	import OverviewTab from './OverviewTab.svelte';
@@ -97,6 +98,8 @@
 			canUpgrade={data.org?.role === 'owner' || data.org?.role === 'admin'}
 			upgrades={data.upgrades ?? []}
 			upgradesMessage={data.upgradesMessage ?? null}
+			disks={data.disks ?? []}
+			diskPath={data.diskPath ?? '/'}
 		/>
 	{:else if data.tab === 'files'}
 		{#if data.files}
@@ -117,6 +120,16 @@
 			loadMessage={data.edgeMessage ?? null}
 			actionMessage={typeof form?.edgeMessage === 'string' ? form.edgeMessage : null}
 		/>
+	{/if}
+	{#if data.alerts || data.alertsMessage}
+		<HostAlertsSection
+			settings={data.alerts ?? null}
+			canEdit={data.canEditAlerts ?? false}
+			loadMessage={data.alertsMessage ?? null}
+			actionMessage={typeof form?.alertsMessage === 'string' ? form.alertsMessage : null}
+		/>
+	{/if}
+	{#if data.canManageAccess}
 		<section id="access" class="mt-8">
 			<h2 class="mb-3 text-lg font-semibold tracking-tight">Access</h2>
 			{#if data.accessMessage}

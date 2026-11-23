@@ -103,6 +103,8 @@ type Mem struct {
 	// agentUpgrades is the agent upgrade rows, oldest first (api-v1
 	// v1.48); see agent_upgrades.go.
 	agentUpgrades []store.AgentUpgrade
+	// alertSettings is host id → stored alert settings (api-v1 v1.49).
+	alertSettings map[uuid.UUID]store.HostAlertSettings
 }
 
 type sessionRec struct {
@@ -152,6 +154,7 @@ func New() *Mem {
 		users:                     map[uuid.UUID]store.User{},
 		notificationReads:         map[uuid.UUID]map[string]time.Time{},
 		problems:                  map[uuid.UUID]store.Problem{},
+		alertSettings:             map[uuid.UUID]store.HostAlertSettings{},
 		byEmail:                   map[string]uuid.UUID{},
 		idents:                    map[uuid.UUID]store.Identity{},
 		bySubject:                 map[string]uuid.UUID{},

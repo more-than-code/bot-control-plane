@@ -37,6 +37,11 @@ const (
 	processEvery   = 60
 )
 
+// MetricsIntervalSec is the metrics interval the hub sends every agent in
+// its config frame. The host resource sweep derives its expected sample
+// counts from it (api-v1 v1.49).
+const MetricsIntervalSec = metricsEvery
+
 // Hub tracks live agent sockets and serves /agent/v1/ws.
 type Hub struct {
 	st   store.Store

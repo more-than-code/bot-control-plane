@@ -8,10 +8,10 @@
 	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import type { AgentUpgrade, Host, SnapshotView } from '$lib/api-types';
+	import type { AgentUpgrade, Host, HostDisk, SnapshotView } from '$lib/api-types';
 	import { upgradeLine } from '$lib/agent-upgrade';
 	import { formatBytes, formatCapacity, formatLoad, formatPercent, formatRate, formatTemp, formatUptime } from '$lib/format';
-	import { alignSeries, hostPolicyLine, hostSharedNetworks, METRIC_SPECS, type MetricChart, type MetricFormat } from '$lib/host-view';
+	import { alignSeries, hostPolicyLine, hostSharedNetworks, METRIC_SPECS, overviewHref, type MetricChart, type MetricFormat } from '$lib/host-view';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import { RANGES, type RangeKey } from '$lib/ranges';
@@ -25,7 +25,9 @@
 		snapshot,
 		canUpgrade = false,
 		upgrades = [],
-		upgradesMessage = null
+		upgradesMessage = null,
+		disks = [],
+		diskPath = '/'
 	}: {
 		host: Host;
 		range: RangeKey;
@@ -36,6 +38,9 @@
 		/** The host's agent upgrades, newest first. */
 		upgrades?: AgentUpgrade[];
 		upgradesMessage?: string | null;
+		/** The host's mounts (api-v1 v1.49 item 4); the picker shows with more than one. */
+		disks?: HostDisk[];
+		diskPath?: string;
 	} = $props();
 
 	const formatters: Record<MetricFormat, (value: number) => string> = {
@@ -57,7 +62,8 @@
 					values: index >= 0 ? (aligned.columns[index] ?? []) : aligned.times.map(() => null)
 				};
 			});
-			return { spec, chart, times: aligned.times, drawn };
+			const title = spec.m === 'disk' && disks.length > 1 ? `${spec.title} ${diskPath}` : spec.title;
+			return { spec, title, chart, times: aligned.times, drawn };
 		})
 	);
 
@@ -133,7 +139,7 @@
 <nav class="mb-3 flex flex-wrap gap-2" aria-label="Time range">
 	{#each rangeKeys as key (key)}
 		<Button
-			href="?tab=overview&range={key}"
+			href={overviewHref(key, diskPath)}
 			variant={range === key ? 'default' : 'outline'}
 			size="sm"
 			aria-current={range === key ? 'page' : undefined}>{RANGES[key].label}</Button>
@@ -217,16 +223,30 @@
 
 <p class="text-muted-foreground mb-3 text-sm">Charts refresh every 30 seconds while this tab is visible.</p>
 
+{#if disks.length > 1}
+	<nav class="mb-3 flex min-w-0 flex-wrap items-center gap-2" aria-label="Disk mount" data-disk-picker>
+		<span class="text-muted-foreground text-sm">Disk</span>
+		{#each disks as disk (disk.path)}
+			<Button
+				href={overviewHref(range, disk.path)}
+				variant={diskPath === disk.path ? 'default' : 'outline'}
+				size="sm"
+				class="max-w-full truncate font-mono"
+				aria-current={diskPath === disk.path ? 'page' : undefined}>{disk.path}</Button>
+		{/each}
+	</nav>
+{/if}
+
 <div class="grid min-w-0 gap-4 md:grid-cols-2">
 	{#each charts as item (item.spec.m)}
 		{#if item.chart?.message}
 			<figure class="bg-card min-w-0 rounded-xl p-3 ring-1 ring-foreground/10">
-				<h2 class="mb-2 text-base font-medium">{item.spec.title}</h2>
+				<h2 class="mb-2 text-base font-medium">{item.title}</h2>
 				<Notice kind="error">{item.chart.message}</Notice>
 			</figure>
 		{:else}
 			<LineChart
-				title={item.spec.title}
+				title={item.title}
 				times={item.times}
 				series={item.drawn}
 				format={formatters[item.spec.format]}

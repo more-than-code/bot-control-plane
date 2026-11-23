@@ -535,6 +535,7 @@ type Store interface {
 	ProblemStore
 	HostFileStore
 	AgentUpgradeStore
+	HostAlertStore
 	// ListOpenRequests is the user's pending, unexpired value, file and
 	// connect requests at at, newest first, at most max (api-v1 v1.33 item
 	// 8), in projects that are not deleted.
@@ -699,7 +700,8 @@ type Store interface {
 	// InsertBatch inserts samples once per (host, batch). inserted is false when the batch was already stored.
 	InsertBatch(ctx context.Context, hostID, batchID uuid.UUID, samples []Sample, at time.Time) (inserted bool, err error)
 	// QueryChart returns at most 500 aggregated buckets per series. It does not return raw samples.
-	QueryChart(ctx context.Context, hostID uuid.UUID, measurement string, from, to time.Time, stepSec int) ([]ChartSeries, error)
+	// path is the disk mount (m=disk only; "" is "/", api-v1 v1.49 item 4).
+	QueryChart(ctx context.Context, hostID uuid.UUID, measurement, path string, from, to time.Time, stepSec int) ([]ChartSeries, error)
 	LoadMetric(ctx context.Context, hostID uuid.UUID, measurement string, from, to time.Time) ([]Sample, error)
 	// LatestProcesses returns the newest sample group for the host, sorted and
 	// limited in the store. It is not filtered by service project.

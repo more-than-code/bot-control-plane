@@ -1221,3 +1221,52 @@ Summary from bot-control-plane `AGENTS.md`: `ImageDeploy.reason` and `final_stat
    - The "Update available" badge offers **Upgrade** when `agent_upgrade_allowed` is true. Otherwise the tooltip says how to opt in.
    - Upgrade opens a confirm dialog, then shows a running state and the outcome.
    - The host Overview lists the history.
+
+## v1.49 host resource alerts (2026-11-23, approved spec `docs/spec-host-resource-alerts.md` rev 1; migration 0033; additive; implemented on bot-control-plane `dev` 2026-11-23, not yet released; ships with v1.50)
+1. **Problem kind `host_resource`.**
+   - Audience: org owners and admins of the host's org.
+   - Subjects: `<host_id>:mem`, `<host_id>:disk:<path>`, `<host_id>:cpu`, `<host_id>:load`.
+   - Levels: `needs_action` for mem and disk, `heads_up` for cpu and load.
+   - The href is `/hosts/<id>?range=1h`.
+   - Title and detail carry only the host name, the mount path and numbers.
+2. **Sweep** (inside the 1-minute problems sweep, after the 5-minute grace; off with `BOT_API_PROBLEMS=off`).
+   - Watched hosts are always-on, not revoked, online, with the newest sample under 2 minutes old and alerts enabled.
+   - The sweep runs one grouped query per measurement over 15 minutes.
+   - Default thresholds:
+
+     | Check | Opens | Resolves |
+     |---|---|---|
+     | mem | avg `available` < max(15 % of total, 96 MiB) over 10 min | ≥ max(20 %, 128 MiB) over 5 min |
+     | disk (each mount) | `used_percent` ≥ 90 for 10 min, latest included | < 85 over 5 min |
+     | cpu | avg busy (100 − idle) ≥ 90 % over 15 min | < 75 % over 5 min |
+     | load | avg load5 / `n_cpus` ≥ 2.0 over 15 min | < 1.2 over 5 min |
+
+   - A mount no longer reported, a host no longer watched, or alerts switched off resolves the open problem with "No longer checked".
+3. **`GET /v1/hosts/{id}/alert-settings`** (anyone who can see the host) and **`PUT …/alert-settings`** (org owner or admin; console sessions and MCP-delegated tokens).
+   - Body: `{"alerts_enabled":bool, "mem_min_available_percent":5–50|null, "disk_max_used_percent":50–99|null, "cpu_max_busy_percent":50–100|null}`. Null means the default.
+   - With an override, the resolve point is the override plus 5 points for memory, or minus 5 for disk and cpu.
+   - Out-of-range values → `bad_request`.
+   - Audit `host.alert_settings {"host", changed fields}`.
+4. **Metrics query:**
+   - `m=mem` adds `available` (average bytes per step).
+   - `m=disk` accepts `&path=<mount>`, default `/`. An unknown path returns an empty series.
+   - `GET /v1/hosts/{id}/disks` lists the mounts seen in the last 24 h: `{"items":[{"path","fstype"}]}`.
+5. **Migration 0033:**
+   - `app.host_alert_settings` (host_id pk, fk cascade; the four columns with checks; updated_at; updated_by);
+   - the problems kind check gains `host_resource`;
+   - narrow grants.
+   - The down script deletes `host_resource` problems, restores the previous kind check and drops the table.
+6. **MCP:**
+   - `list_problems` describes `host_resource`;
+   - new tools `get_alert_settings {host_id}` and `set_alert_settings {host_id, …}`, the latter through `confirm`;
+   - `query_metrics` accepts `path` for disk.
+7. **Implementation notes (2026-11-23):**
+   - `PUT …/alert-settings`: `alerts_enabled` is required; the body holds only the four fields (unknown fields, an `idempotency_key` or a fractional number → `bad_request`). A revoked host → `conflict`. A PUT that changes nothing writes and audits nothing. MCP-delegated tokens call it directly (the MCP server keeps the confirm step, as for v1.48).
+   - Memory floors: the 96 MiB open and 128 MiB resolve floors apply only to the default. With `mem_min_available_percent` set, the percent alone decides.
+   - For an open problem the resolve test runs first, so 5 minutes of recovery resolve it even while the longer open window still holds the bad minutes.
+   - Coverage: a window opens or resolves only with at least half the samples the metrics interval (10 s) gives it: 15 of 30 for 5 minutes, 30 of 60 for 10, 45 of 90 for 15.
+   - Disk: at most 50 mounts per host are judged, in path order. A mount the host stops reporting resolves with "No longer reported: the host no longer reports this mount."; other cases keep "No longer checked: …".
+   - Disk subject: `<host_id>:disk:<path>` when the path is printable and the subject stays within 300 characters; otherwise `<host_id>:disk:#<first 16 hex digits of sha256(path)>`. Titles show the mount with control characters replaced and cut to 64 characters with "…".
+   - Disk href: `/hosts/<id>?range=1h&disk=<url-escaped path>` (for a hashed subject, the path from the host's mounts of the last 24 h; without a match, no `disk`).
+   - Metrics `path`: more than 1024 characters or a control character → `bad_request` "invalid path"; ignored for other `m`.
+   - `GET /v1/hosts/{id}/disks`: anyone who can see the host, MCP-delegated too; at most 200 mounts, sorted by path.
