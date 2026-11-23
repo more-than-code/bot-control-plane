@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -87,10 +88,13 @@ func (d *DB) NoticeHostUpdates(ctx context.Context, hostIDs []uuid.UUID, version
 	if len(hostIDs) == 0 {
 		return out, nil
 	}
+	// Sorted ids and row locks taken in id order: two lists with
+	// overlapping hosts lock them in the same order and cannot deadlock.
 	ids := make([]string, len(hostIDs))
 	for i, id := range hostIDs {
 		ids[i] = id.String()
 	}
+	sort.Strings(ids)
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		return nil, mapErr(err)
@@ -98,7 +102,12 @@ func (d *DB) NoticeHostUpdates(ctx context.Context, hostIDs []uuid.UUID, version
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `
 DELETE FROM app.host_update_notices
-WHERE host_id = ANY($1::uuid[]) AND version <> $2
+WHERE (host_id, version) IN (
+  SELECT host_id, version FROM app.host_update_notices
+  WHERE host_id = ANY($1::uuid[]) AND version <> $2
+  ORDER BY host_id, version
+  FOR UPDATE
+)
 `, ids, version); err != nil {
 		return nil, mapErr(err)
 	}
@@ -106,6 +115,7 @@ WHERE host_id = ANY($1::uuid[]) AND version <> $2
 	if _, err := tx.Exec(ctx, `
 INSERT INTO app.host_update_notices (host_id, version, noticed_at)
 SELECT h.id, $2, $3 FROM app.hosts h WHERE h.id = ANY($1::uuid[])
+ORDER BY h.id
 ON CONFLICT (host_id, version) DO NOTHING
 `, ids, version, at); err != nil {
 		return nil, mapErr(err)
