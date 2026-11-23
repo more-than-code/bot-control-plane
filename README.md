@@ -63,6 +63,8 @@ One tag (`vX.Y.Z`) covers the whole repo and produces one bundle:
 - `bot-console-<tag>.tar.gz`, the console build;
 - `SHA256SUMS` and `RELEASE.md`.
 
+Pushing the tag runs `.github/workflows/release.yml`. It refuses a tag that is not on main, runs the checks, builds the bundle with `scripts/release-bundle.sh` and publishes it as a GitHub release. The production deploy then waits for approval in the `production` environment, and runs on a self-hosted runner, which calls that machine's deploy hook (`deploy-release <tag> <bundle dir>`, which runs `--migrate`). The setup is described at the top of the workflow file.
+
 The `deploybot` CLI is not part of the server bundle. bot-agent is released from its own repo.
 
 ## License
