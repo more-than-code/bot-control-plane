@@ -2,6 +2,7 @@ package tools
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/more-than-code/bot-control-plane/mcp/internal/apiclient"
@@ -124,6 +125,43 @@ func fixURL(api *apiclient.Client, fix map[string]any, projectID string) string 
 func withLink(text, link string) string {
 	if link == "" {
 		return text
+	}
+	return text + " Open: " + link
+}
+
+// GitHub refusal reasons (api-v1 v1.53): why ghcr.io refused the project's
+// GitHub connection. The fix for org_restricted is on github.com, not in
+// the console: an org owner grants the Deploybot GitHub app there.
+var (
+	githubLoginPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`)
+	githubGrantPattern = regexp.MustCompile(`^https://github\.com/settings/connections/applications/[A-Za-z0-9._-]{1,64}$`)
+	refusalReasons     = map[string]bool{"github_sign_in": true, "org_restricted": true, "no_package_access": true}
+)
+
+// githubRefusal keeps an image-access refusal's allowlisted fields, or nil.
+func githubRefusal(in map[string]any) map[string]any {
+	reason, _ := in["reason"].(string)
+	if !refusalReasons[reason] {
+		return nil
+	}
+	out := map[string]any{"reason": reason}
+	for key, re := range map[string]*regexp.Regexp{"owner": githubLoginPattern, "account": githubLoginPattern, "url": githubGrantPattern} {
+		if s, ok := in[key].(string); ok && re.MatchString(s) {
+			out[key] = s
+		}
+	}
+	if reason == "org_restricted" && out["owner"] == nil {
+		return nil
+	}
+	return out
+}
+
+// orgGrantStep is what the person does when an organization has not
+// granted the Deploybot GitHub app.
+func orgGrantStep(owner, link string) string {
+	text := "send the person this GitHub link: an owner of " + owner + " clicks Grant next to " + owner + " (a member clicks Request, and an owner approves it), then check again; reconnecting GitHub will not help."
+	if link == "" {
+		return "ask an owner of " + owner + " to grant the Deploybot GitHub app in GitHub Settings → Applications → Authorized OAuth Apps (a member clicks Request); reconnecting GitHub will not help."
 	}
 	return text + " Open: " + link
 }

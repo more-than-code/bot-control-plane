@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
@@ -265,10 +266,36 @@ const (
 	detailGitHubLoginRefused = "GitHub sign-in expired or was revoked. Reconnect GitHub in Settings."
 )
 
+// refusalText is the person-facing reason a GitHub connection was refused
+// (api-v1 v1.53), with the GitHub page that fixes it; "" when the reason
+// is unknown or is the sign-in itself (the v1.43 detail says that).
+func refusalText(r *accessRefusal) string {
+	if r == nil {
+		return ""
+	}
+	switch r.Reason {
+	case github.RefusalOrgRestricted:
+		text := "The " + r.Owner + " organization has not granted the Deploybot GitHub app access, so reconnecting will not help. " +
+			"An org owner clicks Grant (a member clicks Request) next to " + r.Owner
+		if r.URL != "" {
+			return text + " at " + r.URL
+		}
+		return text + " in GitHub Settings → Applications → Authorized OAuth Apps."
+	case github.RefusalNoPackageAccess:
+		account := "The connected GitHub account"
+		if r.Account != "" {
+			account = "The GitHub account " + r.Account
+		}
+		return account + " cannot see the " + r.Owner + " package. Give it read access to the package on GitHub, or reconnect GitHub as an account that can."
+	default:
+		return ""
+	}
+}
+
 // noteRegistryAccess is the registry_login hook on every image-access
 // answer that used a stored login: login_failed opens, private_ok resolves.
 // login is the image-access login kind (manual or github).
-func (s *Server) noteRegistryAccess(ctx context.Context, projectID uuid.UUID, host, login, access string) {
+func (s *Server) noteRegistryAccess(ctx context.Context, projectID uuid.UUID, host, login, access string, refusal *accessRefusal) {
 	if !s.problemsOn() {
 		return
 	}
@@ -285,6 +312,9 @@ func (s *Server) noteRegistryAccess(ctx context.Context, projectID uuid.UUID, ho
 		detail := detailLoginRefused
 		if login == loginGitHub {
 			detail = detailGitHubLoginRefused
+			if text := refusalText(refusal); text != "" {
+				detail = text
+			}
 		}
 		s.openProblem(ctx, store.ProblemOpen{
 			Kind: store.ProblemRegistryLogin, Subject: subject, OrgID: project.OrgID, ProjectID: &id,

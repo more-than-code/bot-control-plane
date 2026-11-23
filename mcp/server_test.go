@@ -2636,7 +2636,7 @@ func TestListProblems(t *testing.T) {
 	fake := &fakeAPI{token: userToken}
 	mcpSrv, _ := newTestServer(t, fake)
 	cs, _ := connectMCP(t, mcpSrv, userToken)
-	want := "1 open problem: ghcr.io login was refused since 2026-11-21 08:12 UTC (needs_action) — ask the person to reconnect it (connect_registry sends a connect request)."
+	want := "1 open problem: ghcr.io login was refused since 2026-11-21 08:12 UTC (needs_action): Token expired or revoked. Reconnect it in Settings — ask the person to reconnect it (connect_registry sends a connect request)."
 	res := mustCall(t, cs, "list_problems", map[string]any{"org_id": orgID})
 	assertLast(t, fake, http.MethodGet, "/v1/orgs/"+orgID+"/problems", "", "")
 	if res.IsError || textOf(t, res) != want {

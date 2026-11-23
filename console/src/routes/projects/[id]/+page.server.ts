@@ -70,7 +70,7 @@ import {
 import { formText } from '$lib/server/form';
 import { catalogRoutes, catalogRoutesConfirm, catalogRoutesSave } from '$lib/server/edge-actions';
 import { catalogPrivateKeys, catalogReadiness, connectGitHub, githubRefused, hostPolicySnippet, imageAccess, networkSnippet } from '$lib/server/settings-auto';
-import { githubNoteCode, type GitHubNoteCode } from '$lib/settings-auto';
+import { githubNoteCode, type GitHubNoteCode, type GitHubRefused } from '$lib/settings-auto';
 import { catalogImageVersionDelete, catalogImageVersions } from '$lib/server/image-versions';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
@@ -424,7 +424,7 @@ export const load: PageServerLoad = async (event) => {
 	const registries = settings?.registries ?? [];
 	const registriesMessage = settings?.registriesMessage ?? null;
 	// The refused-login badge streams: its registry lookups never hold up the tab.
-	const refused: Promise<boolean> =
+	const refused: Promise<GitHubRefused> =
 		tab === 'settings' && canAdmin ? githubRefused(event, id, registries, catalog).catch(() => false) : Promise.resolve(false);
 
 	// The streamed states stay a promise: present() would turn it into a plain object.
