@@ -76,6 +76,7 @@ var delegatedDenyPatterns = []string{
 }
 
 var delegatedAllowPatterns = []string{
+	"PUT /v1/hosts/{id}/alert-settings",
 	"POST /v1/hosts/{id}/snapshot",
 	"POST /v1/services/{id}/probe",
 	"POST /v1/projects/{id}/catalog/{name}/logs",

@@ -126,6 +126,7 @@ TRUNCATE TABLE
     app.host_file_applies,
     app.host_file_versions,
     app.host_agent_upgrades,
+    app.host_alert_settings,
     app.hosts,
     app.project_members,
     app.sessions,

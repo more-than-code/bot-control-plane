@@ -86,12 +86,12 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	}
 	var mcpSecret string
 	if cfg.MCPResource != "" {
-		mcpSecret, err = config.ReadMCPClientSecret(cfg.MCPClientSecretFile)
+		mcpSecret, err = config.LoadMCPClientSecret(cfg.MCPClientSecret, cfg.MCPClientSecretFile)
 		if err != nil {
 			return err
 		}
 	}
-	key, err := config.ReadSecretsKey(cfg.SecretsKeyFile)
+	key, err := config.LoadSecretsKey(cfg.SecretsKey, cfg.SecretsKeyFile)
 	if err != nil {
 		return err
 	}
@@ -145,8 +145,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		srv.GitHubStates = github.NewStates()
 		srv.GitHubFailures = github.NewFailures()
 		log.Info("connect github ready")
-	} else if cfg.GitHubClientID != "" || cfg.GitHubClientSecretFile != "" {
-		log.Warn("connect github is off: it needs BOT_API_GITHUB_CLIENT_ID, BOT_API_GITHUB_CLIENT_SECRET_FILE and BOT_API_CONSOLE_ORIGIN")
+	} else if cfg.GitHubClientID != "" || cfg.GitHubClientSecretFile != "" || cfg.GitHubClientSecret != "" {
+		log.Warn("connect github is off: it needs BOT_API_GITHUB_CLIENT_ID, BOT_API_GITHUB_CLIENT_SECRET_FILE (or BOT_API_GITHUB_CLIENT_SECRET) and BOT_API_CONSOLE_ORIGIN")
 	}
 	if cfg.EdgeTLSIssuer == config.EdgeIssuerInternal {
 		log.Warn("host edges use Caddy's internal CA, not ACME (BOT_API_EDGE_TLS_ISSUER=internal, dev and test hosts only)")
@@ -167,7 +167,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	// api-v1 v1.48: hello and agent_upgrade_result settle agent upgrades;
 	// rows left open past 15 minutes become unknown.
 	hub.SetUpgradeHook(srv.UpgradeHook)
+	// api-v1 v1.50: a deploy result no waiter took settles its row from Postgres.
+	hub.SetLateHook(srv.LateResultHook)
 	go srv.RunAgentUpgrades(ctx)
+	// api-v1 v1.50: in-flight deploy rows past their deadline become timeout.
+	go srv.RunImageOpSweep(ctx)
 	go srv.RunDomainChecks(ctx)
 	startBackground(ctx, cfg, log, func() { hub.SetDeployHook(srv.DeployHook) }, srv.RunProblems, srv.RunGitHubRefresh)
 	return d.serve(cfg.Listen, root, hub.CloseAll)
@@ -204,7 +208,7 @@ func githubClient(cfg config.Config) (*github.Client, error) {
 	if !cfg.GitHubConfigured() {
 		return nil, nil
 	}
-	secret, err := config.ReadGitHubClientSecret(cfg.GitHubClientSecretFile)
+	secret, err := config.LoadGitHubClientSecret(cfg.GitHubClientSecret, cfg.GitHubClientSecretFile)
 	if err != nil {
 		return nil, err
 	}

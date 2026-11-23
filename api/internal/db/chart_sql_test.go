@@ -18,7 +18,8 @@ func TestChartSQLAggregates(t *testing.T) {
 		"LIMIT %d",
 		"last_v >= first_v",
 		"(last_v - first_v)::float8 / dt",
-		"path = '/'",
+		"path = $5",
+		`path = "/"`,
 		"cpu = 'cpu-total'",
 		"interface <> 'lo'",
 	} {

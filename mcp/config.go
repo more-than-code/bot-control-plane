@@ -45,7 +45,7 @@ func configFrom(getenv func(string) string) (config, error) {
 	if err := validatePublicOrigin(cfg.PublicOrigin, cfg.AllowInsecureHTTP); err != nil {
 		return config{}, err
 	}
-	secret, err := readClientSecret(getenv("BOT_MCP_CLIENT_SECRET_FILE"))
+	secret, err := loadClientSecret(strings.TrimSpace(getenv("BOT_MCP_CLIENT_SECRET")), getenv("BOT_MCP_CLIENT_SECRET_FILE"))
 	if err != nil {
 		return config{}, err
 	}
@@ -94,6 +94,26 @@ func validatePublicOrigin(raw string, allowInsecureHTTP bool) error {
 		return fmt.Errorf("BOT_MCP_PUBLIC_ORIGIN contains a character that cannot be quoted")
 	}
 	return nil
+}
+
+// loadClientSecret is the client secret from BOT_MCP_CLIENT_SECRET (value)
+// or BOT_MCP_CLIENT_SECRET_FILE (path), never both (api-v1 v1.50 item 2).
+// The value has the file line's rules: one line of 32 to 4096 bytes. The
+// secret is never included in an error.
+func loadClientSecret(value, path string) (string, error) {
+	if value == "" {
+		return readClientSecret(path)
+	}
+	if strings.TrimSpace(path) != "" {
+		return "", errors.New("BOT_MCP_CLIENT_SECRET and BOT_MCP_CLIENT_SECRET_FILE are both set; set only one")
+	}
+	if strings.ContainsAny(value, "\r\n") || len(value) > maxClientSecretBytes {
+		return "", errors.New("BOT_MCP_CLIENT_SECRET is invalid")
+	}
+	if len(value) < minClientSecretBytes {
+		return "", errors.New("BOT_MCP_CLIENT_SECRET must be at least 32 characters")
+	}
+	return value, nil
 }
 
 // readClientSecret returns the first line of path.

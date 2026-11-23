@@ -614,6 +614,16 @@ func (s *Server) checkHost(ctx context.Context, rd readiness, host store.Host, l
 	if !rd.isImage {
 		return nil
 	}
+	// api-v1 v1.50 item 9: a host-network entry is reported under the
+	// same check name, so readers keep their list of checks.
+	if rd.img.Network == catalog.NetworkHost {
+		if hostNetworkReady(host, rd.img, "deploy") {
+			list.add("networks", readyOK, host.Name+" allows host networking", readyFix{})
+		} else {
+			list.add("networks", readyMissing, reasonNoHostNetwork, readyFix{})
+		}
+		return nil
+	}
 	if len(rd.img.Networks) == 0 {
 		list.add("networks", readyOK, "the entry joins no shared networks", readyFix{})
 		return nil

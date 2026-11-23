@@ -26,6 +26,10 @@ type CallError struct {
 	// may already have reached the host (the socket dropped or was
 	// replaced while waiting). The task may have run (api-v1 v1.47).
 	MaybeSent bool
+	// FromResult marks an error built from the agent's own task_result
+	// (failed or timed_out), which a v1.21 agent keeps until
+	// task_result_ack (api-v1 v1.50 item 9).
+	FromResult bool
 }
 
 func (e *CallError) Error() string {
@@ -59,6 +63,15 @@ func (h *Hub) Image(ctx context.Context, host store.Host, kind string, spec map[
 		timeoutSec = taskTimeoutSec
 	}
 	return h.live(ctx, host, kind, nil, spec, timeoutSec)
+}
+
+// ImageWithID is Image with a task id the caller chose, so it can record
+// the id before the frame is sent (api-v1 v1.50 item 3).
+func (h *Hub) ImageWithID(ctx context.Context, host store.Host, kind string, spec map[string]any, timeoutSec int, taskID uuid.UUID) (LiveResult, error) {
+	if timeoutSec < 1 {
+		timeoutSec = taskTimeoutSec
+	}
+	return h.liveID(ctx, host, kind, nil, spec, timeoutSec, taskID)
 }
 
 // EdgeTimeoutSec is the edge task budget: the first apply may pull the
@@ -130,13 +143,16 @@ func (h *Hub) Probe(ctx context.Context, host store.Host, svc store.Service, spe
 }
 
 func (h *Hub) live(ctx context.Context, host store.Host, kind string, service *string, spec map[string]any, timeoutSec int) (LiveResult, error) {
+	return h.liveID(ctx, host, kind, service, spec, timeoutSec, uuid.New())
+}
+
+func (h *Hub) liveID(ctx context.Context, host store.Host, kind string, service *string, spec map[string]any, timeoutSec int, taskID uuid.UUID) (LiveResult, error) {
 	if host.RevokedAt != nil || h.Status(host, h.now()) != "online" {
 		return LiveResult{}, &CallError{Code: "unavailable", Msg: "host unavailable"}
 	}
 	if spec == nil {
 		spec = map[string]any{}
 	}
-	taskID := uuid.New()
 	now := h.now()
 	ttl := taskTTL
 	if timeoutSec > int(taskTTL/time.Second) {
@@ -161,7 +177,7 @@ func (h *Hub) live(ctx context.Context, host store.Host, kind string, service *s
 		h.mu.Unlock()
 		return LiveResult{}, &CallError{Code: "unavailable", Msg: "host unavailable"}
 	}
-	h.waiters[taskID] = waiter{conn: ac, ch: ch}
+	h.waiters[taskID] = waiter{conn: ac, ch: ch, kind: kind}
 	h.mu.Unlock()
 
 	if err := ac.writeJSON(ctx, frame); err != nil {
@@ -238,22 +254,109 @@ func (h *Hub) onTaskResult(ac *agentConn, f frame) error {
 		return nil
 	}
 	var out taskOut
+	var ce *CallError
 	switch f.State {
 	case "succeeded":
 		out.res = LiveResult{TaskID: id, Payload: taskPayload(f.Payload)}
 	case "timed_out":
-		out.err = &CallError{Code: "timeout", Msg: "timed out"}
+		ce = &CallError{Code: "timeout", Msg: "timed out"}
 	case "failed":
-		out.err = failedTask(jsonString(f.ErrorCode), taskPayload(f.Payload))
+		ce = failedTask(jsonString(f.ErrorCode), taskPayload(f.Payload))
 	default:
-		out.err = &CallError{Code: "error", Msg: jsonString(f.ErrorCode), Payload: taskPayload(f.Payload)}
+		ce = &CallError{Code: "error", Msg: jsonString(f.ErrorCode), Payload: taskPayload(f.Payload)}
 	}
-	h.deliver(id, out)
-	return ac.write(map[string]any{
+	if ce != nil {
+		ce.FromResult = true
+		out.err = ce
+	}
+	var ackResult bool
+	switch kind, got := h.deliver(id, out, ac); got {
+	case delivered:
+		// An image deploy or rollback is acked by the API once its row is
+		// written (AckResult, api-v1 v1.50 item 9); a run has no row.
+		ackResult = kind == "image_start"
+	case foreignConn:
+		// A waiter exists, but for another connection: not this socket's
+		// task. Acked and dropped (api-v1 v1.50 item 9).
+		ac.log.Info("task result from another connection dropped", "task_id", id.String())
+		ackResult = true
+	default:
+		ackResult = h.lateResult(ac, id, out)
+	}
+	if err := ac.write(map[string]any{
 		"v":       1,
 		"type":    "task_ack",
 		"task_id": id.String(),
+	}); err != nil {
+		return err
+	}
+	if !ackResult {
+		return nil
+	}
+	return writeResultAck(ac, id)
+}
+
+// writeResultAck sends task_result_ack (agent-protocol v1.21 item 5): the
+// agent deletes its stored result on it. An older agent ignores the type.
+func writeResultAck(ac *agentConn, id uuid.UUID) error {
+	return ac.write(map[string]any{
+		"v":       1,
+		"type":    "task_result_ack",
+		"task_id": id.String(),
 	})
+}
+
+// AckResult sends task_result_ack for taskID to the host's current socket,
+// after the API stored the result (api-v1 v1.50 item 9). Without a socket
+// it does nothing: the agent resends the result after its next hello, and
+// the late path acks it.
+func (h *Hub) AckResult(hostID, taskID uuid.UUID) {
+	h.mu.Lock()
+	ac := h.conns[hostID]
+	h.mu.Unlock()
+	if ac == nil {
+		return
+	}
+	if err := writeResultAck(ac, taskID); err != nil {
+		ac.log.Warn("task result ack not sent", "task_id", taskID.String())
+	}
+}
+
+// LateHook settles the deploy or rollback row whose task is taskID on
+// hostID from a result no waiter in this process took (api-v1 v1.50 item
+// 3): the waiting request ended, timed out, or ran in another API process
+// or before a restart. The frame's own "late" flag is not needed: a result
+// no waiter took is late here either way. A row that does not
+// exist or is already settled is not an error. A non-nil error means the
+// store failed: the result is not acked, so the agent resends it after its
+// next hello.
+type LateHook func(ctx context.Context, hostID, taskID uuid.UUID, res LiveResult, err error) error
+
+// SetLateHook sets the function that settles late deploy results. It runs
+// on the read loop.
+func (h *Hub) SetLateHook(fn LateHook) {
+	h.mu.Lock()
+	h.lateHook = fn
+	h.mu.Unlock()
+}
+
+// lateResult hands a result no waiter took to the late hook and reports
+// whether to send task_result_ack. Without a hook the result is dropped
+// and acked, logged by task id only.
+func (h *Hub) lateResult(ac *agentConn, id uuid.UUID, out taskOut) bool {
+	h.mu.Lock()
+	fn := h.lateHook
+	h.mu.Unlock()
+	if fn == nil {
+		ac.log.Info("task result with no waiter dropped", "task_id", id.String())
+		return true
+	}
+	res, callErr := finishTask(id, out)
+	if err := fn(ac.parent, ac.hostID, id, res, callErr); err != nil {
+		ac.log.Error("late task result not stored", "task_id", id.String())
+		return false
+	}
+	return true
 }
 
 func (h *Hub) onTaskReject(ac *agentConn, f frame) {
@@ -269,8 +372,7 @@ func (h *Hub) onTaskReject(ac *agentConn, f frame) {
 		// Only the edge reads it (its refusal detail).
 		ce.Payload = taskPayload(f.Payload)
 	}
-	h.deliver(id, taskOut{err: ce})
-	_ = ac
+	h.deliver(id, taskOut{err: ce}, ac)
 }
 
 func rejectCode(code string) (string, string) {
@@ -327,15 +429,30 @@ func taskPayload(raw json.RawMessage) json.RawMessage {
 	return ingest.RedactPayload(raw)
 }
 
-func (h *Hub) deliver(id uuid.UUID, out taskOut) {
+// Delivery outcomes.
+const (
+	noWaiter = iota
+	delivered
+	foreignConn
+)
+
+// deliver hands out to the task's waiter when the waiter's task was sent on
+// from (the delivering socket), and reports the task kind and the outcome.
+// A waiter of another socket is left waiting.
+func (h *Hub) deliver(id uuid.UUID, out taskOut, from *agentConn) (string, int) {
 	h.mu.Lock()
 	w, ok := h.waiters[id]
+	if ok && w.conn != from {
+		h.mu.Unlock()
+		return w.kind, foreignConn
+	}
 	if ok {
 		delete(h.waiters, id)
 	}
 	h.mu.Unlock()
 	if !ok {
-		return
+		return "", noWaiter
 	}
 	w.ch <- out
+	return w.kind, delivered
 }

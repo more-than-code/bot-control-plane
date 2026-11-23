@@ -2,6 +2,7 @@
 //
 //	deploybot-server api [--migrate]
 //	deploybot-server mcp
+//	deploybot-server health <url>
 //
 // Called as bot-api-server or bot-mcp-server (for example through a
 // symlink), it runs that server with all its arguments.
@@ -20,6 +21,7 @@ import (
 
 const usage = `usage: deploybot-server api [--migrate]
        deploybot-server mcp
+       deploybot-server health http://127.0.0.1:<port>/<path>
 `
 
 func main() {
@@ -29,6 +31,8 @@ func main() {
 		code = api.Run(context.Background(), args)
 	case "mcp":
 		code = mcp.Run(context.Background(), args)
+	case "health":
+		code = health(args, os.Stderr)
 	}
 	os.Exit(code)
 }
@@ -49,7 +53,7 @@ func dispatch(argv []string, stderr io.Writer) (mode string, args []string, code
 		return "", nil, 2
 	}
 	switch argv[1] {
-	case "api", "mcp":
+	case "api", "mcp", "health":
 		return argv[1], argv[2:], 0
 	case "-h", "--help":
 		fmt.Fprint(stderr, usage)

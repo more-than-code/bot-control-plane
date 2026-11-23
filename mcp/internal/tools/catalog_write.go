@@ -25,7 +25,7 @@ var imageSpecKeys = map[string]struct{}{
 	"kind": {}, "image": {}, "command": {}, "entrypoint": {}, "ports": {},
 	"env": {}, "env_sets": {}, "secret_env": {}, "volumes": {}, "files": {},
 	"healthcheck": {}, "logging": {}, "health_policy": {}, "restart": {}, "user": {}, "healthy_after_sec": {},
-	"memory_mb": {}, "timeout_sec": {}, "networks": {},
+	"memory_mb": {}, "timeout_sec": {}, "networks": {}, "network": {},
 }
 
 // Healthcheck bounds match api-v1 v1.11 item 7, and a leading CMD, CMD-SHELL
@@ -161,6 +161,11 @@ const catalogWriteSchema = `{
           "maxItems": 4,
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"}
+        },
+        "network": {
+          "type": ["string", "null"],
+          "enum": ["host", null],
+          "description": "Optional. \"host\": the container shares the host's network (binds the host's 127.0.0.1; ports are not published, ports[].host is only the loopback port the health check uses). Needs networks left out, and a host whose root allows the project in runner.toml host_network_projects; otherwise deploy, rollback and run are refused. Leave out for the usual project network."
         }
       }
     }
@@ -298,6 +303,28 @@ func validateImageSpec(raw json.RawMessage) error {
 		if err := validateNetworks(networks); err != nil {
 			return err
 		}
+	}
+	if network, ok := fields["network"]; ok {
+		if err := validateNetwork(network, fields["networks"]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateNetwork checks spec.network (api-v1 v1.50 item 1): null, or
+// "host" without shared networks.
+func validateNetwork(raw, networks json.RawMessage) error {
+	trimmed := bytes.TrimSpace(raw)
+	if bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	var mode string
+	if err := json.Unmarshal(trimmed, &mode); err != nil || mode != "host" {
+		return errors.New(`network must be "host" or left out`)
+	}
+	if n := bytes.TrimSpace(networks); len(n) > 0 && !bytes.Equal(n, []byte("null")) && !bytes.Equal(n, []byte("[]")) {
+		return errors.New(`network "host" cannot be combined with networks`)
 	}
 	return nil
 }

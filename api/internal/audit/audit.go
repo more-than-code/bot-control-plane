@@ -27,6 +27,9 @@ const (
 	ActionHostRevoke      = "host.revoke"
 	ActionHostRename      = "host.rename"
 	ActionHostArchive     = "host.archive"
+	// ActionHostAlertSettings is a change of a host's alert settings
+	// (api-v1 v1.49 item 3). Detail: host and the changed fields.
+	ActionHostAlertSettings = "host.alert_settings"
 	// api-v1 v1.24 item 8. The old host.share* and catalog approval
 	// actions stay readable in history; nothing writes them now.
 	ActionHostAccessGrant          = "host.access_grant"

@@ -42,6 +42,15 @@ type ImageDeploy struct {
 	InFlightUntil time.Time `json:"-"`
 }
 
+// DeployTask is the deploy or rollback row an agent task id names (api-v1
+// v1.50 item 3), with the action and the entry's project and name.
+type DeployTask struct {
+	Deploy    ImageDeploy
+	Action    string
+	ProjectID uuid.UUID
+	Entry     string
+}
+
 // DeployFinalStatus is the part of ImageStatus a deploy row keeps.
 type DeployFinalStatus struct {
 	State        string `json:"state"`
