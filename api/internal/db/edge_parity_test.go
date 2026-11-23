@@ -18,6 +18,13 @@ import (
 
 const edgeMigration = "0023_domains_edge_routes.sql"
 
+// forgetEdgeMigrations forgets 0023 and 0036 (it relaxes
+// domain_assignments_pattern_chk on the table 0023 creates), so Migrate
+// rebuilds the domain tables as the newest migration defines them.
+// Forgetting only 0023 would re-create the 0023 check while 0036 stays
+// recorded.
+const forgetEdgeMigrations = `DELETE FROM app.schema_migrations WHERE name IN ('` + edgeMigration + `', '0036_domain_assignment_names.sql')`
+
 // TestParityDomains runs the domain store rules against memstore and,
 // with a test database, Postgres.
 func TestParityDomains(t *testing.T) {
@@ -445,7 +452,7 @@ func TestDomainsEdgeRoutesMigration(t *testing.T) {
 	if edgeTables(t, d, ctx) != 0 {
 		t.Fatal("down left tables")
 	}
-	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+edgeMigration+`'`); err != nil {
+	if _, err := conn.Exec(ctx, forgetEdgeMigrations); err != nil {
 		t.Fatal(err)
 	}
 	if err := Migrate(ctx, url); err != nil {
@@ -472,7 +479,7 @@ func restoreEdgeMigration(url string) {
 	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'app' AND table_name = 'routes'`).Scan(&n); err != nil || n == 1 {
 		return
 	}
-	if _, err := d.pool.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+edgeMigration+`'`); err != nil {
+	if _, err := d.pool.Exec(ctx, forgetEdgeMigrations); err != nil {
 		return
 	}
 	_ = Migrate(ctx, url)

@@ -512,7 +512,8 @@ func runDown(t *testing.T, ctx context.Context, url string) {
 }
 
 // dropEdgeSchema clears the 0023 rows and runs its down script on conn
-// (already deploybot_owner), then forgets 0023 so Migrate applies it again.
+// (already deploybot_owner), then forgets 0023 and 0036 so Migrate applies
+// them again.
 // A database without 0023 is left as it is.
 func dropEdgeSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 	t.Helper()
@@ -535,7 +536,7 @@ func dropEdgeSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 	if _, err := conn.PgConn().Exec(ctx, string(body)).ReadAll(); err != nil {
 		t.Fatalf("0023 down: %v", err)
 	}
-	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+edgeMigration+`'`); err != nil {
+	if _, err := conn.Exec(ctx, forgetEdgeMigrations); err != nil {
 		t.Fatal(err)
 	}
 }
