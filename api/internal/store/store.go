@@ -797,6 +797,12 @@ type Store interface {
 	// MarkConfirmationUsed sets used_at when the row is unused, unexpired, and owned by userID.
 	// Anything else is ErrNotFound.
 	MarkConfirmationUsed(ctx context.Context, hash []byte, userID uuid.UUID, at time.Time) error
+	// ReopenConfirmation clears used_at of a row owned by userID and used
+	// at or before at, after the host refused the task so nothing ran
+	// (api-v1 v1.55 item 2). expires_at becomes at least until, even when
+	// the plan expired while the host was asked. It returns the row's
+	// expires_at; anything else is ErrNotFound.
+	ReopenConfirmation(ctx context.Context, hash []byte, userID uuid.UUID, at, until time.Time) (time.Time, error)
 	// PutServiceConfirmation inserts one health-check plan. A duplicate token hash is ErrConflict.
 	PutServiceConfirmation(ctx context.Context, hash []byte, c ServiceConfirmation) error
 	GetServiceConfirmation(ctx context.Context, hash []byte) (ServiceConfirmation, error)

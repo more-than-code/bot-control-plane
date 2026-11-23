@@ -34,6 +34,8 @@ type frame struct {
 	Files json.RawMessage `json:"files"`
 	// LastUpgrade is hello last_upgrade (agent-protocol v1.20 item 2).
 	LastUpgrade json.RawMessage `json:"last_upgrade"`
+	// Field is a task_reject bad_spec key name (agent-protocol v1.23).
+	Field json.RawMessage `json:"field"`
 	// Raw is the whole frame, for handlers that decode a strict shape.
 	Raw []byte `json:"-"`
 }

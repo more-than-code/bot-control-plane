@@ -36,6 +36,10 @@ const (
 	// unsupported_agent) for network "host" on a host without
 	// programs.host_network.
 	reasonNoHostNetwork = "this host does not allow host networking (runner.toml host_network_projects)"
+	// msgPlanKept is added to a deploy or rollback refusal when its
+	// confirmation was reopened (api-v1 v1.55 item 2). It takes the
+	// plan's expiry as HH:MM UTC.
+	msgPlanKept = ". Nothing ran on the host, so this plan is kept: after fixing the cause outside the entry (for example upgrade_agent, the host's runner.toml or an env set), confirm it again with the same confirmation_id and idempotency_key until %s UTC. A change to the entry itself needs a new plan"
 	// msgMayStillFinish is the 503 for a deploy or rollback whose frame
 	// reached the host before the connection dropped (api-v1 v1.50 item 8).
 	msgMayStillFinish  = "host unavailable; the host may still finish this deploy. It shows as running until its ends_by time; check the deploy history"
@@ -284,7 +288,7 @@ func (s *Server) imageMutate(w http.ResponseWriter, r *http.Request, action stri
 		s.issueConfirmation(w, r, p, projectID, host, entry, action, body.Key, hash, digest, force, img.Networks)
 		return
 	}
-	s.performImage(w, r, p, projectID, host, entry, img, action, body.Force, digest, 0, body.Key)
+	s.performImage(w, r, p, projectID, host, entry, img, action, body.Force, digest, 0, body.Key, nil)
 }
 
 // envRefsOK refuses a delegated deploy or rollback plan whose env has a bad
@@ -368,7 +372,7 @@ func (s *Server) finishImageShort(w http.ResponseWriter, r *http.Request, p prin
 			return
 		}
 	}
-	s.performImage(w, r, p, projectID, host, entry, img, action, false, "", lines, key)
+	s.performImage(w, r, p, projectID, host, entry, img, action, false, "", lines, key, nil)
 }
 
 func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principal, c store.CatalogConfirmation, entry store.CatalogEntry) {
@@ -449,7 +453,28 @@ func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principa
 		return
 	}
 	force := c.ImageForce != nil && *c.ImageForce
-	s.performImage(w, r, p, c.ProjectID, host, entry, img, c.Action, force, digest, 0, c.IdempotencyKey)
+	s.performImage(w, r, p, c.ProjectID, host, entry, img, c.Action, force, digest, 0, c.IdempotencyKey, secretHash(r))
+}
+
+// reopenPlan makes a deploy or rollback confirmation usable again after
+// the host refused the task, so nothing ran (api-v1 v1.55 item 2). It
+// returns the sentence added to the refusal, or "" when the plan could not
+// be reopened (it expired, or a store error, which is logged).
+func (s *Server) reopenPlan(plan []byte, userID uuid.UUID) string {
+	var expires time.Time
+	at := s.now()
+	err := s.settle(func(c context.Context) error {
+		var rerr error
+		expires, rerr = s.Store.ReopenConfirmation(c, plan, userID, at, at.Add(store.ConfirmationTTL))
+		return rerr
+	})
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			s.logErr(err)
+		}
+		return ""
+	}
+	return fmt.Sprintf(msgPlanKept, expires.UTC().Format("15:04"))
 }
 
 // secretHash is the confirmation token hash already checked by the caller.
@@ -458,7 +483,10 @@ func secretHash(r *http.Request) []byte {
 	return secret.Hash(r.PathValue("confirmation_id"))
 }
 
-func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, img catalog.Image, action string, force bool, digest string, lines int, key string) {
+// plan is the hash of the confirmation being performed, or nil for a
+// console action: a deploy or rollback the host refused reopens it (api-v1
+// v1.55 item 2).
+func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principal, projectID uuid.UUID, host store.Host, entry store.CatalogEntry, img catalog.Image, action string, force bool, digest string, lines int, key string, plan []byte) {
 	timeout := imageTimeout(action, img)
 	if s.imageBudget > 0 {
 		timeout = s.imageBudget
@@ -566,6 +594,13 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 				hold = false
 				if err == nil {
 					ackStored()
+				}
+				// Only a written refused row frees the entry for a retry;
+				// otherwise it stays in flight until the sweep.
+				if plan != nil && err == nil {
+					if kept := s.reopenPlan(plan, p.User.ID); kept != "" {
+						got.msg = strings.TrimRight(got.msg, ".") + kept
+					}
 				}
 			}
 			// api-v1 v1.50: the frame reached the host, and an agent that
@@ -1782,8 +1817,36 @@ func takeImage(action string, res agentws.LiveResult, err error, forms []secretF
 }
 
 // msgSpecRefused is the deploy and rollback message for the agent's
-// task_reject bad_spec, which carries only the code.
+// task_reject bad_spec when it names no field (an agent before
+// agent-protocol v1.23).
 const msgSpecRefused = "the host's agent refused the task as malformed (bad_spec): it did not accept a field of this entry's spec, env or files; the agent does not say which. Check that the agent is up to date (upgrade_agent), then compare the spec with the ImageSpec rules"
+
+// specFieldHints adds a sentence for the fields an agent most often refuses
+// (api-v1 v1.55 item 1).
+var specFieldHints = map[string]string{
+	"spec.secret_env": "Each key under \"secret_env\" must be an allowed env key, and each value <env set>.<KEY>.",
+	"env":             "A resolved env key is not allowed (PATH, HOME, LD_*, NODE_OPTIONS and similar), or a value is too long or holds a line break.",
+	"registry_auth":   "The registry login sent with the task was not accepted; reconnect the registry.",
+	"files":           "The entry's files did not match their resolved contents, or a target is not allowed.",
+	"spec.files":      "A file name or target is not allowed, is listed twice, or overlaps a volume.",
+	"spec.volumes":    "A volume name or target is not allowed or is listed twice.",
+}
+
+// specRefused is the deploy and rollback message for the agent's
+// task_reject bad_spec. field is the key the agent named (agent-protocol
+// v1.23), already checked by agentws.RejectField, or "".
+func specRefused(field string) string {
+	if field == "" {
+		return msgSpecRefused
+	}
+	// The field is quoted so the API's key=value redaction does not take
+	// the next word for a secret ("secret_env did" would be).
+	msg := "the host's agent refused the task as malformed (bad_spec): field \"" + field + "\" did not pass the host's checks (the agent names the field, never its value)."
+	if hint := specFieldHints[field]; hint != "" {
+		msg += " " + hint
+	}
+	return msg + " Check that the agent is up to date (upgrade_agent), then compare that field with the ImageSpec rules"
+}
 
 func takeDeploy(res agentws.LiveResult, err error, forms []secretForm) imageCall {
 	if err == nil {
@@ -1798,8 +1861,9 @@ func takeDeploy(res agentws.LiveResult, err error, forms []secretForm) imageCall
 	}
 	if hostRejection(call.Code) {
 		if call.Agent == "bad_spec" {
-			// The agent's task_reject names no field; say what the code means.
-			return imageCall{request: true, code: call.Code, msg: msgSpecRefused, reason: msgSpecRefused, maybeSent: call.MaybeSent}
+			// Say what the code means, with the field when the agent named it.
+			msg := specRefused(call.Field)
+			return imageCall{request: true, code: call.Code, msg: msg, reason: msg, maybeSent: call.MaybeSent}
 		}
 		return requestCall(call, forms)
 	}
