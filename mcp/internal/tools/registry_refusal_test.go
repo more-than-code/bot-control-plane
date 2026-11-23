@@ -39,7 +39,7 @@ func TestReadinessGitHubOrgAccess(t *testing.T) {
 	}
 	// A link that is not GitHub's application page is dropped.
 	bad := projectFix(map[string]any{"action": "github_org_access", "owner": "kea-studio", "url": "https://evil.example/x"})
-	if bad["url"] != nil || !strings.Contains(nextStep(bad, lnProject, "web"), "Authorized OAuth Apps") {
+	if bad["url"] != nil || !strings.Contains(nextStep(bad, lnProject, "web", ""), "Authorized OAuth Apps") {
 		t.Fatalf("bad %+v", bad)
 	}
 	if got := projectFix(map[string]any{"action": "github_org_access", "owner": "-bad"}); got["action"] != "none" {

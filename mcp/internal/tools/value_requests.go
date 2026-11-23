@@ -171,7 +171,11 @@ func requestEnvValue(ctx context.Context, api *apiclient.Client, call requestCal
 	}
 	payload, fail := post(ctx, api, in.createPath(), body)
 	if fail != nil {
-		return keepFixedMessage(fail, "conflict", in.Key+" already has a value; edit it in the console")
+		link := projectSettingsURL(api, in.ProjectID, "env-sets")
+		if in.Entry != "" {
+			link = entryURL(api, in.ProjectID, in.Entry)
+		}
+		return keepFixedLinked(fail, "conflict", in.Key+" already has a value; edit it in the console", link)
 	}
 	created, ok := valueRequestKind.parseCreated(payload)
 	if !ok {

@@ -70,7 +70,7 @@ var problemFix = map[string]string{
 	"host_offline":   "check the machine and its bot-agent service",
 	"registry_login": "ask the person to reconnect it (connect_registry sends a connect request)",
 	"deploy":         "read deploy_history for the reason and the stored log tail, fix the cause, then deploy again or roll back",
-	"host_file":      "an organization owner or admin opens the host's Config files tab in the console (config files are not available over MCP)",
+	"host_file":      "only an organization owner or admin can fix it, on the host's Config files tab (not available over MCP): send them that problem's link from the Open in the console line when it is there",
 	"host_resource":  "free memory or disk on the host, or raise its threshold (set_alert_settings)",
 }
 

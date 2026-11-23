@@ -83,7 +83,7 @@ func TestReadinessConsoleURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "https://console.example/hosts/" + lnHost + "?tab=policy&policy.add_image=ghcr.io%2Fkea%2Fsite"
-	if body.Checks[0].Fix["console_url"] != want || !strings.Contains(body.Checks[0].Next, "Open: "+want) {
+	if body.Checks[0].Fix["console_url"] != want || !strings.Contains(body.Checks[0].Next, "this link, which opens the page for it, to allow the image on the host's Policy tab: "+want) {
 		t.Fatalf("%+v", body.Checks[0])
 	}
 	if body.Checks[1].Fix["console_url"] != "https://console.example/hosts/"+lnHost+"?tab=policy&policy.edge=on" {
@@ -109,5 +109,55 @@ func TestHostAndProblemLinks(t *testing.T) {
 	probs := json.RawMessage(`{"items":[{"title":"pi4 offline","href":"/hosts/` + lnHost + `"},{"title":"x","href":"//evil.example/"},{"title":"old","href":"/a","resolved_at":"2026-11-23T00:00:00Z"}]}`)
 	if got := problemLinks(api, probs); got != "\nOpen in the console: pi4 offline: https://console.example/hosts/"+lnHost {
 		t.Fatalf("%q", got)
+	}
+}
+
+// A person's console step names the page to send; a tool step gets none.
+func TestNextStepPersonLinks(t *testing.T) {
+	login := map[string]any{"action": "add_registry_login", "registry": "registry.example.com"}
+	if !personStep(login) {
+		t.Fatal("a registry login is the person's")
+	}
+	if s := nextStep(login, lnProject, "web", "https://c.example/x"); !strings.Contains(s, "send the person this link") || !strings.HasSuffix(s, "https://c.example/x") {
+		t.Fatalf("%s", s)
+	}
+	if s := nextStep(login, lnProject, "web", ""); !strings.Contains(s, "in the console (project Settings, Registries)") {
+		t.Fatalf("%s", s)
+	}
+	for _, fix := range []map[string]any{
+		{"action": "create_env_set", "set": "app"},
+		{"action": "connect_github"},
+		{"action": "fill_value", "set": "app", "key": "TOKEN"},
+	} {
+		if personStep(fix) {
+			t.Fatalf("%v is a tool step", fix)
+		}
+	}
+}
+
+func TestEnvSetRevealLinks(t *testing.T) {
+	api := linkClient(t, "https://console.example")
+	sets := withEnvSetLinks(api, lnProject, []envSetView{
+		{Name: "app", Keys: []envSetKeyView{{Key: "SECRET", IsSecret: true, RevealPending: true}, {Key: "TOKEN", NeedsValue: true}}},
+		{Name: "@web", Entry: "web", Keys: []envSetKeyView{{Key: "K", RevealPending: true}}},
+	})
+	text := summarizeEnvSets(sets)
+	if !strings.Contains(text, "app has 1 key generated and not yet revealed; only the person can reveal it, once: send them this link: https://console.example/projects/"+lnProject+"?tab=settings#env-sets") {
+		t.Fatalf("%s", text)
+	}
+	if !strings.Contains(text, "https://console.example/projects/"+lnProject+"?tab=catalog&catalog.q=web") || !strings.Contains(text, "call request_env_value") {
+		t.Fatalf("%s", text)
+	}
+}
+
+func TestPlaceholderStep(t *testing.T) {
+	if s := placeholderStep("env TOKEN in set app has no value yet; set it in the console"); !strings.Contains(s, "set app and key TOKEN") {
+		t.Fatalf("%s", s)
+	}
+	if s := placeholderStep("env TOKEN in set @web has no value yet; set it in the console"); !strings.Contains(s, "entry web and key TOKEN") {
+		t.Fatalf("%s", s)
+	}
+	if placeholderStep("something else") != "" {
+		t.Fatal("other text got a step")
 	}
 }

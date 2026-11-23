@@ -139,7 +139,7 @@ func TestAssignDomainFix(t *testing.T) {
 	if link != "https://console.example/orgs/"+lnOrg+"?domains.assign="+domainID+"&domains.pattern=app&domains.project="+lnProject+"&tab=settings" {
 		t.Fatalf("link %q", link)
 	}
-	if step := nextStep(fix, lnProject, "serve"); !strings.Contains(step, "app.example.com") || !strings.Contains(step, "console only") {
+	if step := nextStep(fix, lnProject, "serve", ""); !strings.Contains(step, "app.example.com") || !strings.Contains(step, "console only") {
 		t.Fatalf("next step %q", step)
 	}
 	bad := projectFix(map[string]any{"action": "assign_domain", "org_id": lnOrg, "domain_id": domainID, "pattern": "**", "name": "not a name"})

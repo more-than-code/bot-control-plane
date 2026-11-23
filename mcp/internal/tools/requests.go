@@ -147,6 +147,17 @@ func keepFixedMessage(fail *mcp.CallToolResult, code, fixed string) *mcp.CallToo
 	return fail
 }
 
+// keepFixedLinked is keepFixedMessage for a step only the person can do:
+// when the API's fixed message came back, it adds the console page to send
+// them, when there is one.
+func keepFixedLinked(fail *mcp.CallToolResult, code, fixed, link string) *mcp.CallToolResult {
+	kept := keepFixedMessage(fail, code, fixed)
+	if kept == fail || link == "" {
+		return kept
+	}
+	return toolError(code, fixed+"; only the person can do that: send them this link: "+link)
+}
+
 // requestKind is what differs between request types in what the agent sees.
 type requestKind struct {
 	rule      string // the first sentence of the descriptions and of every summary

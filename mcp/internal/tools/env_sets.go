@@ -180,7 +180,7 @@ const listEnvSetsSchema = `{
 func registerListEnvSets(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "list_env_sets",
-		Description: "List a project's env sets as key names and flags: is_secret, needs_value (a placeholder the user must still fill in the console; a deploy that uses it is refused), and reveal_pending (a generated value the user has not viewed yet). Each set has used_by, the catalog entries that name it in env_sets or secret_env. A set named @<entry> with an entry field is that entry's private set: secrets only it uses, named in its secret_env as @<entry>.KEY; change them through the entry (update_catalog_entry, request_env_value with entry). Never returns a value or a preview, even for plain keys. Needs project owner or admin. Reads stored API data. Does not contact any host.",
+		Description: "List a project's env sets as key names and flags: is_secret, needs_value (a placeholder still without a value: call request_env_value so the person enters it; a deploy that uses it is refused), and reveal_pending (a generated value the user has not viewed yet). Each set has used_by, the catalog entries that name it in env_sets or secret_env. A set named @<entry> with an entry field is that entry's private set: secrets only it uses, named in its secret_env as @<entry>.KEY; change them through the entry (update_catalog_entry, request_env_value with entry). Never returns a value or a preview, even for plain keys. Needs project owner or admin. Reads stored API data. Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(listEnvSetsSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -206,8 +206,9 @@ func registerListEnvSets(server *mcp.Server, api *apiclient.Client) {
 			if err != nil {
 				return toolError("error", errEnvSetShape.Error())
 			}
-			out, _ := json.Marshal(map[string]any{"items": []envSetView{set}})
-			return present(out, summarizeEnvSets([]envSetView{set}))
+			sets := withEnvSetLinks(api, in.ProjectID, []envSetView{set})
+			out, _ := json.Marshal(map[string]any{"items": sets})
+			return present(out, summarizeEnvSets(sets))
 		}
 		// api-v1 v1.33 item 6: entry-private sets are listed too, with entry.
 		q := url.Values{}
@@ -230,6 +231,7 @@ func registerListEnvSets(server *mcp.Server, api *apiclient.Client) {
 			}
 			sets = append(sets, set)
 		}
+		sets = withEnvSetLinks(api, in.ProjectID, sets)
 		out, _ := json.Marshal(map[string]any{"items": sets})
 		return present(out, summarizeEnvSets(sets))
 	})
@@ -243,6 +245,10 @@ type envSetView struct {
 	// Entry and UsedBy are api-v1 v1.33 items 6 and 4.
 	Entry  string   `json:"entry,omitempty"`
 	UsedBy []string `json:"used_by"`
+	// ConsoleURL is the set's console page (list_env_sets only, when
+	// BOT_MCP_CONSOLE_ORIGIN is set): where the person reveals a generated
+	// value, which no tool can do.
+	ConsoleURL string `json:"console_url,omitempty"`
 }
 
 // privateSetPattern is an entry-private set name (api-v1 v1.33 item 6).
@@ -322,11 +328,40 @@ func summarizeEnvSets(sets []envSetView) string {
 	}
 	switch {
 	case needs == 1:
-		text += " 1 key still needs a value in the console."
+		text += " 1 key still needs a value: call request_env_value for it; the person enters the value."
 	case needs > 1:
-		text += fmt.Sprintf(" %d keys still need a value in the console.", needs)
+		text += fmt.Sprintf(" %d keys still need a value: call request_env_value for each; the person enters the value.", needs)
+	}
+	for _, set := range sets {
+		reveal := 0
+		for _, k := range set.Keys {
+			if k.RevealPending {
+				reveal++
+			}
+		}
+		if reveal == 0 {
+			continue
+		}
+		if set.ConsoleURL != "" {
+			text += fmt.Sprintf(" %s has %s generated and not yet revealed; only the person can reveal it, once: send them this link: %s", set.Name, countKeys(reveal), set.ConsoleURL)
+		} else {
+			text += fmt.Sprintf(" %s has %s generated and not yet revealed; only the person can reveal it, once, in the console.", set.Name, countKeys(reveal))
+		}
 	}
 	return text
+}
+
+// withEnvSetLinks sets each set's console page: the entry's row for a
+// private set, else project Settings, Env sets.
+func withEnvSetLinks(api *apiclient.Client, projectID string, sets []envSetView) []envSetView {
+	for i := range sets {
+		if sets[i].Entry != "" {
+			sets[i].ConsoleURL = entryURL(api, projectID, sets[i].Entry)
+		} else {
+			sets[i].ConsoleURL = projectSettingsURL(api, projectID, "env-sets")
+		}
+	}
+	return sets
 }
 
 // countKeys is "1 key" or "n keys".
@@ -345,7 +380,7 @@ func envSetCreated(payload json.RawMessage) *mcp.CallToolResult {
 		return toolError("error", errEnvSetShape.Error())
 	}
 	out, _ := json.Marshal(set)
-	return present(out, fmt.Sprintf("created env set %s with %s. Generated values are shown once in the console; placeholders are filled there.", set.Name, countKeys(len(set.Keys))))
+	return present(out, fmt.Sprintf("created env set %s with %s. Generated values are revealed once, only by the person: list_env_sets gives the link to send them. Fill placeholders with request_env_value.", set.Name, countKeys(len(set.Keys))))
 }
 
 // envSetPayload reports whether a 201 confirm body is an env set (it has

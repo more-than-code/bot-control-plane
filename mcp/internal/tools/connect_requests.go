@@ -124,6 +124,12 @@ func connectRegistry(ctx context.Context, api *apiclient.Client, call requestCal
 		return badRequest(err)
 	}
 	if err := in.validate(); err != nil {
+		if in.Registry != connectRegistryHost {
+			// Another registry's login holds a password: only the person adds it.
+			if link := projectSettingsURL(api, in.ProjectID, "registries"); link != "" {
+				return badRequest(errors.New(err.Error() + "; only the person can add it: send them this link: " + link))
+			}
+		}
 		return badRequest(err)
 	}
 	if call.state != "" {
