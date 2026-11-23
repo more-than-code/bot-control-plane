@@ -81,3 +81,54 @@ WHERE user_id = $1::uuid AND key = ANY($2::text[])
 	}
 	return out, nil
 }
+
+func (d *DB) NoticeHostUpdates(ctx context.Context, hostIDs []uuid.UUID, version string, at time.Time) (map[uuid.UUID]time.Time, error) {
+	out := map[uuid.UUID]time.Time{}
+	if len(hostIDs) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(hostIDs))
+	for i, id := range hostIDs {
+		ids[i] = id.String()
+	}
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `
+DELETE FROM app.host_update_notices
+WHERE host_id = ANY($1::uuid[]) AND version <> $2
+`, ids, version); err != nil {
+		return nil, mapErr(err)
+	}
+	// Only hosts that exist: a host deleted meanwhile is skipped, not an error.
+	if _, err := tx.Exec(ctx, `
+INSERT INTO app.host_update_notices (host_id, version, noticed_at)
+SELECT h.id, $2, $3 FROM app.hosts h WHERE h.id = ANY($1::uuid[])
+ON CONFLICT (host_id, version) DO NOTHING
+`, ids, version, at); err != nil {
+		return nil, mapErr(err)
+	}
+	rows, err := tx.Query(ctx, `
+SELECT host_id::text, noticed_at FROM app.host_update_notices
+WHERE host_id = ANY($1::uuid[]) AND version = $2
+`, ids, version)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	for rows.Next() {
+		var id string
+		var t time.Time
+		if err := rows.Scan(&id, &t); err != nil {
+			rows.Close()
+			return nil, mapErr(err)
+		}
+		out[uuid.MustParse(id)] = t.UTC()
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err)
+	}
+	return out, mapErr(tx.Commit(ctx))
+}

@@ -75,7 +75,9 @@ func (s *Server) releaseNotices(now time.Time) []notification {
 }
 
 // hostUpdateNotices are the hosts with update_available (v1.34, v1.36) in
-// orgs where the caller is owner or admin.
+// orgs where the caller is owner or admin. at is when the API first saw the
+// host behind the latest version (migration 0035), so a host checking in
+// does not move its notice back to the top of the bell.
 func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]notification, error) {
 	if s.LatestAgentVersion == "" {
 		return nil, nil
@@ -85,6 +87,7 @@ func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]not
 		return nil, err
 	}
 	var out []notification
+	var ids []uuid.UUID
 	for _, o := range orgs {
 		if !store.OrgAdmin(o.Role) {
 			continue
@@ -99,20 +102,30 @@ func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]not
 				continue
 			}
 			latest := *v.LatestAgentVersion
-			// A host that never connected has no last_seen_at: use its enrolment.
-			at := h.EnrolledAt
-			if h.LastSeenAt != nil {
-				at = *h.LastSeenAt
-			}
+			ids = append(ids, h.ID)
 			out = append(out, notification{
 				Key:    "host_update:" + h.ID.String() + ":" + latest,
 				Kind:   "host_update",
 				Title:  "Update available on " + h.Name,
 				Detail: "bot-agent " + latest + " (this host: " + h.AgentVersion + ")",
 				Href:   "/hosts/" + h.ID.String(),
-				At:     at.UTC(),
 			})
 		}
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	noticed, err := s.Store.NoticeHostUpdates(ctx, ids, s.LatestAgentVersion, s.now())
+	if err != nil {
+		return nil, err
+	}
+	now := s.now().UTC()
+	for i := range out {
+		at, ok := noticed[ids[i]]
+		if !ok {
+			at = now
+		}
+		out[i].At = at.UTC()
 	}
 	return out, nil
 }
