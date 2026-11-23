@@ -208,3 +208,12 @@ func TestRedactKeepsAPIRefusalTexts(t *testing.T) {
 		}
 	}
 }
+
+// api-v1 v1.55: the API quotes a refused field, so redaction keeps the
+// field, its hint and the kept-plan sentence readable.
+func TestRedactKeepsRefusedField(t *testing.T) {
+	msg := `bad_spec): field "spec.secret_env" did not pass the host's checks (the agent names the field, never its value). Each key under "secret_env" must be an allowed env key, and each value <env set>.<KEY>. Nothing ran on the host, so this plan is kept: after fixing the cause, confirm it again with the same confirmation_id and idempotency_key until 12:05 UTC`
+	if got := redactText(msg); got != msg {
+		t.Fatalf("redacted: %q", got)
+	}
+}
