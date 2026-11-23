@@ -143,7 +143,7 @@ func requestFile(ctx context.Context, api *apiclient.Client, call requestCall) *
 	}
 	payload, fail := post(ctx, api, idPath("v1", "projects", in.ProjectID, "file-requests"), body)
 	if fail != nil {
-		return keepFixedMessage(fail, "conflict", "file "+in.Name+" already exists; replace it in the console")
+		return keepFixedLinked(fail, "conflict", "file "+in.Name+" already exists; replace it in the console", projectSettingsURL(api, in.ProjectID, "files"))
 	}
 	created, ok := fileRequestKind.parseCreated(payload)
 	if !ok {

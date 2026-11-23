@@ -119,6 +119,9 @@ func registerSetEntryImage(server *mcp.Server, api *apiclient.Client) {
 		}
 		spec, err := storedImageSpec(payload)
 		if err != nil {
+			if link := entryURL(api, in.ProjectID, in.Name); link != "" && errors.Is(err, errProgramEntry) {
+				return toolError("bad_request", err.Error()+"; only the person can edit it: send them this link: "+link)
+			}
 			return toolError("bad_request", err.Error())
 		}
 		image, err := json.Marshal(in.Image)
@@ -153,6 +156,9 @@ func requireImageRef(image string) error {
 	return nil
 }
 
+// errProgramEntry refuses set_entry_image on a program entry.
+var errProgramEntry = errors.New("set_entry_image is for image entries; program entries are edited in the console")
+
 // storedImageSpec returns the stored spec of an image entry with every field
 // kept as the API sent it, so a GET then PUT changes only what the caller sets
 // (api-v1 v1.24.1). A program entry or a body without a spec object is refused.
@@ -165,7 +171,7 @@ func storedImageSpec(raw json.RawMessage) (map[string]json.RawMessage, error) {
 		return nil, errCatalogEntryShape
 	}
 	if row.Kind == "program" {
-		return nil, errors.New("set_entry_image is for image entries; program entries are edited in the console")
+		return nil, errProgramEntry
 	}
 	if row.Kind != "image" {
 		return nil, errCatalogEntryShape

@@ -112,7 +112,7 @@ func TestEnvSetTools(t *testing.T) {
 		if !strings.Contains(string(raw), `"needs_value":true`) || !strings.Contains(string(raw), `"reveal_pending":true`) {
 			t.Fatalf("flags missing %s", raw)
 		}
-		if !strings.Contains(textOf(t, listed), "1 key still needs a value in the console.") {
+		if !strings.Contains(textOf(t, listed), "1 key still needs a value: call request_env_value for it") {
 			t.Fatalf("summary %q", textOf(t, listed))
 		}
 	}
@@ -127,6 +127,7 @@ func assertNoEnvLeak(t *testing.T, res any) {
 }
 
 const needsValueRefusal = "env SMTP_PASSWORD in set mail has no value yet; set it in the console"
+const placeholderNext = ". Next: call request_env_value with this project, set mail and key SMTP_PASSWORD; the person opens its link and enters the value"
 
 // api-v1 v1.27 item 6: the refusal reaches deploy and run tool results
 // unchanged (it names a key and a set, never a value).
@@ -139,7 +140,7 @@ func TestNeedsValueRefusalPassesThrough(t *testing.T) {
 		res := mustCall(t, cs, tool, map[string]any{
 			"project_id": projectID, "entry": imageEntry, "host_id": hostID, "idempotency_key": tool + "-1",
 		})
-		want := "bad_request: " + needsValueRefusal
+		want := "bad_request: " + needsValueRefusal + placeholderNext
 		if tool == "deploy_entry" {
 			// api-v1 v1.29: a deploy refusal points to check_readiness.
 			want += "\nRun check_readiness for this entry and host to see what is missing and how to fix it."

@@ -76,7 +76,7 @@ func TestReadinessTools(t *testing.T) {
 	res = mustCall(t, cs, "image_access", map[string]any{"project_id": projectID, "image": "ghcr.io/joe/app:v1"})
 	assertLast(t, fake, http.MethodGet, "/v1/projects/"+projectID+"/image-access", "image=ghcr.io%2Fjoe%2Fapp%3Av1", "")
 	raw, _ = json.Marshal(res.StructuredContent)
-	if res.IsError || string(raw) != `{"access":"private_no_login","login":"none","registry":"ghcr.io"}` || !strings.Contains(textOf(t, res), "Connect GitHub in the console") {
+	if res.IsError || string(raw) != `{"access":"private_no_login","login":"none","registry":"ghcr.io"}` || !strings.Contains(textOf(t, res), "Call connect_registry") {
 		t.Fatalf("image_access %s %s", raw, textOf(t, res))
 	}
 

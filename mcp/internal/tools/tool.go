@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -142,11 +143,28 @@ func fromAPI(err error) *mcp.CallToolResult {
 	var apiErr *apiclient.Error
 	if errors.As(err, &apiErr) {
 		if apiErr.Code == "bad_request" && envRefusal(apiErr.Msg) {
-			return toolError(apiErr.Code, apiErr.Msg)
+			return toolError(apiErr.Code, apiErr.Msg+placeholderStep(apiErr.Msg))
 		}
 		return toolError(apiErr.Code, redactText(apiErr.Msg))
 	}
 	return toolError("error", "api request failed")
+}
+
+// noValueMsg is the deploy refusal for a placeholder without a value.
+var noValueMsg = regexp.MustCompile(`^env ([A-Z_][A-Z0-9_]{0,63}) in set (@?[a-z0-9][a-z0-9-]{0,47}) has no value yet; set it in the console$`)
+
+// placeholderStep is the agent's next step for that refusal: the person
+// enters the value through request_env_value's link, not by finding the
+// console page.
+func placeholderStep(msg string) string {
+	m := noValueMsg.FindStringSubmatch(msg)
+	if m == nil {
+		return ""
+	}
+	if strings.HasPrefix(m[2], "@") {
+		return fmt.Sprintf(". Next: call request_env_value with this project, entry %s and key %s; the person opens its link and enters the value", m[2][1:], m[1])
+	}
+	return fmt.Sprintf(". Next: call request_env_value with this project, set %s and key %s; the person opens its link and enters the value", m[2], m[1])
 }
 
 // call sends one API request with the delegated token from ctx.

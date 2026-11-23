@@ -272,7 +272,7 @@ func TestFileRequestSummaryPerState(t *testing.T) {
 
 // TestReadinessNextAddFile: check_readiness names request_file for add_file.
 func TestReadinessNextAddFile(t *testing.T) {
-	got := nextStep(map[string]any{"action": "add_file", "name": "tls.pem"}, vrProject, "web")
+	got := nextStep(map[string]any{"action": "add_file", "name": "tls.pem"}, vrProject, "web", "")
 	if got != "call request_file with project_id "+vrProject+" and name tls.pem; the person adds the file in the browser." {
 		t.Fatalf("next %q", got)
 	}
