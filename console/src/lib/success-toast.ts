@@ -39,3 +39,8 @@ export function toastHostRemoved(name: string): void {
 export function toastVersionDeleted(shortDigest: string, tags: number): void {
 	toast.success(`Deleted version ${shortDigest} (${tags} ${tags === 1 ? 'tag' : 'tags'}).`);
 }
+
+/** "Saved alerts." after a host's Alerts card is saved (api-v1 v1.49). */
+export function toastAlertsSaved(): void {
+	toast.success('Saved alerts.');
+}

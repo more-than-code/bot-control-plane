@@ -1,6 +1,6 @@
 # Spec: assign one name of a domain, and the Assign link in MCP
 
-Rev 1 (2026-11-23). Joe asked that an org be able to give a project a single hostname (or a narrower wildcard) instead of only the apex or `*.<domain>`, and that domain assignment reach MCP. api-v1 **v1.49**, migration **0033**. No agent-protocol change.
+Rev 1 (2026-11-23). Joe asked that an org be able to give a project a single hostname (or a narrower wildcard) instead of only the apex or `*.<domain>`, and that domain assignment reach MCP. api-v1 **v1.52** (renumbered from v1.49 when v1.49–v1.51 landed first), migration **0035**. No agent-protocol change.
 
 ## 1. Problem
 
@@ -8,7 +8,7 @@ An assignment's `pattern` was `@` (the domain itself) or `*` (any one label belo
 
 The second half of the ask, "expose domain assignment over MCP with plan + confirm", is answered differently: Joe's design principle (DD `DEF-20261123-design-principle-privileged-steps-are-do-exut`) is that the MCP must not perform privileged steps. Assigning a domain stays console only, and MCP hands the person a deep link to the exact action instead.
 
-## 2. Patterns (api-v1 v1.49)
+## 2. Patterns (api-v1 v1.52)
 
 1. **`pattern` is relative to the domain name**, like a DNS zone file. Four shapes:
    - `@` — the domain itself (unchanged).
@@ -18,13 +18,15 @@ The second half of the ask, "expose domain assignment over MCP with plan + confi
    Labels are lowercase LDH (IDNA A-labels included), each ≤ 63 characters, and the name written out is ≤ 253 characters. `PUT …/domains/{id}/assignments` refuses anything else as `bad_request` with the shape message, which now names all four forms. The same project and pattern twice in one body is still refused. At most 64 assignments per domain, unchanged.
 2. **A route is allowed** when a `verified` domain assigned to the project covers its hostname under one of its patterns. `*` still matches exactly one label; `*.dev` matches exactly one label below `dev.<domain>`; a relative name matches only itself. No new DNS record is needed, because the parent domain is already verified.
 3. **A domain delete** plans and removes the routes under the domain at any depth, and still leaves a route that another verified or lapsed domain assigned to the same project covers, under any of the four patterns.
-4. **Migration 0033** only relaxes `domain_assignments_pattern_chk`; no row changes. Its down script deletes the assignments that are not `@` or `*` (routes under them keep serving until their domain is deleted, but no new route is accepted) and restores the old check. Roll the API back to v1.48 first.
+4. **Migration 0035** only relaxes `domain_assignments_pattern_chk`; no row changes. Its down script deletes the assignments that are not `@` or `*` (routes under them keep serving until their domain is deleted, but no new route is accepted) and restores the old check. Roll the API back to v1.51 first.
 
-## 3. The Assign link (api-v1 v1.49)
+## 3. The Assign link (api-v1 v1.52)
 
-1. **`PUT …/catalog/{name}/routes`** refusing `"<hostname> is not under a verified domain assigned to this project"` now carries a payload when that hostname is under a `verified` domain of the project's org (the most specific one): `{"hostname","domain","domain_id","pattern","name","assign_url"}`. `pattern` is the narrowest pattern that assigns exactly that hostname, `name` is it written out, and `assign_url` is `<BOT_API_CONSOLE_ORIGIN>/orgs/<org>?tab=settings&domains.assign=<domain_id>&domains.project=<project>&domains.pattern=<pattern>` (left out when the console origin is unset). The message is unchanged, so an older client reads the same refusal. A hostname under no verified domain of the org has no payload.
-2. **Readiness** `routes` warn for the same case gains fix `{"action":"assign_domain","name","url"}` with the same link. Any other `routes` warning keeps fix `none`.
-3. **MCP.** No assign tool: the API refuses delegated sessions on the domain routes, and this is a privileged step. `set_routes` appends one sentence to that refusal naming the domain and the link, and tells the agent to show it to the person. `check_readiness` turns the fix into "ask an org owner or admin to open <url> and save the row that assigns <name> to this project (assigning a domain is console only)". The MCP checks the link itself (scheme `http`/`https`, no userinfo, the project and pattern in the query matching the payload) and drops a link that does not fit, so a refusal can never point the agent elsewhere.
+Links follow v1.51's convention: the API sends ids, and the MCP server builds `console_url` from `BOT_MCP_CONSOLE_ORIGIN`.
+
+1. **`PUT …/catalog/{name}/routes`** refusing `"<hostname> is not under a verified domain assigned to this project"` now carries a payload when that hostname is under a `verified` domain of the project's org (the most specific one): `{"hostname","domain","domain_id","org_id","pattern","name"}`. `pattern` is the narrowest pattern that assigns exactly that hostname, and `name` is it written out. The message is unchanged, so an older client reads the same refusal. A hostname under no verified domain of the org has no payload.
+2. **Readiness** `routes` warn for the same case has fix `{"action":"assign_domain","org_id","domain_id","pattern","name"}` instead of v1.51's `verify_domain`, which stays for a hostname under no verified domain and for a lapsed one.
+3. **MCP.** No assign tool: the API refuses delegated sessions on the domain routes, and this is a privileged step. The link is `<console>/orgs/<org>?tab=settings&domains.assign=<domain>&domains.project=<project>&domains.pattern=<pattern>`, built only from checked UUIDs and a checked pattern. `set_routes` appends one sentence to that refusal naming the domain and the name, with `Open: <link>`. `check_readiness` puts the same link in the fix's `console_url`. Without a console origin the sentences stay and the link is left out.
 
 ## 4. Console
 

@@ -15,9 +15,9 @@
 
 	/**
 	 * Which projects of the org may route under a domain (api-v1 v1.35 item 1): one row per project and pattern, `@` for
-	 * the domain itself, `*` for one label below it, and since v1.49 a name below it (`app`, `api.dev`) or a narrower
+	 * the domain itself, `*` for one label below it, and since v1.52 a name below it (`app`, `api.dev`) or a narrower
 	 * wildcard (`*.dev`). Save replaces the whole list. A refusal shows here; it is only the one from a save made since
-	 * the dialog opened. An `assign_url` (`domains.assign`, `domains.project`, `domains.pattern`) opens it once with
+	 * the dialog opened. An Assign link (`domains.assign`, `domains.project`, `domains.pattern`) opens it once with
 	 * that row added, for an org admin to check and save.
 	 */
 	let { domain, projects, action }: { domain: OrgDomain; projects: Project[]; action: string } = $props();

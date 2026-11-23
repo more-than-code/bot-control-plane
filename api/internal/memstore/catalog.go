@@ -50,6 +50,9 @@ func clonePrograms(p *store.HostPrograms) *store.HostPrograms {
 	if p.HostFiles != nil {
 		cp.HostFiles = append([]store.HostFile{}, p.HostFiles...)
 	}
+	if p.ImagePatterns != nil {
+		cp.ImagePatterns = append([]string{}, p.ImagePatterns...)
+	}
 	if p.Edge != nil {
 		edge := *p.Edge
 		cp.Edge = &edge

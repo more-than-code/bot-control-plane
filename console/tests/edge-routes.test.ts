@@ -161,7 +161,7 @@ describe('edge route rules', () => {
 	});
 });
 
-describe('v1.49 assignment patterns', () => {
+describe('v1.52 assignment patterns', () => {
 	test('a pattern is @, *, a name below the domain, or *. and a name', () => {
 		for (const pattern of ['@', '*', 'app', 'api.dev', '*.dev', 'a-b.c']) assert.equal(isDomainPatternFor('example.com', pattern), true, pattern);
 		for (const pattern of ['', '*', '**', 'a..b', '-app', 'app.', '*.*', 'A', 'app/x', null, 7]) {
@@ -327,7 +327,7 @@ describe('v1.35 actions', () => {
 		assert.equal(none.length, 0);
 	});
 
-	test('a name assignment is sent as a pattern, typed as the full name or relative (v1.49)', async () => {
+	test('a name assignment is sent as a pattern, typed as the full name or relative (v1.52)', async () => {
 		const calls = installFetch(() => envelope(null));
 		await assert.rejects(
 			async () =>
@@ -479,7 +479,7 @@ describe('v1.35 renders', () => {
 		assert.match(html, /→ Lab/);
 	});
 
-	test('an assignment of one name is written out in the row (v1.49)', () => {
+	test('an assignment of one name is written out in the row (v1.52)', () => {
 		setPageUrl(`http://console.example/orgs/${ORG.id}?tab=settings`);
 		const html = render(OrgDomainsSection, {
 			props: { domains: [domain({ assignments: [{ project_id: PROJECT.id, project_name: 'Lab', pattern: 'marketingos' }] })], projects: [PROJECT] }

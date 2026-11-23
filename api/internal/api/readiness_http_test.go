@@ -307,7 +307,7 @@ func TestReadinessChecksAndFixes(t *testing.T) {
 	}
 	ready, checks, _ = readinessOf(t, f.w, f.owner, project, "web", host)
 	c := findCheck(t, checks, "host_policy")
-	if ready || c.Status != "missing" || c.Message != "this host does not allow image ghcr.io/joe/app" || c.Fix["action"] != "host_policy_snippet" || c.Fix["host_id"] != host {
+	if ready || c.Status != "missing" || c.Message != "this host does not allow image ghcr.io/joe/app" || c.Fix["action"] != "host_policy_snippet" || c.Fix["host_id"] != host || c.Fix["image_pattern"] != "ghcr.io/joe/app" {
 		t.Fatalf("policy denied %+v", c)
 	}
 	status, env, _ := mustCall(t, f.w, f.del, http.MethodGet, "/v1/projects/"+project+"/catalog/web/host-policy-snippet?host_id="+host, "")
@@ -328,6 +328,26 @@ func TestReadinessChecksAndFixes(t *testing.T) {
 	if _, checks, _ = readinessOf(t, f.w, f.owner, project, "web", host); findCheck(t, checks, "host_policy").Status != "unknown" {
 		t.Fatal("a later deploy should clear host_policy")
 	}
+
+	// api-v1 v1.51: a console-managed host sends its patterns, so the check
+	// is exact and names the pattern in the fix.
+	h, err := f.w.mem.GetHost(ctx, f.sc.host.ID)
+	if err != nil || h.Programs == nil {
+		t.Fatal(err)
+	}
+	managed := *h.Programs
+	managed.ConsolePolicy, managed.ImagePatterns = true, []string{"ghcr.io/other/*"}
+	setPrograms(t, f.w, f.sc.host.ID, &managed)
+	_, checks, _ = readinessOf(t, f.w, f.owner, project, "web", host)
+	if c := findCheck(t, checks, "host_policy"); c.Status != "missing" || c.Fix["action"] != "host_policy_snippet" || c.Fix["image_pattern"] != "ghcr.io/joe/app" || !strings.Contains(c.Message, "Policy tab") {
+		t.Fatalf("managed missing %+v", c)
+	}
+	managed.ImagePatterns = []string{"ghcr.io/joe/*"}
+	setPrograms(t, f.w, f.sc.host.ID, &managed)
+	if _, checks, _ = readinessOf(t, f.w, f.owner, project, "web", host); findCheck(t, checks, "host_policy").Status != "ok" {
+		t.Fatal("a matching pattern should pass")
+	}
+	setPrograms(t, f.w, f.sc.host.ID, h.Programs)
 
 	// No deploy access: host_access missing with grant_deploy_access.
 	if _, _, err := f.w.grant(ctx, f.sc.host.ID, f.sc.project.ID, "metrics", owner.ID, f.w.now); err != nil {

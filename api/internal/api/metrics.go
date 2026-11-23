@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/ingest"
@@ -40,7 +42,15 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		writeCode(w, "bad_request", "invalid range")
 		return
 	}
-	series, err := s.Store.QueryChart(r.Context(), host.ID, m, from, to, step)
+	// api-v1 v1.49 item 4: the disk mount, default "/".
+	path := q.Get("path")
+	if m != "disk" {
+		path = ""
+	} else if len(path) > maxDiskPath || strings.ContainsFunc(path, unicode.IsControl) {
+		writeCode(w, "bad_request", "invalid path")
+		return
+	}
+	series, err := s.Store.QueryChart(r.Context(), host.ID, m, path, from, to, step)
 	if errors.Is(err, store.ErrUnknownMeasurement) {
 		writeCode(w, "bad_request", "invalid m")
 		return

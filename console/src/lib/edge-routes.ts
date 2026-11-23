@@ -260,11 +260,11 @@ export function assignmentText(domain: string, pattern: DomainPattern): string {
 	return pattern === '@' ? domain : `${pattern}.${domain}`;
 }
 
-/** The console link keys that open a domain's Assign dialog with one row filled in (api-v1 v1.49 `assign_url`). */
+/** The console link keys that open a domain's Assign dialog with one row filled in (api-v1 v1.52 Assign link). */
 export const ASSIGN_LINK_KEYS = ['domains.assign', 'domains.project', 'domains.pattern'] as const;
 
 /**
- * The row an `assign_url` asks for on this domain: its id in `domains.assign`, a project of the org in
+ * The row an Assign link asks for on this domain: its id in `domains.assign`, a project of the org in
  * `domains.project` and a pattern the domain can take in `domains.pattern`. Null when the link is for another domain
  * or any part does not fit, so a stale or edited link opens nothing.
  */

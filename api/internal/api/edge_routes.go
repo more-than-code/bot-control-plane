@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -777,32 +776,36 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 	if err != nil || len(routes) == 0 {
 		return err
 	}
-	warn := func(msg string) { list.add("routes", readyWarn, msg, readyFix{}) }
+	warn := func(msg string, fix readyFix) { list.add("routes", readyWarn, msg, fix) }
 	domains, err := s.Store.ProjectDomains(ctx, rd.projectID)
 	if err != nil {
 		return err
+	}
+	domainFix := readyFix{}
+	if project, err := s.Store.GetProject(ctx, rd.projectID); err == nil {
+		domainFix = readyFix{Action: fixVerifyDomain, OrgID: idPtr(project.OrgID)}
 	}
 	for _, r := range routes {
 		d, ok := routeDomain(domains, r.Hostname, true)
 		switch {
 		case !ok:
 			msg := fmt.Sprintf("%s is not under a verified domain assigned to this project", r.Hostname)
-			if link, ok := s.assignLink(ctx, rd.projectID, r.Hostname); ok && link.URL != "" {
-				list.add("routes", readyWarn, msg, readyFix{Action: fixAssignDomain, Name: link.Name, URL: link.URL})
+			if link, ok := s.assignLink(ctx, rd.projectID, r.Hostname); ok {
+				warn(msg, readyFix{Action: fixAssignDomain, OrgID: idPtr(link.OrgID), DomainID: idPtr(link.DomainID), Pattern: link.Pattern, Name: link.Name})
 				return nil
 			}
-			warn(msg)
+			warn(msg, domainFix)
 			return nil
 		case d.Status == store.DomainLapsed:
-			warn(fmt.Sprintf("domain %s has lapsed; its routes keep serving but no new route is accepted until it verifies again", d.Name))
+			warn(fmt.Sprintf("domain %s has lapsed; its routes keep serving but no new route is accepted until it verifies again", d.Name), domainFix)
 			return nil
 		}
 		if rd.entry.Kind == "program" && rd.entry.Spec.Port == nil {
-			warn(fmt.Sprintf("program %s declares no port; add one to route it", rd.entry.Name))
+			warn(fmt.Sprintf("program %s declares no port; add one to route it", rd.entry.Name), readyFix{})
 			return nil
 		}
 		if _, ok := upstreamPort(rd.entry, r.Port); !ok {
-			warn(portNotPublished(r.Port))
+			warn(portNotPublished(r.Port), readyFix{})
 			return nil
 		}
 	}
@@ -825,7 +828,13 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 			return err
 		}
 		if !h.Programs.EdgeAvailable() {
-			warn(fmt.Sprintf("the edge is not available on %s: %s", h.Name, msgEdgeUnavailable))
+			// api-v1 v1.51: on a console-managed host an org admin allows
+			// the edge on the host's Policy tab.
+			if h.Programs != nil && h.Programs.ConsolePolicy {
+				warn(fmt.Sprintf("the edge is not allowed on %s; an org admin turns it on on the host's Policy tab", h.Name), readyFix{Action: fixAllowEdge, HostID: idPtr(h.ID)})
+				return nil
+			}
+			warn(fmt.Sprintf("the edge is not available on %s: %s", h.Name, msgEdgeUnavailable), readyFix{Action: fixAllowEdge, HostID: idPtr(h.ID)})
 			return nil
 		}
 		edge, err := s.Store.GetHostEdge(ctx, id)
@@ -833,7 +842,7 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 			return err
 		}
 		if !edge.Enabled {
-			warn(fmt.Sprintf("the edge is off on %s; an org admin turns it on in the console", h.Name))
+			warn(fmt.Sprintf("the edge is off on %s; an org admin turns it on in the console", h.Name), readyFix{Action: fixTurnOnEdge, HostID: idPtr(h.ID)})
 			return nil
 		}
 	}
@@ -842,17 +851,17 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 }
 
 // domainAssignLink is the payload of a refused hostname that sits under a
-// verified domain of the project's org (api-v1 v1.49): the name an org
-// owner or admin would assign, written out and as a pattern, and, when the
-// console origin is set, the console link that opens the domain's Assign
-// dialog with this project and pattern already filled in.
+// verified domain of the project's org (api-v1 v1.52): the domain, and the
+// name an org owner or admin would assign, written out and as a pattern.
+// The MCP server builds the console link that opens the domain's Assign
+// dialog with this row filled in; the API never builds it.
 type domainAssignLink struct {
 	Hostname string    `json:"hostname"`
 	Domain   string    `json:"domain"`
 	DomainID uuid.UUID `json:"domain_id"`
+	OrgID    uuid.UUID `json:"org_id"`
 	Pattern  string    `json:"pattern"`
 	Name     string    `json:"name"`
-	URL      string    `json:"assign_url,omitempty"`
 }
 
 // assignLink finds the most specific verified domain of the project's org
@@ -877,17 +886,8 @@ func (s *Server) assignLink(ctx context.Context, projectID uuid.UUID, hostname s
 	if best.Name == "" || !ok || !store.ValidPattern(best.Name, pattern) {
 		return domainAssignLink{}, false
 	}
-	link := domainAssignLink{
-		Hostname: hostname, Domain: best.Name, DomainID: best.ID, Pattern: pattern,
+	return domainAssignLink{
+		Hostname: hostname, Domain: best.Name, DomainID: best.ID, OrgID: project.OrgID, Pattern: pattern,
 		Name: store.PatternName(best.Name, pattern),
-	}
-	if prefix, ok := consolePagePrefix(s.ConsoleOrigin, "/orgs/"); ok {
-		q := url.Values{}
-		q.Set("tab", "settings")
-		q.Set("domains.assign", best.ID.String())
-		q.Set("domains.project", projectID.String())
-		q.Set("domains.pattern", pattern)
-		link.URL = prefix + project.OrgID.String() + "?" + q.Encode()
-	}
-	return link, true
+	}, true
 }

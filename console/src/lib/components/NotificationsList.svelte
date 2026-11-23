@@ -1,5 +1,6 @@
 <script lang="ts">
 	import CircleArrowUp from '@lucide/svelte/icons/circle-arrow-up';
+	import Cpu from '@lucide/svelte/icons/cpu';
 	import FileWarning from '@lucide/svelte/icons/file-warning';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -32,7 +33,14 @@
 
 	const zones = timeZoneSource();
 
-	const PROBLEM_ICONS = { host_offline: ServerOff, registry_login: KeyRound, deploy: RotateCcw, host_file: FileWarning, agent_upgrade: CircleArrowUp };
+	const PROBLEM_ICONS = {
+		host_offline: ServerOff,
+		registry_login: KeyRound,
+		deploy: RotateCcw,
+		host_file: FileWarning,
+		agent_upgrade: CircleArrowUp,
+		host_resource: Cpu
+	};
 
 	function iconOf(item: Notification) {
 		const problem = problemKindOf(item);

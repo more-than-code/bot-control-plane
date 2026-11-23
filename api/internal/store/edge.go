@@ -72,7 +72,7 @@ type OrgDomain struct {
 }
 
 // DomainAssignment lets a project route under a domain. Pattern is
-// relative to the domain name, like a DNS zone file (api-v1 v1.49): "@" (the
+// relative to the domain name, like a DNS zone file (api-v1 v1.52): "@" (the
 // name itself), "*" (one label below it), a relative name such as
 // "marketingos" or "api.dev" (exactly that name below the domain), or "*."
 // and a relative name such as "*.dev" (one label below that name).

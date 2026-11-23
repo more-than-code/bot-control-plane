@@ -1,13 +1,13 @@
--- Hand-run rollback for 0033_domain_assignment_names.sql. --migrate does not apply this file.
--- It runs in one transaction, so a failure leaves 0033 fully applied.
+-- Hand-run rollback for 0035_domain_assignment_names.sql. --migrate does not apply this file.
+-- It runs in one transaction, so a failure leaves 0035 fully applied.
 -- It never refuses. Assignments of a single name or a narrower wildcard
 -- are dropped. Routes under them stay until their domain is deleted, but
--- no new route is accepted under them. Roll the API back to v1.48 first.
+-- no new route is accepted under them. Roll the API back to v1.51 first.
 --
 -- Run as deploybot_owner. After this script, delete the applied row before
--- --migrate will run 0033 again:
+-- --migrate will run 0035 again:
 --
---   DELETE FROM app.schema_migrations WHERE name = '0033_domain_assignment_names.sql';
+--   DELETE FROM app.schema_migrations WHERE name = '0035_domain_assignment_names.sql';
 
 BEGIN;
 

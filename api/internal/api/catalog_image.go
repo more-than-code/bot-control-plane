@@ -32,9 +32,16 @@ const (
 	reasonNoLogging     = "this host's agent does not support log settings"
 	reasonNoPolicy      = "this host's agent does not support health policies"
 	reasonNoNetworks    = "this host's agent does not support shared networks; upgrade it to 0.2.9"
-	invalidAgentResult  = "invalid agent result"
-	settleTimeout       = 5 * time.Second
-	staleGraceSec       = 120
+	// reasonNoHostNetwork is the api-v1 v1.50 item 1 refusal (409
+	// unsupported_agent) for network "host" on a host without
+	// programs.host_network.
+	reasonNoHostNetwork = "this host does not allow host networking (runner.toml host_network_projects)"
+	// msgMayStillFinish is the 503 for a deploy or rollback whose frame
+	// reached the host before the connection dropped (api-v1 v1.50 item 8).
+	msgMayStillFinish  = "host unavailable; the host may still finish this deploy. It shows as running until its ends_by time; check the deploy history"
+	invalidAgentResult = "invalid agent result"
+	settleTimeout      = 5 * time.Second
+	staleGraceSec      = 120
 	// resultMarginSec is the API's wait past the deploy or rollback task
 	// budget (api-v1 v1.42 item 3).
 	resultMarginSec   = 30
@@ -240,6 +247,10 @@ func (s *Server) imageMutate(w http.ResponseWriter, r *http.Request, action stri
 	if (action == "deploy" || action == "rollback") && !s.networksAllowed(w, r, p, projectID, host, entry.Name, action, img) {
 		return
 	}
+	if !hostNetworkReady(host, img, action) {
+		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "unsupported_agent", reasonNoHostNetwork)
+		return
+	}
 	if action == "rollback" && !s.digestAllowed(w, r, entry.ID, host.ID, body.Digest) {
 		return
 	}
@@ -330,6 +341,10 @@ func (s *Server) finishImageShort(w http.ResponseWriter, r *http.Request, p prin
 		s.fail(w, err)
 		return
 	}
+	if !hostNetworkReady(host, img, action) {
+		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "unsupported_agent", reasonNoHostNetwork)
+		return
+	}
 	// Logs are not audited and are not idempotent. Refuse before the hub
 	// call so a missing key cannot return unredacted lines.
 	if action == "logs" && s.Secrets == nil {
@@ -398,6 +413,10 @@ func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principa
 		return
 	}
 	if (c.Action == "deploy" || c.Action == "rollback") && !s.networksAllowed(w, r, p, c.ProjectID, host, entry.Name, c.Action, img) {
+		return
+	}
+	if !hostNetworkReady(host, img, c.Action) {
+		s.imageDeny(w, r, p, c.ProjectID, host.ID, host.Name, entry.Name, c.Action, "unsupported_agent", reasonNoHostNetwork)
 		return
 	}
 	if c.Action == "rollback" && !s.digestAllowed(w, r, entry.ID, host.ID, digest) {
@@ -496,8 +515,26 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 		s.imageFail(ctx, w, p.User.ID, key, &agentws.CallError{Code: "error", Msg: "internal error"}, forms)
 		return
 	}
-	res, callErr := s.Hub.Image(ctx, host, imageKind(action), spec, timeout)
+	// api-v1 v1.50 item 3: the task id is stored on the deploy or rollback
+	// row before the frame goes out, so a result that outlives this request
+	// (or this process) can still settle the row.
+	taskID := uuid.New()
+	if action == "deploy" || action == "rollback" {
+		if err := s.Store.SetImageOpTask(ctx, opID, taskID, action); err != nil {
+			s.imageFail(ctx, w, p.User.ID, key, err, forms)
+			return
+		}
+	}
+	res, callErr := s.Hub.ImageWithID(ctx, host, imageKind(action), spec, timeout, taskID)
 	got := takeImage(action, res, callErr, forms)
+	// api-v1 v1.50 item 9: a deploy or rollback result the agent sent (and
+	// keeps until acked) is acked only after its row is written.
+	ackStored := func() {
+		var ce *agentws.CallError
+		if (action == "deploy" || action == "rollback") && (callErr == nil || (errors.As(callErr, &ce) && ce.FromResult)) {
+			s.Hub.AckResult(host.ID, taskID)
+		}
+	}
 	if action == "remove" && got.request && got.code == "timeout" {
 		hold = false
 		_ = s.settle(func(c context.Context) error {
@@ -517,10 +554,8 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 			}
 			s.auditImageDeny(ctx, p, projectID, host, entry.Name, action, got.code, reason, forms)
 			// A deploy or rollback the host refused stays in history as
-			// refused (api-v1 v1.47 item 2). A failed write leaves the row
-			// to the defer, which deletes it as before. A host that dropped
-			// after the frame may have been sent did not refuse: that row is
-			// deleted as before, since the deploy may have run.
+			// refused (api-v1 v1.47 item 2). A failed write keeps the row in
+			// flight for the sweep and sends no ack (api-v1 v1.50 item 9).
 			if (action == "deploy" || action == "rollback") && hostRejection(got.code) && !got.maybeSent {
 				err := s.settle(func(c context.Context) error {
 					_, ferr := s.Store.FinishImageDeployWith(c, opID, store.DeployFinish{
@@ -528,9 +563,20 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 					})
 					return ferr
 				})
+				hold = false
 				if err == nil {
-					hold = false
+					ackStored()
 				}
+			}
+			// api-v1 v1.50: the frame reached the host, and an agent that
+			// finishes deploys on the host (agent-protocol v1.21 item 5)
+			// resends the result after it reconnects. The row stays in
+			// flight for that late result; SweepImageOps settles it timeout
+			// after in_flight_until when none comes. Only a frame never
+			// written releases the row (the defer), as in v1.47.
+			if (action == "deploy" || action == "rollback") && got.maybeSent {
+				hold = false
+				got.msg = msgMayStillFinish
 			}
 		}
 		s.imageFail(ctx, w, p.User.ID, key, &agentws.CallError{Code: got.code, Msg: got.msg}, forms)
@@ -569,11 +615,31 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 		})
 		return ferr
 	})
+	if errors.Is(err, store.ErrNotFound) {
+		// A late result (another process, or this one through the late
+		// hook) settled the row first: answer from the stored row; that
+		// path already audited it (api-v1 v1.50 item 9).
+		stored, rerr := s.Store.GetImageDeploy(ctx, entry.ID, host.ID, opID)
+		if rerr == nil && !stored.InFlight {
+			hold = false
+			ackStored()
+			s.imageDone(w, p.User.ID, key, map[string]any{
+				"deploy": redactDeployRead(stored, forms),
+				"status": got.status,
+				"lines":  got.lines,
+			})
+			return
+		}
+	}
 	if err != nil {
+		// The row stays in flight for the sweep; no ack, so the agent
+		// resends the result (api-v1 v1.50 item 9).
+		hold = false
 		s.imageFail(ctx, w, p.User.ID, key, err, forms)
 		return
 	}
 	hold = false
+	ackStored()
 	s.auditImageOK(ctx, p, projectID, host, entry.Name, action, finished.Outcome, finished.Digest, forms)
 	s.DeployHook(ctx, projectID, entry.ID, entry.Name, host.ID)
 	s.imageDone(w, p.User.ID, key, map[string]any{
@@ -846,6 +912,13 @@ func (s *Server) imageTask(ctx context.Context, projectID uuid.UUID, host store.
 // is skipped; every secret that opened is still returned. The same set is
 // used whether or not the frame sends secret_keys.
 func (s *Server) redactValues(ctx context.Context, projectID uuid.UUID, img catalog.Image) []secretForm {
+	forms, _ := s.redactValuesCheck(ctx, projectID, img)
+	return forms
+}
+
+// redactValuesCheck is redactValues that also reports whether a secret
+// could not be opened (a decrypt failure), so a caller can fail closed.
+func (s *Server) redactValuesCheck(ctx context.Context, projectID uuid.UUID, img catalog.Image) ([]secretForm, bool) {
 	var envForms []secretForm
 	var other []string
 	failed := false
@@ -876,7 +949,7 @@ func (s *Server) redactValues(ctx context.Context, projectID uuid.UUID, img cata
 		s.logger().Error("decrypt failed")
 	}
 	other = append(other, more...)
-	return mergeSecretForms(envForms, redactedValueForms(other))
+	return mergeSecretForms(envForms, redactedValueForms(other)), failed
 }
 
 // redactEnvValues returns secret env values whose winning material opened.
@@ -1282,6 +1355,19 @@ func closedNetwork(defined []store.SharedNetwork, want []string, slug string) st
 		}
 	}
 	return ""
+}
+
+// hostNetworkReady is the api-v1 v1.50 item 1 gate: a deploy, rollback or
+// run of an entry with network "host" needs the host's hello
+// programs.host_network. Other actions and entries pass.
+func hostNetworkReady(host store.Host, img catalog.Image, action string) bool {
+	if img.Network != catalog.NetworkHost {
+		return true
+	}
+	if action != "deploy" && action != "rollback" && action != "run" {
+		return true
+	}
+	return host.Programs != nil && host.Programs.HostNetwork
 }
 
 func policySupported(host store.Host) bool {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 
@@ -114,36 +113,31 @@ func confirmationRoutes(status int, payload json.RawMessage) *mcp.CallToolResult
 var assignLinkPattern = regexp.MustCompile(`^@$|^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
 
 // assignLinkSentence reads the payload of an unassigned-hostname refusal
-// (api-v1 v1.49) and returns the sentence that names the console link an
-// org owner or admin opens to assign that one name. Assigning a domain is
-// console only, so the agent never does it: it shows the link. The payload
-// is checked here, and a link whose shape or project does not fit is
-// dropped, so a refusal can never carry a URL of its own choosing.
-func assignLinkSentence(payload json.RawMessage, projectID string) string {
+// (api-v1 v1.52) and returns the sentence that tells the agent who assigns
+// that one name, with console_url's link when BOT_MCP_CONSOLE_ORIGIN is
+// set. Assigning a domain is console only, so the agent never does it: it
+// posts the link. The link is built here from checked ids, never taken from
+// the payload.
+func assignLinkSentence(api *apiclient.Client, payload json.RawMessage, projectID string) string {
 	var in struct {
 		Hostname string `json:"hostname"`
 		Domain   string `json:"domain"`
+		DomainID string `json:"domain_id"`
+		OrgID    string `json:"org_id"`
 		Pattern  string `json:"pattern"`
 		Name     string `json:"name"`
-		URL      string `json:"assign_url"`
 	}
 	if len(payload) == 0 || json.Unmarshal(payload, &in) != nil {
 		return ""
 	}
 	if !routeHostPattern.MatchString(in.Hostname) || !routeHostPattern.MatchString(in.Domain) ||
 		!assignLinkPattern.MatchString(in.Pattern) || len(in.Pattern) > 253 ||
-		in.Name != patternFullName(in.Domain, in.Pattern) {
+		in.Name != patternFullName(in.Domain, in.Pattern) ||
+		!uuidPattern.MatchString(in.DomainID) || !uuidPattern.MatchString(in.OrgID) {
 		return ""
 	}
-	u, err := url.Parse(in.URL)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.Fragment != "" {
-		return ""
-	}
-	q := u.Query()
-	if q.Get("domains.project") != projectID || q.Get("domains.pattern") != in.Pattern || !uuidPattern.MatchString(q.Get("domains.assign")) {
-		return ""
-	}
-	return fmt.Sprintf(" %s is under domain %s, which an org owner or admin can assign to this project: ask the person to open %s and save the row it fills in (assigning a domain is console only), then set the routes again.", in.Hostname, in.Domain, u.String())
+	text := fmt.Sprintf(" %s is under domain %s, which an org owner or admin can assign to this project (assigning a domain is console only): ask the person to assign %s, then set the routes again.", in.Hostname, in.Domain, in.Name)
+	return withLink(text, domainAssignURL(api, in.OrgID, in.DomainID, projectID, in.Pattern))
 }
 
 // patternFullName writes an assignment pattern out, as the API does.
@@ -224,7 +218,7 @@ func registerRoutes(server *mcp.Server, api *apiclient.Client) {
 		status, payload, fail, apiErr := callStatusErr(ctx, api, http.MethodPut, idPath("v1", "projects", in.ProjectID, "catalog", in.Entry, "routes"), nil, body)
 		if fail != nil {
 			if apiErr != nil && apiErr.Code == "bad_request" {
-				if link := assignLinkSentence(apiErr.Payload, in.ProjectID); link != "" {
+				if link := assignLinkSentence(api, apiErr.Payload, in.ProjectID); link != "" {
 					return toolError(apiErr.Code, redactText(apiErr.Msg)+link)
 				}
 			}

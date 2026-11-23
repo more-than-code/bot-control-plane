@@ -82,7 +82,8 @@ func summarizeWhatsNew(version string, entries []changelog.Entry) string {
 // Instructions is the MCP server instructions text (spec-update-awareness
 // §2.3): what Deploybot is, then the version and up to 3 new items.
 func Instructions() string {
-	text := "Deploybot deploys and monitors services on the user's own hosts; these tools act as the signed-in user, with the same permissions as the Deploybot console."
+	text := "Deploybot deploys and monitors services on the user's own hosts; these tools act as the signed-in user, with the same permissions as the Deploybot console. " +
+		"Privileged steps are the person's, never the agent's: a host's runner.toml, registry and GitHub logins, secret values and files, host access and domains. For those, results carry console_url; post that link in the chat for the person to open and confirm."
 	latest, ok := changelog.Latest()
 	if !ok {
 		return text

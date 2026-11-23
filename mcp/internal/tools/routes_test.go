@@ -78,18 +78,16 @@ func TestHostsSummaryEdge(t *testing.T) {
 	}
 }
 
-// api-v1 v1.49: a hostname under a verified domain that nothing assigns yet
-// is refused with the console link an org owner or admin opens. The link is
-// checked here, so a payload cannot steer the agent anywhere else.
+// api-v1 v1.52: a hostname under a verified domain that nothing assigns yet
+// is refused with the ids of the Assign row; the MCP server builds the
+// console link from them, so a payload cannot steer the agent anywhere else.
 func TestAssignLinkSentence(t *testing.T) {
-	const org = "00000000-0000-4000-8000-00000000a001"
-	const project = "00000000-0000-4000-8000-00000000a002"
-	const domainID = "00000000-0000-4000-8000-00000000a003"
-	link := func(over map[string]any) json.RawMessage {
-		url := "http://console.test/orgs/" + org + "?domains.assign=" + domainID + "&domains.pattern=marketingos&domains.project=" + project + "&tab=settings"
+	const domainID = "44444444-4444-4444-8444-444444444444"
+	api := linkClient(t, "https://console.example")
+	payload := func(over map[string]any) json.RawMessage {
 		in := map[string]any{
-			"hostname": "marketingos.example.com", "domain": "example.com", "domain_id": domainID,
-			"pattern": "marketingos", "name": "marketingos.example.com", "assign_url": url,
+			"hostname": "marketingos.example.com", "domain": "example.com", "domain_id": domainID, "org_id": lnOrg,
+			"pattern": "marketingos", "name": "marketingos.example.com",
 		}
 		for k, v := range over {
 			in[k] = v
@@ -97,55 +95,55 @@ func TestAssignLinkSentence(t *testing.T) {
 		raw, _ := json.Marshal(in)
 		return raw
 	}
-	text := assignLinkSentence(link(nil), project)
-	for _, want := range []string{"marketingos.example.com is under domain example.com", "console.test/orgs/" + org, "console only"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("sentence %q misses %q", text, want)
+	text := assignLinkSentence(api, payload(nil), lnProject)
+	want := "https://console.example/orgs/" + lnOrg + "?domains.assign=" + domainID + "&domains.pattern=marketingos&domains.project=" + lnProject + "&tab=settings"
+	for _, part := range []string{"marketingos.example.com is under domain example.com", "console only", "Open: " + want} {
+		if !strings.Contains(text, part) {
+			t.Fatalf("sentence %q misses %q", text, part)
 		}
 	}
-	// A pattern of the domain itself, and a narrower wildcard, work too.
-	if assignLinkSentence(link(map[string]any{"pattern": "@", "name": "example.com", "hostname": "example.com",
-		"assign_url": "https://console.test/orgs/" + org + "?domains.assign=" + domainID + "&domains.pattern=%40&domains.project=" + project}), project) == "" {
-		t.Fatal("@ pattern dropped")
+	// Without a console origin the sentence stays, with no link.
+	if text := assignLinkSentence(linkClient(t, ""), payload(nil), lnProject); text == "" || strings.Contains(text, "Open:") {
+		t.Fatalf("no origin %q", text)
 	}
-	bad := []map[string]any{
-		{"assign_url": "javascript:alert(1)"},
-		{"assign_url": "http://user:pw@console.test/orgs/" + org + "?domains.assign=" + domainID + "&domains.pattern=marketingos&domains.project=" + project},
-		// A link for another project, or another pattern than the payload's.
-		{"assign_url": "http://console.test/orgs/" + org + "?domains.assign=" + domainID + "&domains.pattern=marketingos&domains.project=" + domainID},
-		{"assign_url": "http://console.test/orgs/" + org + "?domains.assign=" + domainID + "&domains.pattern=other&domains.project=" + project},
-		{"assign_url": "http://console.test/orgs/" + org + "?domains.assign=nope&domains.pattern=marketingos&domains.project=" + project},
+	// The domain itself and a narrower wildcard are patterns too.
+	if text := assignLinkSentence(api, payload(map[string]any{"pattern": "@", "name": "example.com", "hostname": "example.com"}), lnProject); !strings.Contains(text, "domains.pattern=%40") {
+		t.Fatalf("@ pattern %q", text)
+	}
+	for _, over := range []map[string]any{
 		{"name": "other.example.com"},
 		{"pattern": "a..b"},
 		{"domain": "Example.com"},
 		{"hostname": "localhost"},
-	}
-	for _, over := range bad {
-		if got := assignLinkSentence(link(over), project); got != "" {
+		{"org_id": "not-a-uuid"},
+		{"domain_id": "x"},
+	} {
+		if got := assignLinkSentence(api, payload(over), lnProject); got != "" {
 			t.Fatalf("payload %#v gave %q", over, got)
 		}
 	}
-	if assignLinkSentence(nil, project) != "" || assignLinkSentence(json.RawMessage("null"), project) != "" {
+	if assignLinkSentence(api, nil, lnProject) != "" || assignLinkSentence(api, json.RawMessage("null"), lnProject) != "" {
 		t.Fatal("empty payload")
 	}
 }
 
-// The assign_domain readiness fix keeps its link and tells the agent to show
-// it, and never lets another URL through.
+// The assign_domain readiness fix keeps only its ids and pattern, and
+// check_readiness turns them into the Assign link.
 func TestAssignDomainFix(t *testing.T) {
-	url := "http://console.test/orgs/00000000-0000-4000-8000-00000000a001?domains.pattern=app&tab=settings"
-	fix := projectFix(map[string]any{"action": "assign_domain", "name": "app.example.com", "url": url, "set": "dropped"})
-	if fix["name"] != "app.example.com" || fix["url"] != url || fix["set"] != nil {
+	const domainID = "44444444-4444-4444-8444-444444444444"
+	fix := projectFix(map[string]any{"action": "assign_domain", "org_id": lnOrg, "domain_id": domainID, "pattern": "app", "name": "app.example.com", "set": "dropped", "url": "javascript:x"})
+	if fix["name"] != "app.example.com" || fix["pattern"] != "app" || fix["domain_id"] != domainID || fix["set"] != nil || fix["url"] != nil {
 		t.Fatalf("fix %#v", fix)
 	}
-	if step := nextStep(fix, "p1", "serve"); !strings.Contains(step, url) || !strings.Contains(step, "console only") {
+	link := fixURL(linkClient(t, "https://console.example"), fix, lnProject)
+	if link != "https://console.example/orgs/"+lnOrg+"?domains.assign="+domainID+"&domains.pattern=app&domains.project="+lnProject+"&tab=settings" {
+		t.Fatalf("link %q", link)
+	}
+	if step := nextStep(fix, lnProject, "serve"); !strings.Contains(step, "app.example.com") || !strings.Contains(step, "console only") {
 		t.Fatalf("next step %q", step)
 	}
-	plain := projectFix(map[string]any{"action": "assign_domain", "name": "not a name", "url": "javascript:alert(1)"})
-	if plain["name"] != nil || plain["url"] != nil {
-		t.Fatalf("fix %#v", plain)
-	}
-	if step := nextStep(plain, "p1", "serve"); !strings.Contains(step, "Organization settings") {
-		t.Fatalf("next step without a link %q", step)
+	bad := projectFix(map[string]any{"action": "assign_domain", "org_id": lnOrg, "domain_id": domainID, "pattern": "**", "name": "not a name"})
+	if bad["pattern"] != nil || bad["name"] != nil || fixURL(linkClient(t, "https://console.example"), bad, lnProject) != "" {
+		t.Fatalf("bad fix %#v", bad)
 	}
 }

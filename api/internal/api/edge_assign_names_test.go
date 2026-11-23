@@ -8,7 +8,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-// api-v1 v1.49: an assignment may name one host below the domain, or a
+// api-v1 v1.52: an assignment may name one host below the domain, or a
 // narrower wildcard, and a hostname under a verified domain that nothing
 // assigns yet is refused with the console link that assigns it.
 
@@ -63,7 +63,6 @@ func TestStoreAssignmentPatterns(t *testing.T) {
 func TestRoutesUnderNameAssignment(t *testing.T) {
 	c := newEdgeCast(t)
 	w := c.w
-	w.srv.ConsoleOrigin = "http://console.test"
 	status, env := w.do(c.tok, http.MethodPost, c.org+"/domains", `{"name":"example.com"}`)
 	mustHTTP(t, status, env, http.StatusCreated, "ok", "ok")
 	d := objectPayload(t, env)
@@ -91,18 +90,18 @@ func TestRoutesUnderNameAssignment(t *testing.T) {
 		t.Fatalf("plan %q", plan)
 	}
 	// console.example.com is under the domain but assigned to nobody: the
-	// refusal carries the one name to assign and the console link for it.
+	// refusal carries the one name to assign and the ids of the Assign row.
 	status, env = w.do(c.tok, http.MethodPut, c.entryPath("web"), `{"routes":[{"hostname":"console.example.com","port":8788}],"idempotency_key":"n2"}`)
 	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "console.example.com is not under a verified domain assigned to this project")
 	link := objectPayload(t, env)
 	if link["domain"] != "example.com" || link["pattern"] != "console" || link["name"] != "console.example.com" {
 		t.Fatalf("assign link %#v", link)
 	}
-	url, _ := link["assign_url"].(string)
-	for _, want := range []string{"http://console.test/orgs/" + c.sc.project.OrgID.String(), "domains.assign=" + id, "domains.project=" + project, "domains.pattern=console", "tab=settings"} {
-		if !strings.Contains(url, want) {
-			t.Fatalf("assign_url %q misses %q", url, want)
-		}
+	if link["domain_id"] != id || link["org_id"] != c.sc.project.OrgID.String() {
+		t.Fatalf("assign ids %#v", link)
+	}
+	if _, ok := link["assign_url"]; ok {
+		t.Fatal("the API builds no console link")
 	}
 	// A hostname under no domain of the org has no link to offer.
 	status, env = w.do(c.tok, http.MethodPut, c.entryPath("web"), `{"routes":[{"hostname":"app.other.test","port":8788}],"idempotency_key":"n3"}`)
@@ -112,12 +111,11 @@ func TestRoutesUnderNameAssignment(t *testing.T) {
 	}
 }
 
-// With no console origin the readiness fix still names the assignment, and
-// the routes warning keeps its text.
+// The readiness fix names the assignment by ids, and the routes warning
+// keeps its text.
 func TestReadinessAssignDomainFix(t *testing.T) {
 	c := newEdgeCast(t)
 	w := c.w
-	w.srv.ConsoleOrigin = "http://console.test"
 	id := c.verifiedDomain(t, "example.com")
 	createImage(t, w, c.tok, c.sc.project.ID, "web", webSpec)
 	c.planAndConfirm(t, c.tok, "web", `[{"hostname":"app.example.com","port":8788}]`, "k1")
@@ -137,7 +135,7 @@ func TestReadinessAssignDomainFix(t *testing.T) {
 			t.Fatalf("routes check %#v", check)
 		}
 		fix := check["fix"].(map[string]any)
-		if fix["action"] != "assign_domain" || fix["name"] != "app.example.com" || !strings.Contains(fix["url"].(string), "domains.pattern=app") {
+		if fix["action"] != "assign_domain" || fix["name"] != "app.example.com" || fix["pattern"] != "app" || fix["domain_id"] != id || fix["org_id"] != c.sc.project.OrgID.String() {
 			t.Fatalf("fix %#v", fix)
 		}
 		return

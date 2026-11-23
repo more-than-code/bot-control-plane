@@ -38,6 +38,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerListProblems(server, api)
 	registerListServices(server, api)
 	registerQueryMetrics(server, api)
+	registerAlertSettings(server, api)
 	registerListProcesses(server, api)
 	registerServiceHealthHistory(server, api)
 	registerHostSnapshot(server, api)
@@ -164,7 +165,7 @@ func callStatus(ctx context.Context, api *apiclient.Client, method, path string,
 }
 
 // callStatusErr is callStatus and also the API refusal itself, for the one
-// caller that reads a refusal's payload (set_routes, api-v1 v1.49). It is
+// caller that reads a refusal's payload (set_routes, api-v1 v1.52). It is
 // nil when the call succeeded or failed before the API answered.
 func callStatusErr(ctx context.Context, api *apiclient.Client, method, path string, query url.Values, body any) (int, json.RawMessage, *mcp.CallToolResult, *apiclient.Error) {
 	token, ok := auth.DelegatedFromContext(ctx)

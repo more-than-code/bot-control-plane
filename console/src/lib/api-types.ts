@@ -242,7 +242,7 @@ export type HostEdgePolicy = {
 export type DomainStatus = 'pending' | 'verified' | 'lapsed';
 
 /**
- * Relative to the domain, like a DNS zone file (api-v1 v1.49): `@` is the domain itself, `*` is one label below it, a
+ * Relative to the domain, like a DNS zone file (api-v1 v1.52): `@` is the domain itself, `*` is one label below it, a
  * name such as `app` or `api.dev` is exactly that name below it, and `*.dev` is one label below `dev.<domain>`.
  */
 export type DomainPattern = string;
@@ -270,6 +270,17 @@ export type OrgDomain = {
 export type EdgeStatus = 'off' | 'pending' | 'applied' | 'error';
 
 /** `GET /v1/hosts/{id}/edge` (api-v1 v1.35 item 2). Owners and admins of the host's org. */
+/** `GET /v1/hosts/{id}/alert-settings` (api-v1 v1.49 item 3). A null threshold uses the default. */
+export type HostAlertSettings = {
+	alerts_enabled: boolean;
+	mem_min_available_percent: number | null;
+	disk_max_used_percent: number | null;
+	cpu_max_busy_percent: number | null;
+};
+
+/** One mount of `GET /v1/hosts/{id}/disks` (api-v1 v1.49 item 4). */
+export type HostDisk = { path: string; fstype: string };
+
 export type HostEdge = {
 	/** The host's hello reports `edge.enabled` (its root allowed the edge in runner.toml). */
 	available: boolean;
@@ -385,6 +396,8 @@ export type ImageSpec = {
 	health_policy: ImageHealthPolicy | null;
 	/** Shared networks the container also joins (api-v1 v1.25). Present only when set: 1–4 names. */
 	networks?: string[];
+	/** The container shares the host's network (api-v1 v1.50 item 1). Present only when set; set over MCP or the API. */
+	network?: 'host';
 };
 
 type CatalogEntryBase = {
@@ -753,8 +766,8 @@ export type NotificationKind = 'release' | 'host_update' | 'problem';
 /** A problem's level (api-v1 v1.41 item 1). */
 export type ProblemLevel = 'needs_action' | 'heads_up';
 
-/** A problem's kind (api-v1 v1.41 item 1; `host_file` since v1.44 item 8; `agent_upgrade` since v1.48 item 6). */
-export type ProblemKind = 'host_offline' | 'registry_login' | 'deploy' | 'host_file' | 'agent_upgrade';
+/** A problem's kind (api-v1 v1.41 item 1; `host_file` since v1.44 item 8; `agent_upgrade` since v1.48 item 6; `host_resource` since v1.49 item 1). */
+export type ProblemKind = 'host_offline' | 'registry_login' | 'deploy' | 'host_file' | 'agent_upgrade' | 'host_resource';
 
 export type Notification = {
 	key: string;

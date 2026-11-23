@@ -12,8 +12,10 @@
 	import { page } from '$app/state';
 	import { actionUrlFrom } from '$lib/url';
 	import { accessFailureOf } from '$lib/host-access';
+	import HostAlertsSection from './HostAlertsSection.svelte';
 	import HostEdgeSection from './HostEdgeSection.svelte';
 	import ConfigFilesTab from './ConfigFilesTab.svelte';
+	import PolicyTab from './PolicyTab.svelte';
 	import OverviewTab from './OverviewTab.svelte';
 	import ProcessesTab from './ProcessesTab.svelte';
 
@@ -37,8 +39,10 @@
 	const tabs = $derived([
 		{ key: 'overview', label: 'Overview', href: `?tab=overview&range=${data.range}` },
 		{ key: 'processes', label: 'Processes', href: `?tab=processes&sort=${data.processSort}` },
-		{ key: 'files', label: 'Config files', href: '?tab=files' }
+		{ key: 'files', label: 'Config files', href: '?tab=files' },
+		...(data.canManageAccess ? [{ key: 'policy', label: 'Policy', href: '?tab=policy' }] : [])
 	]);
+	const policyMessage = $derived(typeof form?.policyMessage === 'string' ? form.policyMessage : null);
 
 	$effect(() => {
 		if (!browser || data.tab !== 'overview' || !data.host) return;
@@ -97,10 +101,16 @@
 			canUpgrade={data.org?.role === 'owner' || data.org?.role === 'admin'}
 			upgrades={data.upgrades ?? []}
 			upgradesMessage={data.upgradesMessage ?? null}
+			disks={data.disks ?? []}
+			diskPath={data.diskPath ?? '/'}
 		/>
 	{:else if data.tab === 'files'}
 		{#if data.files}
 			<ConfigFilesTab hostId={data.host.id} files={data.files} {form} />
+		{/if}
+	{:else if data.tab === 'policy'}
+		{#if data.policy}
+			<PolicyTab hostName={data.host.name} tab={data.policy} formMessage={policyMessage} formApply={form?.policyApply ?? null} />
 		{/if}
 	{:else}
 		<ProcessesTab
@@ -116,7 +126,18 @@
 			edge={data.edge ?? null}
 			loadMessage={data.edgeMessage ?? null}
 			actionMessage={typeof form?.edgeMessage === 'string' ? form.edgeMessage : null}
+			policyHref="?tab=policy&policy.edge=on"
 		/>
+	{/if}
+	{#if data.alerts || data.alertsMessage}
+		<HostAlertsSection
+			settings={data.alerts ?? null}
+			canEdit={data.canEditAlerts ?? false}
+			loadMessage={data.alertsMessage ?? null}
+			actionMessage={typeof form?.alertsMessage === 'string' ? form.alertsMessage : null}
+		/>
+	{/if}
+	{#if data.canManageAccess}
 		<section id="access" class="mt-8">
 			<h2 class="mb-3 text-lg font-semibold tracking-tight">Access</h2>
 			{#if data.accessMessage}

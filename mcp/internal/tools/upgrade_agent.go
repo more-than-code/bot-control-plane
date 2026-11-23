@@ -2,12 +2,8 @@ package tools
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -32,90 +28,19 @@ const upgradeAgentSchema = `{
   }
 }`
 
-const (
-	// upgradePlanTTL is how long an upgrade plan waits for confirm.
-	upgradePlanTTL = 10 * time.Minute
-	// maxUpgradePlans caps the pending plans kept in memory.
-	maxUpgradePlans = 1000
-	// maxUpgradePlansPerCaller caps one caller's pending plans.
-	maxUpgradePlansPerCaller = 10
-)
-
 const msgUpgradeOff = "this host does not allow upgrades from Deploybot: its administrator sets agent_upgrade = true in runner.toml (bot-agent 0.2.15 or later)"
 
+// upgradePlan is one pending upgrade_agent call. The store binds it to the
+// caller and the idempotency key (local_plans.go).
 type upgradePlan struct {
-	// caller is the digest of the caller's token (auth.CallerKeyFromContext):
-	// only that caller can confirm the plan.
-	caller  [32]byte
 	hostID  string
 	host    string
 	from    string
 	version string
-	key     string
-	expires time.Time
 }
 
-type upgradePlans struct {
-	mu    sync.Mutex
-	plans map[string]upgradePlan
-	now   func() time.Time
-}
-
-var pendingUpgrades = &upgradePlans{plans: map[string]upgradePlan{}, now: time.Now}
-
-// add stores p under a new 43-character id. Expired plans are dropped
-// first; a full store, or a caller with maxUpgradePlansPerCaller pending
-// plans, refuses.
-func (u *upgradePlans) add(p upgradePlan) (string, error) {
-	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
-	id := base64.RawURLEncoding.EncodeToString(raw[:])
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	now := u.now()
-	for k, v := range u.plans {
-		if !now.Before(v.expires) {
-			delete(u.plans, k)
-		}
-	}
-	if len(u.plans) >= maxUpgradePlans {
-		return "", errors.New("too many pending upgrade confirmations; try again later")
-	}
-	mine := 0
-	for _, v := range u.plans {
-		if v.caller == p.caller {
-			mine++
-		}
-	}
-	if mine >= maxUpgradePlansPerCaller {
-		return "", errors.New("too many pending upgrade confirmations for you; confirm or let some expire (10 minutes)")
-	}
-	p.expires = now.Add(upgradePlanTTL)
-	u.plans[id] = p
-	return id, nil
-}
-
-// take returns the plan for id. found is false for an id this server did
-// not issue and for another caller's plan, which is left alone. A key
-// mismatch keeps the plan; an expired plan is dropped.
-func (u *upgradePlans) take(caller [32]byte, id, key string) (p upgradePlan, found bool, fail *mcp.CallToolResult) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	p, found = u.plans[id]
-	if !found || p.caller != caller {
-		return upgradePlan{}, false, nil
-	}
-	if p.key != key {
-		return upgradePlan{}, true, toolError("conflict", "idempotency_key does not match the request that issued this confirmation")
-	}
-	delete(u.plans, id)
-	if !u.now().Before(p.expires) {
-		return upgradePlan{}, true, toolError("conflict", "this confirmation expired; call the tool again for a new one")
-	}
-	return p, true, nil
-}
+// pendingUpgrades holds upgrade_agent plans for 10 minutes, 10 per caller.
+var pendingUpgrades = newLocalPlans[upgradePlan](10*time.Minute, "upgrade ")
 
 func registerUpgradeAgent(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
@@ -170,8 +95,8 @@ func registerUpgradeAgent(server *mcp.Server, api *apiclient.Client) {
 		}
 		// Whether the caller is an org owner or admin is not visible on a
 		// delegated host read (the API omits access); the API decides at confirm.
-		plan := upgradePlan{caller: caller, hostID: in.HostID, host: host.Name, from: host.AgentVersion, version: *host.LatestAgentVersion, key: in.IdempotencyKey}
-		id, err := pendingUpgrades.add(plan)
+		plan := upgradePlan{hostID: in.HostID, host: host.Name, from: host.AgentVersion, version: *host.LatestAgentVersion}
+		id, expires, err := pendingUpgrades.add(caller, in.IdempotencyKey, plan)
 		if err != nil {
 			return toolError("unavailable", err.Error())
 		}
@@ -180,7 +105,7 @@ func registerUpgradeAgent(server *mcp.Server, api *apiclient.Client) {
 		out, _ := json.Marshal(map[string]any{
 			"confirmation_id": id,
 			"plan":            text,
-			"expires_at":      pendingUpgrades.now().Add(upgradePlanTTL).UTC().Format(time.RFC3339),
+			"expires_at":      expires.UTC().Format(time.RFC3339),
 		})
 		return finishConfirmation(out, nil)
 	})

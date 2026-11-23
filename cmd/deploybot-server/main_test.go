@@ -19,6 +19,7 @@ func TestDispatch(t *testing.T) {
 		{name: "api", argv: []string{"deploybot-server", "api"}, mode: "api", args: []string{}},
 		{name: "api migrate", argv: []string{"/usr/local/bin/deploybot-server", "api", "--migrate"}, mode: "api", args: []string{"--migrate"}},
 		{name: "mcp", argv: []string{"deploybot-server", "mcp"}, mode: "mcp", args: []string{}},
+		{name: "health", argv: []string{"deploybot-server", "health", "http://127.0.0.1:8090/healthz"}, mode: "health", args: []string{"http://127.0.0.1:8090/healthz"}},
 		{name: "argv0 api", argv: []string{"/opt/deploybot/bin/bot-api-server", "--migrate"}, mode: "api", args: []string{"--migrate"}},
 		{name: "argv0 api no args", argv: []string{"bot-api-server"}, mode: "api", args: []string{}},
 		{name: "argv0 mcp", argv: []string{"./bot-mcp-server"}, mode: "mcp", args: []string{}},

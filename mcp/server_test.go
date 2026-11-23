@@ -173,10 +173,11 @@ func TestTools(t *testing.T) {
 		"get_health_checks": true, "list_catalog": true, "get_catalog_entry": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
 		"get_registry_connect_request": true,
 		"check_readiness":              true, "image_access": true, "list_image_tags": true, "host_policy_snippet": true, "shared_network_snippet": true,
-		"whats_new":      true,
-		"list_routes":    true,
-		"list_problems":  true,
-		"deploy_history": true,
+		"whats_new":          true,
+		"list_routes":        true,
+		"list_problems":      true,
+		"deploy_history":     true,
+		"get_alert_settings": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -200,6 +201,15 @@ func TestTools(t *testing.T) {
 				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
 			}
 			for _, phrase := range []string{"real", "audited", "second confirm", "user agrees", "Nothing runs"} {
+				if !strings.Contains(tool.Description, phrase) {
+					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
+				}
+			}
+		case tool.Name == "set_alert_settings":
+			if readOnly || open {
+				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
+			}
+			for _, phrase := range []string{"Nothing changes until confirm", "user agrees", "get_alert_settings", "Does not contact"} {
 				if !strings.Contains(tool.Description, phrase) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
@@ -385,6 +395,7 @@ func TestTools(t *testing.T) {
 		"check_readiness", "image_access", "host_policy_snippet",
 		"update_env_set", "delete_env_set", "shared_network_snippet", "whats_new",
 		"set_routes", "list_routes", "list_problems", "upgrade_agent",
+		"get_alert_settings", "set_alert_settings",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
@@ -393,8 +404,8 @@ func TestTools(t *testing.T) {
 	// 37 before api-v1 v1.34 and v1.35, plus whats_new, set_routes and
 	// list_routes, plus list_problems (v1.41), plus get_catalog_entry and
 	// set_entry_image, plus list_image_tags (v1.46), plus deploy_history (v1.47),
-	// plus upgrade_agent (v1.48).
-	if len(seen) != 46 {
+	// plus upgrade_agent (v1.48), plus get_alert_settings and set_alert_settings (v1.49).
+	if len(seen) != 48 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -2644,5 +2655,34 @@ func TestListProblems(t *testing.T) {
 	}
 	if fake.count() != before {
 		t.Fatal("a refused call reached the API")
+	}
+}
+
+// BOT_MCP_CONSOLE_ORIGIN is optional and, when set, an origin like the
+// public one (the privileged-steps console links).
+func TestConfigConsoleOrigin(t *testing.T) {
+	secretPath := filepath.Join(t.TempDir(), "client-secret")
+	if err := os.WriteFile(secretPath, []byte("0123456789abcdef0123456789abcdef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{
+		"BOT_MCP_LISTEN":             "127.0.0.1:8091",
+		"BOT_MCP_API_URL":            "https://api.example",
+		"BOT_MCP_PUBLIC_ORIGIN":      "https://mcp.example",
+		"BOT_MCP_CLIENT_SECRET_FILE": secretPath,
+	}
+	get := func(k string) string { return env[k] }
+	if cfg, err := configFrom(get); err != nil || cfg.ConsoleOrigin != "" {
+		t.Fatalf("%+v %v", cfg.ConsoleOrigin, err)
+	}
+	env["BOT_MCP_CONSOLE_ORIGIN"] = "https://console.example"
+	if cfg, err := configFrom(get); err != nil || cfg.ConsoleOrigin != "https://console.example" {
+		t.Fatalf("%+v %v", cfg.ConsoleOrigin, err)
+	}
+	for _, bad := range []string{"http://console.example", "https://console.example/x", "https://u@console.example", "console.example"} {
+		env["BOT_MCP_CONSOLE_ORIGIN"] = bad
+		if _, err := configFrom(get); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
 	}
 }

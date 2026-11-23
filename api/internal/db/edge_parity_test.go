@@ -64,7 +64,7 @@ func TestParityDomains(t *testing.T) {
 		if err != nil || len(d.Assignments) != 2 || d.Assignments[0].Pattern != "*" || d.Assignments[0].ProjectName != "dhome" {
 			p.t.Fatalf("assign %#v %v", d.Assignments, err)
 		}
-		// api-v1 v1.49: a single name and a narrower wildcard are patterns
+		// api-v1 v1.52: a single name and a narrower wildcard are patterns
 		// too; the same pair twice, or a bad shape, is ErrInvalid.
 		narrow, err := p.st.PutDomainAssignments(p.ctx, org, d.ID, []store.DomainAssignment{
 			{ProjectID: home.ID, Pattern: "app"}, {ProjectID: home.ID, Pattern: "*.dev"},
@@ -682,7 +682,7 @@ func TestParityDomainScopeAndProjectDelete(t *testing.T) {
 			p.t.Fatalf("under %#v %v", under, err)
 		}
 		// A route a narrower wildcard of another domain covers is left alone
-		// as an exact or `*` assignment is (api-v1 v1.49).
+		// as an exact or `*` assignment is (api-v1 v1.52).
 		if _, err := p.st.PutDomainAssignments(p.ctx, orgA, www.ID, []store.DomainAssignment{{ProjectID: projA.ID, Pattern: "@"}, {ProjectID: projA.ID, Pattern: "deep"}}); err != nil {
 			p.t.Fatal(err)
 		}

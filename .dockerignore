@@ -1,0 +1,29 @@
+# Build context for build/docker/*.Dockerfile (docs/containers.md).
+# Version control, local output, dependencies and secrets stay out.
+.git
+.agents
+.claude
+**/node_modules
+**/.svelte-kit
+console/build
+site
+bin
+deploybot-server
+deploybot
+bot-api-server
+bot-mcp-server
+**/*.test
+**/*.out
+**/.env
+**/.env.*
+**/*.env
+**/*.pem
+**/*.key
+**/*secret*
+!**/*secret*.go
+!**/*secret*.ts
+!**/*secret*.svelte
+!api/internal/secret
+!api/internal/secret/**
+tasks
+**/tasks
