@@ -218,7 +218,8 @@ function deployRow(id: string, outcome: ImageDeploy['outcome'], imageDigest: str
 		finished_at: '2026-10-14T00:01:00Z',
 		by: USER.id,
 		via: 'console',
-		ends_by: null
+		ends_by: null,
+		reason: null
 	};
 }
 

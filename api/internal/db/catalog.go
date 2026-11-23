@@ -206,6 +206,7 @@ JOIN app.catalog_entries e ON e.id = d.entry_id
 WHERE e.project_id = $1::uuid
   AND d.entry_id = ANY(CAST($2 AS uuid[]))
   AND d.via IN ('console', 'mcp')
+  AND d.outcome <> 'refused'
 GROUP BY d.entry_id
 `, projectID.String(), imageIDs)
 		if err != nil {

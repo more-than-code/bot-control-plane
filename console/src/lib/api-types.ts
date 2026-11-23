@@ -176,7 +176,8 @@ export type ImageOutcome =
 	| 'auto_restarted'
 	| 'auto_rolled_back'
 	| 'auto_gave_up'
-	| 'auto_failed';
+	| 'auto_failed'
+	| 'refused';
 
 /** Program policy from the agent's hello. Paths and executables stay on the host. */
 export type HostPrograms = {
@@ -405,6 +406,8 @@ export type ImageDeploy = {
 	via: 'console' | 'mcp' | 'agent';
 	/** The running row's latest end (api-v1 v1.42); null on every finished row and from older APIs. */
 	ends_by: string | null;
+	/** Why it did not succeed (api-v1 v1.47); null on a success, a running row and from older APIs. */
+	reason: string | null;
 };
 
 export type ImageState = 'running' | 'exited' | 'created' | 'paused' | 'restarting' | 'dead' | 'missing' | 'unknown';

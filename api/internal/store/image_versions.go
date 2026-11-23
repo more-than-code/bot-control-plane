@@ -86,11 +86,19 @@ func DeployHolds(entryID, hostID uuid.UUID, rows []ImageDeploy) []DigestHold {
 			break
 		}
 	}
-	for i, row := range sorted {
-		if i == RecentDeploys {
+	// A refused row (api-v1 v1.47) never reached the host and has no
+	// digest. It does not take one of the recent slots, as before v1.47,
+	// when such a row was deleted.
+	recent := 0
+	for _, row := range sorted {
+		if recent == RecentDeploys {
 			break
 		}
+		if row.Outcome == "refused" {
+			continue
+		}
 		add(row.Digest, HoldRecent)
+		recent++
 	}
 	out := make([]DigestHold, 0, len(order))
 	for _, d := range order {

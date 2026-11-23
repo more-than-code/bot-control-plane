@@ -15,7 +15,7 @@ func TestSummarizeProblems(t *testing.T) {
 	text := summarizeProblems(payload)
 	for _, want := range []string{
 		"2 open problems: pi2-2 is offline since 2026-11-21 08:00 UTC (needs_action) — check the machine and its bot-agent service",
-		"web deploy rolled back on pi1� since 2026-11-21 09:30 UTC (heads_up) — look at entry_logs and entry_status",
+		"web deploy rolled back on pi1� since 2026-11-21 09:30 UTC (heads_up) — read deploy_history for the reason",
 		"1 resolved.",
 	} {
 		if !strings.Contains(text, want) {

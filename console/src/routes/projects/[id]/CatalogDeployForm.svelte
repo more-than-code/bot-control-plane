@@ -495,6 +495,9 @@
 							<span class="font-mono text-sm">{digest}</span>
 						{/if}
 						<span class="text-sm">{result.outcome.exit_code == null ? 'exit none' : `exit ${result.outcome.exit_code}`}</span>
+						{#if result.outcome.reason}
+							<span class="text-sm w-full break-words">{result.outcome.reason}</span>
+						{/if}
 					</div>
 				{#if logsHref && !busy}
 					<!-- On the outcome line, above the log, so it is always in view. A plain click closes the drawer; a new-tab click keeps it and its result. Hidden in flight, like Cancel. No hover preload: the tab's load reads container status from the hosts. -->
@@ -590,6 +593,9 @@
 							{/if}
 							{#if item.via === 'agent'}
 								<span class="text-muted-foreground">Deploybot agent</span>
+							{/if}
+							{#if item.reason}
+								<span class="text-muted-foreground w-full break-words">{item.reason}</span>
 							{/if}
 						</li>
 					{/each}

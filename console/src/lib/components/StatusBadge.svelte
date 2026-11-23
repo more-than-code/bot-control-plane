@@ -27,7 +27,8 @@
 		'auto_restarted',
 		'auto_rolled_back',
 		'auto_gave_up',
-		'auto_failed'
+		'auto_failed',
+		'refused'
 	] as const;
 	const text = $derived(known.includes(status as (typeof known)[number]) ? status : 'unknown');
 
@@ -63,7 +64,8 @@
 		auto_restarted: 'text-status-asleep',
 		auto_rolled_back: 'text-status-asleep',
 		auto_gave_up: 'text-status-down',
-		auto_failed: 'text-status-down'
+		auto_failed: 'text-status-down',
+		refused: 'text-status-revoked'
 	};
 </script>
 

@@ -29,7 +29,7 @@ const deployEntrySchema = `{
 func registerDeployEntry(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "deploy_entry",
-		Description: "Deploy a catalog image entry on a host, with the image the entry stores; to deploy a new version, find its tag with list_image_tags and change the entry with set_entry_image first. Requires the deploy permission. The host must run containers. The action is real and is audited. Nothing runs until a second confirm call with the returned confirmation id, after the user agrees. This call does not contact the host. The API refuses when the entry joins a shared network the host does not open to the project, or the host's agent is older than 0.2.9. The result lists the last 3 deploys so a rollback digest can be chosen. Run check_readiness first to see what is missing.",
+		Description: "Deploy a catalog image entry on a host, with the image the entry stores; to deploy a new version, find its tag with list_image_tags and change the entry with set_entry_image first. Requires the deploy permission. The host must run containers. The action is real and is audited. Nothing runs until a second confirm call with the returned confirmation id, after the user agrees. This call does not contact the host. The API refuses when the entry joins a shared network the host does not open to the project, or the host's agent is older than 0.2.9. The result lists the last 3 deploys so a rollback digest can be chosen, with the reason of any that did not succeed; if the last one failed, read deploy_history for that entry and host and fix the cause before deploying again. Run check_readiness first to see what is missing. When confirm reports an outcome other than succeeded or unchanged, its result gives the reason, and deploy_history keeps the reason and the log tail afterwards.",
 		Annotations: mutatingAnnotations(false),
 		InputSchema: json.RawMessage(deployEntrySchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -162,6 +162,7 @@ func projectHistory(raw json.RawMessage) []any {
 			StartedAt  string `json:"started_at"`
 			FinishedAt string `json:"finished_at"`
 			EndsBy     string `json:"ends_by"`
+			Reason     string `json:"reason"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
@@ -191,6 +192,10 @@ func projectHistory(raw json.RawMessage) []any {
 		// finished_at; time is its start and ends_by its latest end.
 		if item.Outcome == "in_flight" && item.EndsBy != "" {
 			row["ends_by"] = item.EndsBy
+		}
+		// api-v1 v1.47: why a past deploy did not succeed.
+		if item.Reason != "" && !deployOutcomeOK(item.Outcome) {
+			row["reason"] = publicString(item.Reason)
 		}
 		out = append(out, row)
 	}

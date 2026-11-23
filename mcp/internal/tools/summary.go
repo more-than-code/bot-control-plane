@@ -500,6 +500,15 @@ func digestHex(s string) bool {
 
 const deployLogPreview = 3
 
+// historyReasonRunes caps a reason on a deploy_entry history line.
+const historyReasonRunes = 160
+
+// deployOutcomeOK is a deploy or rollback that needs no follow-up. An
+// empty outcome is not a deploy result.
+func deployOutcomeOK(outcome string) bool {
+	return outcome == "" || outcome == "succeeded" || outcome == "unchanged"
+}
+
 // imageStateOK is ImageStatus.state, plus v1.8.1 "unknown" for a deploy or
 // rollback whose task ran past its budget. An empty string is not a state.
 func imageStateOK(state string) bool {
@@ -517,6 +526,7 @@ func summarizeImageDeploy(payload json.RawMessage) (string, bool) {
 			Outcome  string `json:"outcome"`
 			Digest   string `json:"digest"`
 			ExitCode *int   `json:"exit_code"`
+			Reason   string `json:"reason"`
 		} `json:"deploy"`
 		Status struct {
 			State string `json:"state"`
@@ -549,6 +559,15 @@ func summarizeImageDeploy(payload json.RawMessage) (string, bool) {
 	}
 	if body.Deploy.ExitCode != nil {
 		fmt.Fprintf(&b, " exit %d", *body.Deploy.ExitCode)
+	}
+	// api-v1 v1.47: why it did not succeed, and where to read more later.
+	if body.Deploy.Reason != "" {
+		b.WriteString("\nreason: ")
+		b.WriteString(clampField(redactText(body.Deploy.Reason), deployReasonRunes))
+	}
+	if !deployOutcomeOK(body.Deploy.Outcome) {
+		b.WriteString("\n")
+		b.WriteString(deployHistoryHint)
 	}
 	lines := body.Lines
 	if len(lines) > deployLogPreview {
@@ -605,6 +624,7 @@ func historyLines(payload json.RawMessage) string {
 			Outcome string `json:"outcome"`
 			Time    string `json:"time"`
 			EndsBy  string `json:"ends_by"`
+			Reason  string `json:"reason"`
 		} `json:"history"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil || len(body.History) == 0 {
@@ -632,6 +652,10 @@ func historyLines(payload json.RawMessage) string {
 		if item.Time != "" {
 			b.WriteByte(' ')
 			b.WriteString(summaryField(item.Time))
+		}
+		if item.Reason != "" {
+			b.WriteString(": ")
+			b.WriteString(clampField(redactText(item.Reason), historyReasonRunes))
 		}
 	}
 	return b.String()

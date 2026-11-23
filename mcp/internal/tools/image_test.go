@@ -71,7 +71,7 @@ func TestImageStateUnknown(t *testing.T) {
 	const bad = "up-state-do-not-echo"
 	timeout := []byte(`{"deploy":{"outcome":"timeout","digest":null,"exit_code":null},"status":{"container":null,"state":"unknown","exit_code":null,"restart_count":0,"started_at":null,"finished_at":null,"digest":null,"ports":[]},"lines":[]}`)
 	res := actedOrPending(http.StatusOK, timeout)
-	if res.IsError || toolText(t, res) != "timeout unknown" {
+	if res.IsError || toolText(t, res) != "timeout unknown\n"+deployHistoryHint {
 		t.Fatalf("timeout text %q err=%v", toolText(t, res), res.IsError)
 	}
 	blob, err := json.Marshal(res.StructuredContent)
@@ -463,5 +463,24 @@ func TestPendingConfirmationHistoryUsesShortDigest(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "img-history-do-not-leak") {
 		t.Fatalf("structured %s", raw)
+	}
+}
+
+// api-v1 v1.47: a failed deploy result shows its reason and points to
+// deploy_history; a success does neither.
+func TestDeployResultReason(t *testing.T) {
+	failed := []byte(`{"deploy":{"id":"33333333-3333-4333-8333-333333333333","outcome":"rolled_back","digest":null,"exit_code":null,"reason":"health check GET :80/ answered 503; rolled back; the previous version is running again"},"status":{"container":"web","state":"running","exit_code":null,"restart_count":0,"started_at":null,"finished_at":null,"digest":null,"ports":[]},"lines":["boom"]}`)
+	res := actedOrPending(http.StatusOK, failed)
+	text := toolText(t, res)
+	if res.IsError || !strings.Contains(text, "\nreason: health check GET :80/ answered 503; rolled back") || !strings.Contains(text, deployHistoryHint) {
+		t.Fatalf("failed text %q", text)
+	}
+	blob, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(blob), `"id":"33333333-3333-4333-8333-333333333333"`) || !strings.Contains(string(blob), `"reason":"health check`) {
+		t.Fatalf("structured %s", blob)
+	}
+	ok := []byte(`{"deploy":{"outcome":"succeeded","digest":null,"exit_code":null,"reason":null},"status":{"container":"web","state":"running","exit_code":null,"restart_count":0,"started_at":null,"finished_at":null,"digest":null,"ports":[]},"lines":[]}`)
+	if text := toolText(t, actedOrPending(http.StatusOK, ok)); strings.Contains(text, "deploy_history") || strings.Contains(text, "reason") {
+		t.Fatalf("success text %q", text)
 	}
 }

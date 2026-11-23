@@ -49,6 +49,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerStopEntry(server, api)
 	registerRestartEntry(server, api)
 	registerDeployEntry(server, api)
+	registerDeployHistory(server, api)
 	registerRollbackEntry(server, api)
 	registerSetHealthChecks(server, api)
 	registerCreateCatalogEntry(server, api)
@@ -220,7 +221,7 @@ func stillRunning(endsBy string) *mcp.CallToolResult {
 	if t, err := time.Parse(time.RFC3339, endsBy); err == nil {
 		msg += ", ends by " + t.UTC().Format("15:04") + " UTC at the latest"
 	}
-	return toolError("error", msg+"; the entry's deploy history shows the outcome (deploy_entry for that host lists it)")
+	return toolError("error", msg+"; deploy_history for that entry and host shows the outcome and why")
 }
 
 // actedOrPending reports a program status only for HTTP 200.
@@ -526,6 +527,13 @@ func projectImageDeploy(v any) map[string]any {
 	}
 	if n, ok := row["exit_code"].(json.Number); ok {
 		out["exit_code"] = n
+	}
+	// api-v1 v1.47: the row id (for deploy_history) and why it did not succeed.
+	if s, ok := row["id"].(string); ok && requireUUID("id", s) == nil {
+		out["id"] = strings.ToLower(s)
+	}
+	if s, ok := row["reason"].(string); ok && s != "" {
+		out["reason"] = publicString(s)
 	}
 	return out
 }
