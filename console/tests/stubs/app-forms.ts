@@ -7,3 +7,8 @@ export function enhance(): Record<string, never> {
 export function deserialize(text: string): { type: string; data?: unknown } {
 	return JSON.parse(text) as { type: string; data?: unknown };
 }
+
+/** Server render does not run actions, so nothing is applied. */
+export function applyAction(): Promise<void> {
+	return Promise.resolve();
+}

@@ -152,6 +152,7 @@
 			addMessage={fieldMessage('addDomain')}
 			rowMessage={fieldMessage('domain')}
 			rowMessageId={action?.domainId ?? null}
+			verifiedId={action?.field === 'domainVerified' ? (action.domainId ?? null) : null}
 		/>
 		<OrgSettingsSection org={data.org} canOwner={data.canOwner} message={sectionMessage} />
 	{/if}

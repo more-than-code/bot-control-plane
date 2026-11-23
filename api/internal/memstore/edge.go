@@ -169,6 +169,22 @@ func (m *Mem) MarkDomainVerified(_ context.Context, orgID, domainID uuid.UUID, a
 	return m.domainViewLocked(d), nil
 }
 
+func (m *Mem) TouchDomainCheck(_ context.Context, orgID, domainID uuid.UUID, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.liveDomainLocked(orgID, domainID)
+	if !ok {
+		return store.ErrNotFound
+	}
+	if d.Status == store.DomainVerified {
+		return nil
+	}
+	check := at
+	d.LastCheckAt = &check
+	m.edgeLocked().domains[d.ID] = d
+	return nil
+}
+
 func (m *Mem) RecordDomainCheck(_ context.Context, domainID uuid.UUID, ok bool, at time.Time) (store.OrgDomain, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

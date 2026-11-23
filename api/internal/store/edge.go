@@ -168,6 +168,11 @@ type EdgeStore interface {
 	// is set when the domain was not verified before. ErrDomainTaken when
 	// another org holds the name.
 	MarkDomainVerified(ctx context.Context, orgID, domainID uuid.UUID, at time.Time) (OrgDomain, error)
+	// TouchDomainCheck stores a manual Verify that found no record: it sets
+	// last_check_at of a pending or lapsed domain and changes nothing else
+	// (failures, status). A verified domain is left as is. ErrNotFound when
+	// the org has no such domain.
+	TouchDomainCheck(ctx context.Context, orgID, domainID uuid.UUID, at time.Time) error
 	// RecordDomainCheck stores one daily re-check of a verified or lapsed
 	// domain: ok sets verified and failures 0; a failure adds one and turns
 	// the domain lapsed at DomainLapseAfter. lapsed is true when this call
