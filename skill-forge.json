@@ -8,13 +8,17 @@
       "api-contracts": "^0.1.0",
       "coding-discipline": "^0.3.1",
       "security-baseline": "^0.1.0",
-      "code-quality": "^0.1.1"
+      "code-quality": "^0.1.1",
+      "testing-strategy": "^0.1.3",
+      "data-migration": "^0.1.0"
     },
     "shims": [
       "claude-code"
     ]
   },
   "instructions": {
-    "role": "repo"
+    "role": "repo",
+    "variant": "full",
+    "version": "^0.1.0"
   }
 }
