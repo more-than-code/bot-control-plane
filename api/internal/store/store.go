@@ -937,6 +937,9 @@ type Store interface {
 	// A Secret that differs from the stored flag is ErrSecretFixed.
 	// An empty Plain for an existing secret key is ErrSecretEmpty; nothing is written.
 	// The bool is true when the key was created. Only a created key rehashes.
+	// With Regenerate (and Generated) the key must already exist and be
+	// secret: a missing set or key is ErrNotFound and writes nothing, a plain
+	// key is ErrSecretFixed; ErrKeyExists does not apply.
 	PutEnvKey(ctx context.Context, projectID uuid.UUID, name string, in EnvKeyPut, actor uuid.UUID, at time.Time) (EnvKey, bool, error)
 	// MakeEnvKeysSecret marks plain keys secret in one transaction (api-v1 v1.17).
 	// It locks the set, then the named values, and calls seal with each plain

@@ -42,7 +42,7 @@ export function privateKeysFolded(count: number, collapsed: boolean): boolean {
 	return collapsed || count > PRIVATE_KEYS_OPEN_MAX;
 }
 
-const ENTRY_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
+export const ENTRY_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
 
 /** The entry of a private set name `@<entry>`, or null. */
 export function privateSetEntry(set: string): string | null {
@@ -61,4 +61,10 @@ export function privateKeyRevealPath(projectId: string, entry: string, key: stri
 /** After Reveal once (shown or refused), the row is an ordinary secret: no longer pending. The reload confirms it. */
 export function afterPrivateReveal(keys: readonly PrivateKey[], key: string): PrivateKey[] {
 	return keys.map((row) => (row.key === key ? { ...row, reveal_pending: false } : row));
+}
+
+/** The API path that regenerates one entry-private key (api-v1 v1.54), or null for a bad entry or key. */
+export function privateKeyRegeneratePath(projectId: string, entry: string, key: string): string | null {
+	const reveal = privateKeyRevealPath(projectId, entry, key);
+	return reveal == null ? null : reveal.replace(/\/reveal$/, '/regenerate');
 }

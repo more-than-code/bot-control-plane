@@ -57,6 +57,8 @@ var delegatedDenyPatterns = []string{
 	"POST /v1/projects/{id}/env-sets/{set}/secret",
 	"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal",
 	"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/reveal",
+	"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/regenerate",
+	"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/regenerate",
 	"POST /v1/value-requests/{request_id}/fill",
 	"POST /v1/value-requests/{request_id}/decline",
 	"POST /v1/file-requests/{request_id}/fill",
@@ -251,6 +253,14 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		{"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/reveal", http.MethodPost, "/v1/projects/" + project + "/catalog/web/private-keys/TOKEN/reveal",
 			"", func(t *testing.T) string {
 				return envSnap(t, w, sc.project.ID, "svc")
+			}},
+		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/regenerate", http.MethodPost, "/v1/projects/" + project + "/env-sets/svc/keys/TOKEN/regenerate",
+			`{"generate":{"kind":"hex"}}`, func(t *testing.T) string {
+				return envSnap(t, w, sc.project.ID, "svc")
+			}},
+		{"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/regenerate", http.MethodPost, "/v1/projects/" + project + "/catalog/web/private-keys/TOKEN/regenerate",
+			`{"generate":{"kind":"hex"}}`, func(t *testing.T) string {
+				return envSnap(t, w, sc.project.ID, "@web")
 			}},
 		{"POST /v1/value-requests/{request_id}/fill", http.MethodPost, "/v1/value-requests/" + strings.Repeat("A", 43) + "/fill",
 			`{"value":"nope"}`, func(t *testing.T) string {

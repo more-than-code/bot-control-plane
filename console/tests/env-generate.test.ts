@@ -260,19 +260,23 @@ describe('reveal once (api-v1 v1.27 item 3)', () => {
 });
 
 describe('env row actions', () => {
-	test('secret row actions are Edit, Reveal once (only while pending) and Delete; there is no Regenerate', () => {
-		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: true }), { revealOnce: true });
-		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false }), { revealOnce: false });
-		assert.deepEqual(envRowActions({ is_secret: false, reveal_pending: true }), { revealOnce: false });
+	test('secret row actions are Edit, Reveal once (only while pending), Regenerate (api-v1 v1.54) and Delete', () => {
+		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: true }), { revealOnce: true, regenerate: true });
+		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false }), { revealOnce: false, regenerate: true });
+		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false, needs_value: true }), { revealOnce: false, regenerate: false });
+		assert.deepEqual(envRowActions({ is_secret: false, reveal_pending: true }), { revealOnce: false, regenerate: false });
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
-		const html = decode(render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body);
+		const html = decode(render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS, regenerateAction: '?/regenerateEnvKey' } }).body);
 		const rowLabels = (key: string) => [...html.matchAll(new RegExp(`aria-label="([^"]*${key}[^"]*)"`, 'g'))].map((m) => m[1]);
-		assert.deepEqual(rowLabels('DB_PASSWORD'), ['Edit DB_PASSWORD', 'Reveal DB_PASSWORD once', 'Delete DB_PASSWORD']);
-		assert.deepEqual(rowLabels('API_TOKEN'), ['Edit API_TOKEN', 'Delete API_TOKEN']);
-		assert.equal(/Regenerate/.test(html), false);
+		assert.deepEqual(rowLabels('DB_PASSWORD'), ['Edit DB_PASSWORD', 'Reveal DB_PASSWORD once', 'Regenerate DB_PASSWORD', 'Delete DB_PASSWORD']);
+		assert.deepEqual(rowLabels('API_TOKEN'), ['Edit API_TOKEN', 'Regenerate API_TOKEN', 'Delete API_TOKEN']);
+		assert.equal(rowLabels('LOG_LEVEL').includes('Regenerate LOG_LEVEL'), false);
+		// Without the action (an older caller) there is no Regenerate.
+		const without = decode(render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body);
+		assert.equal(/aria-label="Regenerate/.test(without), false);
 		const table = source('EnvSetTable.svelte');
-		assert.equal(/egenerat/.test(table), false);
 		assert.match(table, /<EnvRevealDialog setName=\{set\.name\} \{revealKey\} action=\{revealAction\} onClose=\{afterReveal\} \/>/);
+		assert.match(table, /<EnvRegenerateDialog setName=\{set\.name\} \{regenKey\} usedBy=\{set\.used_by\} action=\{regenerateAction\} onClose=\{afterRegenerate\} \/>/);
 	});
 
 	test('key flags parse; missing is false, a plain key is never pending, a bad flag drops the set', () => {

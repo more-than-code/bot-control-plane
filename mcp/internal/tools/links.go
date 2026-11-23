@@ -29,6 +29,25 @@ func projectSettingsURL(api *apiclient.Client, projectID, anchor string) string 
 	return api.ConsoleURL(path)
 }
 
+// envKeyURL opens a shared env set on project Settings with one key's row
+// in view and its button focused: Reveal once (reveal) or Regenerate. The
+// link only focuses the button; the person taps it (api-v1 v1.54).
+func envKeyURL(api *apiclient.Client, projectID, set, key string, reveal bool) string {
+	if !uuidPattern.MatchString(projectID) || !entryNamePattern.MatchString(set) || !envKeyPattern.MatchString(key) {
+		return ""
+	}
+	do := "regenerate"
+	if reveal {
+		do = "reveal"
+	}
+	q := url.Values{}
+	q.Set("tab", "settings")
+	q.Set("env.set", set)
+	q.Set("env.key", key)
+	q.Set("env.do", do)
+	return api.ConsoleURL("/projects/" + projectID + "?" + q.Encode() + "#env-sets")
+}
+
 func entryURL(api *apiclient.Client, projectID, entry string) string {
 	if !uuidPattern.MatchString(projectID) || entry == "" {
 		return ""

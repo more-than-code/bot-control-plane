@@ -207,6 +207,7 @@
 					makeSecretAction={actionUrlFrom(page.url, 'makeEnvKeysSecret')}
 					mergeAction={actionUrlFrom(page.url, 'mergeEnvSet')}
 					revealAction={actionUrlFrom(page.url, 'revealEnvKey')}
+					regenerateAction={actionUrlFrom(page.url, 'regenerateEnvKey')}
 					mergeError={settingsField === 'merge' && settingsName === set.name ? message : null}
 					onAction={() => (envSetNote = '')}
 				/>

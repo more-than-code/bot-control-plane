@@ -717,7 +717,8 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 	if !m.projectAliveLocked(projectID) {
 		return store.EnvKey{}, false, store.ErrNotFound
 	}
-	if !catalog.ValidName(name) {
+	// Only a regenerate reaches a private set "@<entry>" (api-v1 v1.54).
+	if !catalog.ValidName(name) && !(in.Regenerate && catalog.IsPrivateSet(name)) {
 		return store.EnvKey{}, false, store.ErrInvalid
 	}
 	if err := catalog.ValidateEnvKey(in.Key); err != nil {
@@ -740,7 +741,16 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 	}
 	created := idx < 0
 	secret := true
-	if created {
+	if in.Regenerate {
+		// api-v1 v1.54: replace an existing secret value only.
+		if !exists || created {
+			return store.EnvKey{}, false, store.ErrNotFound
+		}
+		if !values[idx].IsSecret {
+			return store.EnvKey{}, false, store.ErrSecretFixed
+		}
+		secret = true
+	} else if created {
 		if in.Secret != nil {
 			secret = *in.Secret
 		}
