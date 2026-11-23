@@ -194,9 +194,15 @@ describe('What\'s new moves to the bell', () => {
 		const fake = fakeEvent({ url: 'http://console.example/projects', session: TOKEN, user: USER });
 		fake.jar.set(SEEN_VERSION_COOKIE, latest);
 		const started = Date.now();
+		// AbortSignal.timeout uses an unref'd timer, and the stub fetch holds no
+		// handle, so nothing keeps the event loop alive while the load waits: Node
+		// would exit and cancel this test and every one after it. A server always
+		// holds the loop open; here a ref'd timer stands in for it.
+		const keepAlive = setTimeout(() => {}, 10_000);
 		try {
 			await layoutLoad(fake.event as never);
 		} finally {
+			clearTimeout(keepAlive);
 			restoreEnv();
 		}
 		const took = Date.now() - started;
