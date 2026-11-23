@@ -124,9 +124,13 @@
 
 	// An agent's deep link (api-v1 v1.52: env.set, env.key, env.do) opens this set and focuses that row's Reveal once
 	// or Regenerate button. It never presses it: the person does. Read once, when the table mounts.
+	let linkFollowed = false;
 	$effect(() => {
+		if (linkFollowed) return;
+		linkFollowed = true;
+		// Untracked: a reload after a save (new `set` object, same URL) must not pull focus back to the row.
 		const link = untrack(() => envKeyLink(page.url.searchParams));
-		if (!link || link.set !== set.name) return;
+		if (!link || link.set !== untrack(() => set.name)) return;
 		untrack(() => {
 			panel = { ...panel, open: true };
 		});
