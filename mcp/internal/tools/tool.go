@@ -54,6 +54,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerCreateCatalogEntry(server, api)
 	registerUpdateCatalogEntry(server, api)
 	registerSetEntryImage(server, api)
+	registerListImageTags(server, api)
 	registerDeleteCatalogEntry(server, api)
 	registerCreateEnvSet(server, api)
 	registerListEnvSets(server, api)

@@ -18,11 +18,22 @@ import (
 
 type tagItem struct {
 	Tag string `json:"tag"`
+	// UpdatedAt is the tag's package version updated_at from GitHub, when
+	// known (api-v1 v1.46 item 1).
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
+
+// Tag orders (api-v1 v1.46 item 1): tagOrderTime when push times from GitHub
+// ordered the list, tagOrderName for the v1.16 name order.
+const (
+	tagOrderTime = "time"
+	tagOrderName = "name"
+)
 
 type tagsPayload struct {
 	Items     []tagItem `json:"items"`
 	Truncated bool      `json:"truncated"`
+	Order     string    `json:"order"`
 }
 
 type digestPayload struct {
@@ -42,9 +53,6 @@ func (s *Server) handleImageTags(w http.ResponseWriter, r *http.Request) {
 		s.writeAuth(w, err)
 		return
 	}
-	if !requireConsole(w, p) {
-		return
-	}
 	ref, mat, ok := s.registryImage(w, r, id, false)
 	if !ok {
 		return
@@ -55,10 +63,16 @@ func (s *Server) handleImageTags(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, sent, err
 		}
-		tags, truncated := registry.OrderByTime(list, s.ghcrTagTimes(ctx, ref, mat, repo))
-		out := tagsPayload{Items: make([]tagItem, len(tags)), Truncated: truncated}
+		times := s.ghcrTagTimes(ctx, ref, mat, repo)
+		tags, truncated := registry.OrderByTime(list, times)
+		out := tagsPayload{Items: make([]tagItem, len(tags)), Truncated: truncated, Order: tagOrderName}
 		for i, t := range tags {
 			out.Items[i] = tagItem{Tag: t}
+			if at, ok := times[t]; ok {
+				at = at.UTC()
+				out.Items[i].UpdatedAt = &at
+				out.Order = tagOrderTime
+			}
 		}
 		return out, sent, nil
 	})
@@ -107,9 +121,6 @@ func (s *Server) handleImageDigest(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := authz.Authorize(r.Context(), p.User.ID, id, authz.CapMembers); err != nil {
 		s.writeAuth(w, err)
-		return
-	}
-	if !requireConsole(w, p) {
 		return
 	}
 	ref, mat, ok := s.registryImage(w, r, id, true)
