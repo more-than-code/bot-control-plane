@@ -25,6 +25,7 @@ import { isUuid } from '$lib/server/validate';
 import { setEdge } from '$lib/server/edge-actions';
 import { applyHostFile, loadHostFiles, saveHostFile, saveSecretHostFile } from '$lib/server/host-files';
 import { loadAgentUpgrades } from '$lib/server/agent-upgrade';
+import { applyHostPolicy, loadHostPolicy } from '$lib/server/host-policy';
 import { parseHostEdge } from '$lib/server/edge-shape';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
@@ -216,6 +217,25 @@ async function loadFiles(event: LoadEvent, host: Host, range: RangeKey, processS
 	};
 }
 
+/** Policy (api-v1 v1.51): org owners and admins only; anyone else gets Overview. */
+async function loadPolicy(event: LoadEvent, host: Host, range: RangeKey, processSort: ProcessSort, accessLoad: Promise<AccessData>): Promise<HostPage> {
+	event.depends('host:policy');
+	const [policy, access] = await Promise.all([loadHostPolicy(event, host), accessLoad]);
+	return {
+		host,
+		tab: 'policy',
+		range,
+		processSort,
+		message: null,
+		serviceLinks: {},
+		metrics: [],
+		processes: null,
+		processesMessage: null,
+		policy,
+		...access
+	};
+}
+
 /**
  * The host's org (for the breadcrumb) and, for org owners and admins, the Access section: the host's access
  * rows and the org's projects, read together. A failure stays in the section and does not replace the page.
@@ -278,6 +298,7 @@ export const load: PageServerLoad = async (event) => {
 		let page: HostPage;
 		if (query.tab === 'processes') page = await loadProcesses(event, host, query.range, query.processSort, access);
 		else if (query.tab === 'files') page = await loadFiles(event, host, query.range, query.processSort, access);
+		else if (query.tab === 'policy' && isOrgAdmin(event.locals.orgs, host.org_id)) page = await loadPolicy(event, host, query.range, query.processSort, access);
 		else page = await loadOverview(event, host, query.range, query.processSort, access, query.diskPath);
 		return present(event, { ...page, ...(await alertsRead), canEditAlerts: isOrgAdmin(event.locals.orgs, host.org_id) && host.revoked_at == null });
 	} catch (err) {
@@ -294,6 +315,7 @@ export const actions: Actions = {
 	saveFile: saveHostFile,
 	saveSecretFile: saveSecretHostFile,
 	applyFile: applyHostFile,
+	applyPolicy: applyHostPolicy,
 	snapshot: async (event) => {
 		requireUser(event);
 		const id = hostId(event.params);

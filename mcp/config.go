@@ -24,6 +24,10 @@ type config struct {
 	PublicOrigin      string
 	AllowInsecureHTTP bool
 	ClientSecret      string
+	// ConsoleOrigin is BOT_MCP_CONSOLE_ORIGIN, optional: the console that
+	// tool results link to for steps the person does there (the
+	// privileged-steps principle). Empty means no links.
+	ConsoleOrigin string
 }
 
 func configFrom(getenv func(string) string) (config, error) {
@@ -32,6 +36,7 @@ func configFrom(getenv func(string) string) (config, error) {
 		APIURL:            strings.TrimSpace(getenv("BOT_MCP_API_URL")),
 		PublicOrigin:      strings.TrimSpace(getenv("BOT_MCP_PUBLIC_ORIGIN")),
 		AllowInsecureHTTP: getenv("BOT_MCP_ALLOW_INSECURE_HTTP") == "1",
+		ConsoleOrigin:     strings.TrimSpace(getenv("BOT_MCP_CONSOLE_ORIGIN")),
 	}
 	if cfg.Listen == "" || cfg.APIURL == "" || cfg.PublicOrigin == "" {
 		return config{}, errors.New("BOT_MCP_LISTEN, BOT_MCP_API_URL, and BOT_MCP_PUBLIC_ORIGIN are required")
@@ -44,6 +49,11 @@ func configFrom(getenv func(string) string) (config, error) {
 	}
 	if err := validatePublicOrigin(cfg.PublicOrigin, cfg.AllowInsecureHTTP); err != nil {
 		return config{}, err
+	}
+	if cfg.ConsoleOrigin != "" {
+		if err := validateOrigin("BOT_MCP_CONSOLE_ORIGIN", cfg.ConsoleOrigin, cfg.AllowInsecureHTTP); err != nil {
+			return config{}, err
+		}
 	}
 	secret, err := loadClientSecret(strings.TrimSpace(getenv("BOT_MCP_CLIENT_SECRET")), getenv("BOT_MCP_CLIENT_SECRET_FILE"))
 	if err != nil {
@@ -74,24 +84,30 @@ func validateAPIURL(raw string, allowInsecureHTTP bool) error {
 }
 
 func validatePublicOrigin(raw string, allowInsecureHTTP bool) error {
+	return validateOrigin("BOT_MCP_PUBLIC_ORIGIN", raw, allowInsecureHTTP)
+}
+
+// validateOrigin checks an absolute http(s) origin: https unless loopback
+// or BOT_MCP_ALLOW_INSECURE_HTTP, no user info, path, query or fragment.
+func validateOrigin(name, raw string, allowInsecureHTTP bool) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return errors.New("BOT_MCP_PUBLIC_ORIGIN must be an absolute http(s) URL")
+		return errors.New(name + " must be an absolute http(s) URL")
 	}
 	if u.Scheme == "http" && !apiclient.HTTPAllowed(u.Hostname(), allowInsecureHTTP) {
-		return errors.New("BOT_MCP_PUBLIC_ORIGIN must use https")
+		return errors.New(name + " must use https")
 	}
 	if u.User != nil {
-		return errors.New("BOT_MCP_PUBLIC_ORIGIN must not include user info")
+		return errors.New(name + " must not include user info")
 	}
 	if u.Path != "" && u.Path != "/" {
-		return errors.New("BOT_MCP_PUBLIC_ORIGIN must not include a path")
+		return errors.New(name + " must not include a path")
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("BOT_MCP_PUBLIC_ORIGIN must not include a query or fragment")
+		return errors.New(name + " must not include a query or fragment")
 	}
 	if strings.ContainsAny(raw, "\"\\") {
-		return fmt.Errorf("BOT_MCP_PUBLIC_ORIGIN contains a character that cannot be quoted")
+		return fmt.Errorf("%s contains a character that cannot be quoted", name)
 	}
 	return nil
 }

@@ -110,7 +110,13 @@ const (
 	// state and reason when the row settles.
 	ActionHostAgentUpgrade       = "host.agent_upgrade"
 	ActionHostAgentUpgradeResult = "host.agent_upgrade_result"
-	ActionFileDelete             = "file.delete"
+	// Console host policy (api-v1 v1.51). Detail: host, the change
+	// (edge_from, edge_to, images_added, images_removed, projects_added,
+	// projects_removed), the refusal reason on a denied start; host and
+	// outcome (applied, rolled_back, unknown) when it settles.
+	ActionHostPolicyApply  = "host.policy_apply"
+	ActionHostPolicyResult = "host.policy_result"
+	ActionFileDelete       = "file.delete"
 	// File requests (api-v1 v1.30). The fill itself is file.put with
 	// detail via "file_request".
 	ActionFileRequested       = "file.requested"

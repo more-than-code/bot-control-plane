@@ -771,27 +771,31 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 	if err != nil || len(routes) == 0 {
 		return err
 	}
-	warn := func(msg string) { list.add("routes", readyWarn, msg, readyFix{}) }
+	warn := func(msg string, fix readyFix) { list.add("routes", readyWarn, msg, fix) }
 	domains, err := s.Store.ProjectDomains(ctx, rd.projectID)
 	if err != nil {
 		return err
+	}
+	domainFix := readyFix{}
+	if project, err := s.Store.GetProject(ctx, rd.projectID); err == nil {
+		domainFix = readyFix{Action: fixVerifyDomain, OrgID: idPtr(project.OrgID)}
 	}
 	for _, r := range routes {
 		d, ok := routeDomain(domains, r.Hostname, true)
 		switch {
 		case !ok:
-			warn(fmt.Sprintf("%s is not under a verified domain assigned to this project", r.Hostname))
+			warn(fmt.Sprintf("%s is not under a verified domain assigned to this project", r.Hostname), domainFix)
 			return nil
 		case d.Status == store.DomainLapsed:
-			warn(fmt.Sprintf("domain %s has lapsed; its routes keep serving but no new route is accepted until it verifies again", d.Name))
+			warn(fmt.Sprintf("domain %s has lapsed; its routes keep serving but no new route is accepted until it verifies again", d.Name), domainFix)
 			return nil
 		}
 		if rd.entry.Kind == "program" && rd.entry.Spec.Port == nil {
-			warn(fmt.Sprintf("program %s declares no port; add one to route it", rd.entry.Name))
+			warn(fmt.Sprintf("program %s declares no port; add one to route it", rd.entry.Name), readyFix{})
 			return nil
 		}
 		if _, ok := upstreamPort(rd.entry, r.Port); !ok {
-			warn(portNotPublished(r.Port))
+			warn(portNotPublished(r.Port), readyFix{})
 			return nil
 		}
 	}
@@ -814,7 +818,13 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 			return err
 		}
 		if !h.Programs.EdgeAvailable() {
-			warn(fmt.Sprintf("the edge is not available on %s: %s", h.Name, msgEdgeUnavailable))
+			// api-v1 v1.51: on a console-managed host an org admin allows
+			// the edge on the host's Policy tab.
+			if h.Programs != nil && h.Programs.ConsolePolicy {
+				warn(fmt.Sprintf("the edge is not allowed on %s; an org admin turns it on on the host's Policy tab", h.Name), readyFix{Action: fixAllowEdge, HostID: idPtr(h.ID)})
+				return nil
+			}
+			warn(fmt.Sprintf("the edge is not available on %s: %s", h.Name, msgEdgeUnavailable), readyFix{Action: fixAllowEdge, HostID: idPtr(h.ID)})
 			return nil
 		}
 		edge, err := s.Store.GetHostEdge(ctx, id)
@@ -822,7 +832,7 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 			return err
 		}
 		if !edge.Enabled {
-			warn(fmt.Sprintf("the edge is off on %s; an org admin turns it on in the console", h.Name))
+			warn(fmt.Sprintf("the edge is off on %s; an org admin turns it on in the console", h.Name), readyFix{Action: fixTurnOnEdge, HostID: idPtr(h.ID)})
 			return nil
 		}
 	}

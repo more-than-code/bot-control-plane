@@ -73,6 +73,7 @@ var delegatedDenyPatterns = []string{
 	"POST /v1/me/notifications/read",
 	"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}",
 	"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply",
+	"POST /v1/orgs/{id}/hosts/{host_id}/policy",
 }
 
 var delegatedAllowPatterns = []string{
@@ -306,6 +307,9 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 			return hostFileSnap(t, w, sc.host.ID)
 		}},
 		{"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply", http.MethodPost, org + "/hosts/" + host + "/files/dd-policy/apply", `{"version":1}`, func(t *testing.T) string {
+			return hostFileSnap(t, w, sc.host.ID)
+		}},
+		{"POST /v1/orgs/{id}/hosts/{host_id}/policy", http.MethodPost, org + "/hosts/" + host + "/policy", `{"base_hash":"` + strings.Repeat("a", 64) + `","edge":true,"images":[],"projects":[]}`, func(t *testing.T) string {
 			return hostFileSnap(t, w, sc.host.ID)
 		}},
 	}

@@ -64,6 +64,8 @@ func TestRouteTable(t *testing.T) {
 		"GET /v1/orgs/{id}/hosts/{host_id}/files/{name}/versions/{v}",
 		"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}",
 		"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply",
+		"GET /v1/orgs/{id}/hosts/{host_id}/policy",
+		"POST /v1/orgs/{id}/hosts/{host_id}/policy",
 		"GET /v1/orgs/{id}/domains",
 		"POST /v1/orgs/{id}/domains",
 		"POST /v1/orgs/{id}/domains/{domain_id}/verify",

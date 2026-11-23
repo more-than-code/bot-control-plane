@@ -1,12 +1,13 @@
 import type { AgentUpgrade, Host, HostAccess, HostAlertSettings, HostDisk, HostEdge, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
 import type { HostFilesTab } from './host-files';
+import type { HostPolicyTab } from './host-policy';
 import { isCatalogHost } from './catalog';
 import { parseRange, type RangeKey } from './ranges';
 import type { Column } from './table';
 
 export const METRIC_REFRESH_MS = 30_000;
 
-export const HOST_TABS = ['overview', 'processes', 'files'] as const;
+export const HOST_TABS = ['overview', 'processes', 'files', 'policy'] as const;
 export type HostTab = (typeof HOST_TABS)[number];
 
 export type ProcessSort = 'cpu' | 'memory';
@@ -171,6 +172,8 @@ export type HostPage = {
 	edgeMessage?: string | null;
 	/** The Config files tab (api-v1 v1.44), read only on `tab=files`. */
 	files?: HostFilesTab | null;
+	/** The Policy tab (api-v1 v1.51), read only on `tab=policy` for org owners and admins. */
+	policy?: HostPolicyTab | null;
 	/** The host's agent upgrades, newest first (api-v1 v1.48), read only on the Overview tab. */
 	upgrades?: AgentUpgrade[];
 	/** The upgrade history read failed. */
@@ -188,7 +191,7 @@ export type HostPage = {
 };
 
 export function parseHostTab(value: string | null): HostTab {
-	if (value === 'processes' || value === 'files') return value;
+	if (value === 'processes' || value === 'files' || value === 'policy') return value;
 	return 'overview';
 }
 

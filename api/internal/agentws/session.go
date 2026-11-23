@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/hostpolicy"
 	"github.com/more-than-code/bot-control-plane/api/internal/ingest"
 	"github.com/more-than-code/bot-control-plane/api/internal/secret"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
@@ -360,6 +361,15 @@ func parsePrograms(raw json.RawMessage) (*store.HostPrograms, bool) {
 	// agent-protocol v1.18 item 3.
 	if !validHostFiles(p.HostFiles) {
 		return nil, false
+	}
+	// agent-protocol v1.22 item 1: patterns only from an opted-in host.
+	if len(p.ImagePatterns) > hostpolicy.MaxImages || (!p.ConsolePolicy && p.ImagePatterns != nil) {
+		return nil, false
+	}
+	for _, pat := range p.ImagePatterns {
+		if !hostpolicy.ValidPattern(pat) {
+			return nil, false
+		}
 	}
 	// agent-protocol v1.15 item 2: the pinned Caddy image, by digest.
 	if p.Edge != nil && p.Edge.Image != "" && !edgeImageRe.MatchString(p.Edge.Image) {

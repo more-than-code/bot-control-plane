@@ -67,6 +67,14 @@ type HostPrograms struct {
 	// 2); absent = false. It gates ImageSpec network "host" (api-v1 v1.50
 	// item 1). The API never puts it on a Host answer.
 	HostNetwork bool `json:"host_network,omitempty"`
+	// ConsolePolicy is hello.programs.console_policy (agent-protocol v1.22
+	// item 1, api-v1 v1.51); absent = false. The host's root lets org owners
+	// and admins change edge, images and projects from the console.
+	ConsolePolicy bool `json:"console_policy,omitempty"`
+	// ImagePatterns is hello.programs.image_patterns, sent only when
+	// ConsolePolicy is true. The API never puts it on a Host answer; the
+	// org-scoped policy route returns it to org owners and admins.
+	ImagePatterns []string `json:"image_patterns,omitzero"`
 }
 
 // HostEdgePolicy is the runner.toml edge switch and the Caddy image digest

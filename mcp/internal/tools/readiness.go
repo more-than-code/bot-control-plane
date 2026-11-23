@@ -107,8 +107,8 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 			"the image registry is reachable with the stored login, and, with host_id, deploy access, the host being online, containers, the host's image policy and shared networks, and for an entry with routes (set_routes), the routes check: a verified domain, a published port and the edge on the entry's host (an org admin turns the edge on in the console). " +
 			"Each check has a status (ok, missing, warn, unknown) and a fix. Fixes you can do yourself: fill_value with request_env_value, create_env_set with create_env_set, add_file with request_file (the person adds the file in the browser); " +
 			"you can start connect_github with connect_registry, and the person approves on github.com. " +
-			"Fixes for the person: ask the person to add a registry login in the console (" + settingsHint + "), or ask an org admin to grant deploy access. " +
-			"For host_policy_snippet, call host_policy_snippet and show the person the snippet. Advisory only: deploy keeps its own refusals. " +
+			"Fixes for the person (add_registry_login, grant_deploy_access, host_policy_snippet, allow_edge, turn_on_edge, verify_domain): the fix carries console_url, the console page for that step, already pointed at the change; post it for the person. " +
+			"Never edit a host's runner.toml or enter a secret yourself. For host_policy_snippet on a host whose root has not let the console manage its policy, also call host_policy_snippet and show the person the snippet. " + linkRule + " Advisory only: deploy keeps its own refusals. " +
 			"Needs owner or admin, or the entry's deploy permission on a host the project deploys to. Reads stored API data and may ask the image registry (cached). Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(checkReadinessSchema),
@@ -159,7 +159,7 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 		if fail != nil {
 			return fail
 		}
-		out, summary, err := projectReadiness(payload, in.ProjectID, label)
+		out, summary, err := projectReadinessLinks(api, payload, in.ProjectID, label)
 		if err != nil {
 			return toolError("error", err.Error())
 		}
@@ -202,18 +202,26 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 		if err := json.Unmarshal(payload, &body); err != nil || !imageAccesses[body.Access] || !imageLogins[body.Login] || !registryHostPattern.MatchString(body.Registry) {
 			return toolError("error", errStatusShape.Error())
 		}
-		out, err := json.Marshal(map[string]any{"registry": body.Registry, "access": body.Access, "login": body.Login})
+		result := map[string]any{"registry": body.Registry, "access": body.Access, "login": body.Login}
+		summary := accessSummary(body.Registry, body.Access, body.Login)
+		if body.Access == "private_no_login" || body.Access == "login_failed" {
+			if link := projectSettingsURL(api, in.ProjectID, "registries"); link != "" {
+				result["console_url"] = link
+				summary = withLink(summary, link)
+			}
+		}
+		out, err := json.Marshal(result)
 		if err != nil {
 			return toolError("error", "internal error")
 		}
-		return present(out, accessSummary(body.Registry, body.Access, body.Login))
+		return present(out, summary)
 	})
 
 	addTool(server, &mcp.Tool{
 		Name: "host_policy_snippet",
 		Description: noSecretRule + " Get the lines a host's root adds to /etc/bot-agent/runner.toml so the host allows this image entry: the image pattern (the entry's repository), " +
 			"the project slug, the runner.toml lines and the matching install.sh command. Show the snippet to the person: only the host's root can apply it, " +
-			"over SSH or Cloud Assistant; Deploybot never edits runner.toml. Use it when check_readiness reports host_policy missing. Needs owner or admin. Text only. Does not contact any host.",
+			"over SSH or Cloud Assistant, unless the root set console_policy = true: then an org owner or admin allows the image on the host's console Policy tab (console_url opens it with the change staged). The agent never edits runner.toml. " + linkRule + " Use it when check_readiness reports host_policy missing. Needs owner or admin. Text only. Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(hostPolicySnippetSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -252,14 +260,23 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 		toml := fmt.Sprintf("images = [%q]\nprojects = [%q]\n", body.ImagePattern, body.Project)
 		command := fmt.Sprintf("sudo ./install.sh install --runner --project %s --image '%s'", body.Project, body.ImagePattern)
 		note := clip(publicString(body.Note), maxErrorBytes)
-		out, err := json.Marshal(map[string]any{
+		link := hostPolicyURL(api, in.HostID, false, body.ImagePattern)
+		result := map[string]any{
 			"image_pattern": body.ImagePattern, "project": body.Project, "toml": toml, "command": command, "note": note,
-		})
+		}
+		if link != "" {
+			result["console_url"] = link
+		}
+		out, err := json.Marshal(result)
 		if err != nil {
 			return toolError("error", "internal error")
 		}
 		summary := "Show this to the person; the host's root applies it (Deploybot never edits runner.toml).\n" +
 			"Add to /etc/bot-agent/runner.toml, keeping the entries already there:\n" + toml + "Or, for a new policy: " + command + "\n" + note
+		if link != "" {
+			summary = "Send the person this link: on a host whose root set console_policy = true, an org owner or admin allows the image on the host's Policy tab, with the change already staged: " + link + "\n" +
+				"On a host without it, the host's root applies the snippet instead.\n" + summary
+		}
 		return present(out, summary)
 	})
 }
@@ -273,9 +290,15 @@ type readyRow struct {
 	Next    string         `json:"next,omitempty"`
 }
 
-// projectReadiness rebuilds the readiness answer from allowlisted fields
-// and adds, per check, what to do next.
+// projectReadiness is projectReadinessLinks with no console links.
 func projectReadiness(payload json.RawMessage, projectID, entry string) (json.RawMessage, string, error) {
+	return projectReadinessLinks(nil, payload, projectID, entry)
+}
+
+// projectReadinessLinks rebuilds the readiness answer from allowlisted
+// fields and adds, per check, what to do next and, for a step the person
+// does, console_url.
+func projectReadinessLinks(api *apiclient.Client, payload json.RawMessage, projectID, entry string) (json.RawMessage, string, error) {
 	var body struct {
 		Ready  bool `json:"ready"`
 		Checks []struct {
@@ -298,7 +321,11 @@ func projectReadiness(payload json.RawMessage, projectID, entry string) (json.Ra
 		fix := projectFix(c.Fix)
 		row := readyRow{Check: c.Check, Status: c.Status, Message: readinessMessage(c.Message), Fix: fix}
 		if c.Status != "ok" {
-			row.Next = nextStep(fix, projectID, entry)
+			link := fixURL(api, fix, projectID)
+			row.Next = withLink(nextStep(fix, projectID, entry), link)
+			if link != "" {
+				fix["console_url"] = link
+			}
 		}
 		if c.Status == "missing" {
 			missing++
@@ -348,7 +375,8 @@ func readinessMessage(msg string) string {
 func projectFix(in map[string]any) map[string]any {
 	action, _ := in["action"].(string)
 	switch action {
-	case "create_env_set", "fill_value", "add_file", "connect_github", "add_registry_login", "grant_deploy_access", "host_policy_snippet", "none":
+	case "create_env_set", "fill_value", "add_file", "connect_github", "add_registry_login", "grant_deploy_access", "host_policy_snippet",
+		"allow_edge", "turn_on_edge", "verify_domain", "none":
 	default:
 		return map[string]any{"action": "none"}
 	}
@@ -363,6 +391,8 @@ func projectFix(in map[string]any) map[string]any {
 	keep("name", fileNamePattern)
 	keep("registry", registryHostPattern)
 	keep("host_id", uuidPattern)
+	keep("org_id", uuidPattern)
+	keep("image_pattern", imagePatternRule)
 	return out
 }
 
@@ -397,7 +427,13 @@ func nextStep(fix map[string]any, projectID, entry string) string {
 	case "grant_deploy_access":
 		return "ask an org owner or admin to grant this project deploy access to the host in the console (the host's Access section)."
 	case "host_policy_snippet":
-		return fmt.Sprintf("call host_policy_snippet with project_id %s, entry %s and host_id %s, and show the person the snippet.", projectID, entry, str("host_id"))
+		return fmt.Sprintf("ask an org owner or admin to allow the image on the host's Policy tab in the console; if the host's root has not set console_policy = true, call host_policy_snippet with project_id %s, entry %s and host_id %s, and show the person the snippet.", projectID, entry, str("host_id"))
+	case "allow_edge":
+		return "ask an org owner or admin to allow the edge on the host's Policy tab in the console (the host's root must have set console_policy = true; otherwise the root adds edge = true to runner.toml)."
+	case "turn_on_edge":
+		return "ask an org owner or admin to turn the edge on in the host's Edge section in the console."
+	case "verify_domain":
+		return "ask an org owner or admin to add, verify and assign the domain to this project in the organization's Domains in the console."
 	default:
 		return ""
 	}

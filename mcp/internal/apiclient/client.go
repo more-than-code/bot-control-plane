@@ -39,6 +39,25 @@ const maxResponseBytes = 8 << 20
 type Client struct {
 	base *url.URL
 	http *http.Client
+	// console is BOT_MCP_CONSOLE_ORIGIN with no trailing slash, or "" when
+	// unset: tool results then carry no console links.
+	console string
+}
+
+// SetConsoleOrigin sets the console origin tool results link to. Call it
+// before the client is shared.
+func (c *Client) SetConsoleOrigin(origin string) {
+	c.console = strings.TrimRight(origin, "/")
+}
+
+// ConsoleURL is the console origin plus path, which starts with "/" and
+// may carry a query and a fragment. It is "" when no origin is set or the
+// path does not start with exactly one "/".
+func (c *Client) ConsoleURL(path string) string {
+	if c == nil || c.console == "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return ""
+	}
+	return c.console + path
 }
 
 // HTTPAllowed reports whether a cleartext http URL for hostname is permitted.

@@ -88,6 +88,12 @@ type Server struct {
 	// agentUpgradeWaitTest, when non-zero, replaces the 130 s agent upgrade
 	// task wait. Tests only.
 	agentUpgradeWaitTest time.Duration
+	// hostPolicies is the console policy applies waiting for a hello
+	// (api-v1 v1.51), by host.
+	hostPolicies hostPolicyRuns
+	// hostPolicyWaitTest, when non-zero, replaces the 70 s policy task
+	// wait. Tests only.
+	hostPolicyWaitTest time.Duration
 }
 
 // delegatedPolicy says what an api_delegated session may do on a route.
@@ -165,6 +171,9 @@ func contractRoutes() []route {
 		{"GET /v1/orgs/{id}/hosts/{host_id}/files/{name}/versions/{v}", false, (*Server).handleHostFileVersion, delegatedDenyRead},
 		{"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}", false, (*Server).handleHostFilePut, delegatedDeny},
 		{"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply", false, (*Server).handleHostFileApply, delegatedDeny},
+		// api-v1 v1.51: a host's console-managed policy, console only.
+		{"GET /v1/orgs/{id}/hosts/{host_id}/policy", false, (*Server).handleHostPolicyGet, delegatedDenyRead},
+		{"POST /v1/orgs/{id}/hosts/{host_id}/policy", false, (*Server).handleHostPolicyApply, delegatedDeny},
 		// api-v1 v1.35 item 1: org domains, console only.
 		{"GET /v1/orgs/{id}/domains", false, (*Server).handleDomainList, delegatedDenyRead},
 		{"POST /v1/orgs/{id}/domains", false, (*Server).handleDomainCreate, delegatedDeny},
@@ -688,11 +697,13 @@ func (s *Server) withUpdateHint(h store.Host, last *store.AgentUpgrade) hostView
 	// Host; v1.48: nor is programs.agent_upgrade; v1.50: nor is
 	// programs.host_network. Every Host answer goes through here
 	// (hostViews, hostRead).
-	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.HostNetwork) {
+	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.HostNetwork || h.Programs.ImagePatterns != nil) {
 		cp := *h.Programs
 		cp.HostFiles = nil
 		cp.AgentUpgrade = false
 		cp.HostNetwork = false
+		// api-v1 v1.51: image patterns only through the policy route.
+		cp.ImagePatterns = nil
 		h.Programs = &cp
 	}
 	v := hostView{Host: h, AgentUpgradeAllowed: allowed}
