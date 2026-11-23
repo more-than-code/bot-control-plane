@@ -33,7 +33,7 @@ const (
 	fixRegistryLogin = "add_registry_login"
 	fixGrantDeploy   = "grant_deploy_access"
 	fixPolicySnippet = "host_policy_snippet"
-	// api-v1 v1.49: the routes check's console steps.
+	// api-v1 v1.51: the routes check's console steps.
 	fixVerifyDomain = "verify_domain"
 	fixAllowEdge    = "allow_edge"
 	fixTurnOnEdge   = "turn_on_edge"
@@ -58,7 +58,7 @@ type readyFix struct {
 	Registry string     `json:"registry,omitempty"`
 	HostID   *uuid.UUID `json:"host_id,omitempty"`
 	// ImagePattern is the repository a host_policy_snippet fix allows
-	// (api-v1 v1.49).
+	// (api-v1 v1.51).
 	ImagePattern string `json:"image_pattern,omitempty"`
 	// OrgID is the org whose Domains a verify_domain fix opens.
 	OrgID *uuid.UUID `json:"org_id,omitempty"`
@@ -624,6 +624,16 @@ func (s *Server) checkHost(ctx context.Context, rd readiness, host store.Host, l
 	if !rd.isImage {
 		return nil
 	}
+	// api-v1 v1.50 item 9: a host-network entry is reported under the
+	// same check name, so readers keep their list of checks.
+	if rd.img.Network == catalog.NetworkHost {
+		if hostNetworkReady(host, rd.img, "deploy") {
+			list.add("networks", readyOK, host.Name+" allows host networking", readyFix{})
+		} else {
+			list.add("networks", readyMissing, reasonNoHostNetwork, readyFix{})
+		}
+		return nil
+	}
 	if len(rd.img.Networks) == 0 {
 		list.add("networks", readyOK, "the entry joins no shared networks", readyFix{})
 		return nil
@@ -649,7 +659,7 @@ func (s *Server) checkHostPolicy(ctx context.Context, rd readiness, host store.H
 		list.add("host_policy", readyUnknown, "the host's policy is checked when the program runs", readyFix{})
 		return nil
 	}
-	// api-v1 v1.49: a console-managed host sends its image patterns, so
+	// api-v1 v1.51: a console-managed host sends its image patterns, so
 	// the check is exact.
 	if host.Programs != nil && host.Programs.ConsolePolicy {
 		ref, err := catalog.ParseImageRef(rd.img.Image)

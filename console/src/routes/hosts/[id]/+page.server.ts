@@ -1,7 +1,8 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
 import type { Host, HostAccess, HostEdge, ProcessSample, Project } from '$lib/api-types';
 import type { HostPage, MetricChart, ProcessSort, ServiceLink } from '$lib/host-view';
-import { hostQuery, METRIC_SPECS } from '$lib/host-view';
+import { hostQuery, MEM_API_SERIES, METRIC_SPECS, withAvailablePercent } from '$lib/host-view';
+import { loadAlertSettings, loadHostDisks, saveAlerts } from '$lib/server/host-alerts';
 import { rangeWindow, type RangeKey } from '$lib/ranges';
 import { processServiceHref, serviceLabel } from '$lib/service-label';
 import { removeAccessAction, setAccessAction } from '$lib/server/access-actions';
@@ -63,25 +64,45 @@ function blank(tab: HostPage['tab'], range: RangeKey, processSort: ProcessSort, 
 	};
 }
 
-async function loadMetric(event: RequestEvent, id: string, spec: (typeof METRIC_SPECS)[number], window: { from: string; to: string }): Promise<MetricChart> {
+async function loadMetric(
+	event: RequestEvent,
+	id: string,
+	spec: (typeof METRIC_SPECS)[number],
+	window: { from: string; to: string },
+	diskPath = '/'
+): Promise<MetricChart> {
 	const params = new URLSearchParams({ m: spec.m, from: window.from, to: window.to });
+	// api-v1 v1.49 item 4: the disk chart is one mount.
+	if (spec.m === 'disk' && diskPath !== '/') params.set('path', diskPath);
+	const names = spec.m === 'mem' ? [...MEM_API_SERIES] : spec.series.map((series) => series.name);
 	try {
 		const payload = await apiFetch(event, `/v1/hosts/${id}/metrics?${params.toString()}`);
-		const parsed = parseMetricPayload(payload, spec.m, spec.series.map((series) => series.name));
+		const parsed = parseMetricPayload(payload, spec.m, names);
 		if (!parsed) return { m: spec.m, message: 'The API returned an unexpected response.', step: null, series: [] };
-		return { m: spec.m, message: null, step: parsed.step, series: parsed.series };
+		const series = spec.m === 'mem' ? withAvailablePercent(parsed.series) : parsed.series;
+		return { m: spec.m, message: null, step: parsed.step, series };
 	} catch (err) {
 		return { m: spec.m, message: loadFailure(err).message, step: null, series: [] };
 	}
 }
 
-async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, processSort: ProcessSort, accessLoad: Promise<AccessData>): Promise<HostPage> {
+async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, processSort: ProcessSort, accessLoad: Promise<AccessData>, chosenDisk: string): Promise<HostPage> {
 	event.depends('host:metrics');
 	const window = rangeWindow(range, Date.now());
-	const [metrics, access, upgrades] = await Promise.all([
-		Promise.all(METRIC_SPECS.map((spec) => loadMetric(event, host.id, spec, window))),
+	const disksRead = loadHostDisks(event, host.id);
+	// Without `?disk=`, a host with exactly one mount charts that mount (it need not be `/`); only the disk chart
+	// waits for the mount list.
+	const pathRead = event.url.searchParams.has('disk')
+		? Promise.resolve(chosenDisk)
+		: disksRead.then((list) => (list.length === 1 ? list[0].path : chosenDisk));
+	const [metrics, access, upgrades, disks, diskPath] = await Promise.all([
+		Promise.all(
+			METRIC_SPECS.map(async (spec) => loadMetric(event, host.id, spec, window, spec.m === 'disk' ? await pathRead : chosenDisk))
+		),
 		accessLoad,
-		loadAgentUpgrades(event, host.id)
+		loadAgentUpgrades(event, host.id),
+		disksRead,
+		pathRead
 	]);
 	return {
 		host,
@@ -91,6 +112,8 @@ async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, proce
 		message: null,
 		serviceLinks: {},
 		metrics,
+		disks,
+		diskPath,
 		processes: null,
 		processesMessage: null,
 		upgrades: upgrades.items,
@@ -194,7 +217,7 @@ async function loadFiles(event: LoadEvent, host: Host, range: RangeKey, processS
 	};
 }
 
-/** Policy (api-v1 v1.49): org owners and admins only; anyone else gets Overview. */
+/** Policy (api-v1 v1.51): org owners and admins only; anyone else gets Overview. */
 async function loadPolicy(event: LoadEvent, host: Host, range: RangeKey, processSort: ProcessSort, accessLoad: Promise<AccessData>): Promise<HostPage> {
 	event.depends('host:policy');
 	const [policy, access] = await Promise.all([loadHostPolicy(event, host), accessLoad]);
@@ -269,12 +292,15 @@ export const load: PageServerLoad = async (event) => {
 			const project = await projectForServices(event, host);
 			if (project) redirect(303, `/projects/${project}?tab=catalog&catalog.host=${host.id}`);
 		}
-		// The access reads run alongside the tab's own reads.
+		// The access and alert reads run alongside the tab's own reads.
 		const access = loadAccess(event, host);
-		if (query.tab === 'processes') return present(event, await loadProcesses(event, host, query.range, query.processSort, access));
-		if (query.tab === 'files') return present(event, await loadFiles(event, host, query.range, query.processSort, access));
-		if (query.tab === 'policy' && isOrgAdmin(event.locals.orgs, host.org_id)) return present(event, await loadPolicy(event, host, query.range, query.processSort, access));
-		return present(event, await loadOverview(event, host, query.range, query.processSort, access));
+		const alertsRead = loadAlertSettings(event, host.id);
+		let page: HostPage;
+		if (query.tab === 'processes') page = await loadProcesses(event, host, query.range, query.processSort, access);
+		else if (query.tab === 'files') page = await loadFiles(event, host, query.range, query.processSort, access);
+		else if (query.tab === 'policy' && isOrgAdmin(event.locals.orgs, host.org_id)) page = await loadPolicy(event, host, query.range, query.processSort, access);
+		else page = await loadOverview(event, host, query.range, query.processSort, access, query.diskPath);
+		return present(event, { ...page, ...(await alertsRead), canEditAlerts: isOrgAdmin(event.locals.orgs, host.org_id) && host.revoked_at == null });
 	} catch (err) {
 		const failure = loadFailure(err);
 		return present(event, blank(query.tab, query.range, query.processSort, failure.message));
@@ -285,6 +311,7 @@ export const actions: Actions = {
 	setAccess: setAccessAction('access'),
 	removeAccess: removeAccessAction('access'),
 	setEdge,
+	saveAlerts,
 	saveFile: saveHostFile,
 	saveSecretFile: saveSecretHostFile,
 	applyFile: applyHostFile,

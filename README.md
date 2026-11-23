@@ -11,7 +11,7 @@ The server side of [Deploybot](https://deploybot.dev): the API, the MCP gateway 
 | `api/` | The API: Google sign-in and sessions, organizations and projects with their members, join tokens, host credentials and host access, the agent WebSocket, metrics ingest into Postgres, the catalog, audit, and the OAuth server for MCP clients. The only part that writes the database or decides permissions. [README](api/README.md), [design](api/docs/design.md). |
 | `mcp/` | The stateless MCP gateway (Streamable HTTP at `/mcp`), acting as the signed-in user, and the `deploybot login` and `deploybot logout` CLI logic (`mcp/cli`). [README](mcp/README.md), [design](mcp/docs/design.md). |
 | `console/` | The SvelteKit web console (adapter-node), a BFF that reads and writes only through the API; it also serves the public site pages. [README](console/README.md), [design](console/docs/design.md). |
-| `cmd/deploybot-server/` | The server binary: `deploybot-server api [--migrate]` or `deploybot-server mcp`. Called as `bot-api-server` or `bot-mcp-server` (for example through a symlink), it runs that mode. |
+| `cmd/deploybot-server/` | The server binary: `deploybot-server api [--migrate]` or `deploybot-server mcp`, plus `deploybot-server health <url>` (a loopback HTTP check for the container healthcheck). Called as `bot-api-server` or `bot-mcp-server` (for example through a symlink), it runs that mode. |
 | `cmd/deploybot/` | The user CLI: `deploybot login`, `deploybot logout`. |
 | `docs/contracts/` | The frozen contracts: `api-v1.md`, `oauth-v1.md`, `agent-protocol-v1.md`. |
 
@@ -64,6 +64,8 @@ One tag (`vX.Y.Z`) covers the whole repo and produces one bundle:
 - `SHA256SUMS` and `RELEASE.md`.
 
 The `deploybot` CLI is not part of the server bundle. bot-agent is released from its own repo.
+
+Container images (`deploybot-server` and `deploybot-console`) are built from the same tag with `build/docker/*.Dockerfile`; see [docs/containers.md](docs/containers.md).
 
 ## License
 

@@ -46,7 +46,7 @@ Bootstrap cost for bot-ops-vm: it runs agent 0.2.14, which predates server
 upgrades, so it needs one SSH session to install the new agent (0.2.15 or
 later) and add `console_policy = true`. After that, edge and images are console-only work.
 
-### 2.2 Agent (agent-protocol v1.21, additive, gated)
+### 2.2 Agent (agent-protocol v1.22, additive, gated)
 
 1. Hello: `programs.console_policy` (bool) and `programs.image_patterns`
    (the runner.toml `images`, sent only when `console_policy` is true; at most
@@ -78,7 +78,7 @@ later) and add `console_policy = true`. After that, edge and images are console-
    previous file back and restart again (`rolled_back`, `not_reconnected`).
    Writes `result.json` for the root and the journal.
 
-### 2.3 API (api-v1 v1.49)
+### 2.3 API (api-v1 v1.51)
 
 - `GET /v1/orgs/{id}/hosts/{host_id}/policy`:
   `{managed, policy_hash, edge, images, projects, apply}`. `apply` is the
@@ -150,4 +150,4 @@ runner.toml keys.
 2. API: routes, task, audit, readiness, tests.
 3. Console: Policy tab, deep-link staging, Edge card link, tests.
 4. MCP: console origin, link package, readiness fixes and tool results, tests.
-5. Contracts: api-v1 v1.49 and agent-protocol v1.21 sections for the umbrella.
+5. Contracts: api-v1 v1.51 and agent-protocol v1.22 sections for the umbrella.

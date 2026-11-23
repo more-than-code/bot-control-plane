@@ -329,7 +329,7 @@ func TestReadinessChecksAndFixes(t *testing.T) {
 		t.Fatal("a later deploy should clear host_policy")
 	}
 
-	// api-v1 v1.49: a console-managed host sends its patterns, so the check
+	// api-v1 v1.51: a console-managed host sends its patterns, so the check
 	// is exact and names the pattern in the fix.
 	h, err := f.w.mem.GetHost(ctx, f.sc.host.ID)
 	if err != nil || h.Programs == nil {

@@ -10,7 +10,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 )
 
-// api-v1 v1.49: a host's console-managed policy.
+// api-v1 v1.51: a host's console-managed policy.
 
 var (
 	policyBase = strings.Repeat("b", 64)

@@ -17,7 +17,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-// A host's console-managed policy (api-v1 v1.49, agent-protocol v1.21,
+// A host's console-managed policy (api-v1 v1.51, agent-protocol v1.22,
 // spec docs/spec-console-host-policy.md). A host whose root set
 // console_policy = true lets org owners and admins change edge, images and
 // projects. The agent stages the change and restarts; the API learns the
@@ -36,7 +36,7 @@ const (
 	hostPolicyKeep = 24 * time.Hour
 )
 
-// Apply states (api-v1 v1.49 item 2).
+// Apply states (api-v1 v1.51 item 2).
 const (
 	policyRunning    = "running"
 	policyApplied    = "applied"

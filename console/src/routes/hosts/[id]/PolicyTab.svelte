@@ -35,7 +35,7 @@
 	import { actionUrlFrom } from '$lib/url';
 
 	/**
-	 * Policy (api-v1 v1.49): the part of runner.toml org owners and admins may change on a host whose root set
+	 * Policy (api-v1 v1.51): the part of runner.toml org owners and admins may change on a host whose root set
 	 * console_policy = true. A deep link stages a change (policy.edge, policy.add_image, policy.add_project); nothing
 	 * applies until the person confirms Apply. The host checks the new file, restarts its agent and puts the old file
 	 * back if the agent does not reconnect.

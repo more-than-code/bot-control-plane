@@ -1,5 +1,5 @@
 /**
- * Host policy (api-v1 v1.49): the Policy tab's read and its apply action. Both go to
+ * Host policy (api-v1 v1.51): the Policy tab's read and its apply action. Both go to
  * `/v1/orgs/{org}/hosts/{host}/policy`, which only org owners and admins may call from the console.
  */
 import { error, fail, isHttpError, isRedirect, type RequestEvent } from '@sveltejs/kit';

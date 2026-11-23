@@ -20,7 +20,7 @@ import { envelope, fakeEvent, installFetch, ORG, restoreEnv, TOKEN, useApi, USER
 import { setPageUrl } from './stubs/app-state.ts';
 import type { Org } from '../src/lib/api-types.ts';
 
-// api-v1 v1.49: a host's console-managed policy (spec-console-host-policy).
+// api-v1 v1.51: a host's console-managed policy (spec-console-host-policy).
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000ab';
 const HASH = 'a'.repeat(64);

@@ -89,7 +89,7 @@ type Server struct {
 	// task wait. Tests only.
 	agentUpgradeWaitTest time.Duration
 	// hostPolicies is the console policy applies waiting for a hello
-	// (api-v1 v1.49), by host.
+	// (api-v1 v1.51), by host.
 	hostPolicies hostPolicyRuns
 	// hostPolicyWaitTest, when non-zero, replaces the 70 s policy task
 	// wait. Tests only.
@@ -171,7 +171,7 @@ func contractRoutes() []route {
 		{"GET /v1/orgs/{id}/hosts/{host_id}/files/{name}/versions/{v}", false, (*Server).handleHostFileVersion, delegatedDenyRead},
 		{"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}", false, (*Server).handleHostFilePut, delegatedDeny},
 		{"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply", false, (*Server).handleHostFileApply, delegatedDeny},
-		// api-v1 v1.49: a host's console-managed policy, console only.
+		// api-v1 v1.51: a host's console-managed policy, console only.
 		{"GET /v1/orgs/{id}/hosts/{host_id}/policy", false, (*Server).handleHostPolicyGet, delegatedDenyRead},
 		{"POST /v1/orgs/{id}/hosts/{host_id}/policy", false, (*Server).handleHostPolicyApply, delegatedDeny},
 		// api-v1 v1.35 item 1: org domains, console only.
@@ -289,6 +289,10 @@ func contractRoutes() []route {
 		// api-v1 v1.48: agent upgrades; the MCP server asks for confirm first.
 		{"POST /v1/hosts/{id}/agent-upgrade", false, (*Server).handleAgentUpgrade, delegatedAllow},
 		{"GET /v1/hosts/{id}/agent-upgrades", false, (*Server).handleAgentUpgrades, delegatedAllow},
+		// api-v1 v1.49 items 3 and 4: alert settings and mounts.
+		{"GET /v1/hosts/{id}/alert-settings", false, (*Server).handleAlertSettingsGet, delegatedAllow},
+		{"PUT /v1/hosts/{id}/alert-settings", false, (*Server).handleAlertSettingsPut, delegatedAllow},
+		{"GET /v1/hosts/{id}/disks", false, (*Server).handleHostDisks, delegatedAllow},
 		// api-v1 v1.24 items 3 and 4: removed routes answer 410 for one release.
 		{"GET /v1/hosts/{id}/shares", false, (*Server).handleSharesGone, delegatedAllow},
 		{"GET /v1/hosts/{id}/shares/{project_id}", false, (*Server).handleSharesGone, delegatedAllow},
@@ -690,13 +694,15 @@ type hostView struct {
 func (s *Server) withUpdateHint(h store.Host, last *store.AgentUpgrade) hostView {
 	allowed := agentUpgradeAllowed(h)
 	// api-v1 v1.44: host files are listed by their own route, never on a
-	// Host; v1.48: nor is programs.agent_upgrade. Every Host answer goes
-	// through here (hostViews, hostRead).
-	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.ImagePatterns != nil) {
+	// Host; v1.48: nor is programs.agent_upgrade; v1.50: nor is
+	// programs.host_network. Every Host answer goes through here
+	// (hostViews, hostRead).
+	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.HostNetwork || h.Programs.ImagePatterns != nil) {
 		cp := *h.Programs
 		cp.HostFiles = nil
 		cp.AgentUpgrade = false
-		// api-v1 v1.49: image patterns only through the policy route.
+		cp.HostNetwork = false
+		// api-v1 v1.51: image patterns only through the policy route.
 		cp.ImagePatterns = nil
 		h.Programs = &cp
 	}

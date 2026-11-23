@@ -28,7 +28,7 @@ const listCatalogSchema = `{
 func registerListCatalog(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "list_catalog",
-		Description: "List catalog entries in a project. Returns name, kind, command_display, last_deployed_at (RFC3339 time of the newest deploy or run by a person or AI agent, or null), and the actions the caller may take. An image entry also returns the image reference, service or job, ports, volume short names, managed file names, env key names, env set names, healthcheck true or false (not the healthcheck command), and logging as max_size_mb and max_files or null. It does not return env values, file contents, or file targets. Does not return the program spec or its environment. get_catalog_entry returns one image entry's full spec. Does not contact the host.",
+		Description: "List catalog entries in a project. Returns name, kind, command_display, last_deployed_at (RFC3339 time of the newest deploy or run by a person or AI agent, or null), and the actions the caller may take. An image entry also returns the image reference, service or job, ports, volume short names, managed file names, env key names, env set names, healthcheck true or false (not the healthcheck command), and logging as max_size_mb and max_files or null, and network (\"host\" when the container runs on the host's network, else null). It does not return env values, file contents, or file targets. Does not return the program spec or its environment. get_catalog_entry returns one image entry's full spec. Does not contact the host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(listCatalogSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -150,6 +150,7 @@ func projectImageEntry(row map[string]any) map[string]any {
 		"logging":         projectLogging(spec),
 		"health_policy":   projectHealthPolicyFor(spec),
 		"networks":        networkList(spec["networks"]),
+		"network":         hostNetwork(spec),
 		"my_actions":      stringList(row["my_actions"]),
 	}
 }
@@ -347,4 +348,13 @@ func stringList(v any) []any {
 		out = append(out, replaceControls(s))
 	}
 	return out
+}
+
+// hostNetwork is spec.network ("host", api-v1 v1.50) or nil when absent or
+// anything else.
+func hostNetwork(spec map[string]any) any {
+	if spec != nil && spec["network"] == "host" {
+		return "host"
+	}
+	return nil
 }

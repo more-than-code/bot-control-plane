@@ -1,5 +1,5 @@
 /**
- * Host policy from the console (api-v1 v1.49): the part of a host's runner.toml that org owners and admins may
+ * Host policy from the console (api-v1 v1.51): the part of a host's runner.toml that org owners and admins may
  * change once the host's root set `console_policy = true`: the edge, the image patterns and the projects. This
  * module is the page's pure side: the shapes, the rules copied from the API (which stays the authority), the
  * staged change a deep link carries (`policy.edge=on`, `policy.add_image=<pattern>`, `policy.add_project=<slug>`),

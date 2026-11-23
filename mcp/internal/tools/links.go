@@ -7,7 +7,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/mcp/internal/apiclient"
 )
 
-// Console deep links (the privileged-steps principle, api-v1 v1.49): an
+// Console deep links (the privileged-steps principle, api-v1 v1.51): an
 // agent never does a privileged step itself. When the next step is the
 // person's, a tool result carries console_url, the exact console page,
 // already pointed at the change where the page supports it. Every link is

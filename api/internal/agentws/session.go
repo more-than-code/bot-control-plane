@@ -362,7 +362,7 @@ func parsePrograms(raw json.RawMessage) (*store.HostPrograms, bool) {
 	if !validHostFiles(p.HostFiles) {
 		return nil, false
 	}
-	// agent-protocol v1.21 item 1: patterns only from an opted-in host.
+	// agent-protocol v1.22 item 1: patterns only from an opted-in host.
 	if len(p.ImagePatterns) > hostpolicy.MaxImages || (!p.ConsolePolicy && p.ImagePatterns != nil) {
 		return nil, false
 	}

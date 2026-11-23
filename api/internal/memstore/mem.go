@@ -84,7 +84,10 @@ type Mem struct {
 	registries   map[string]registryRec
 	projectFiles map[string]fileRec
 	imageDeploys map[uuid.UUID]imageDeployRec
-	autoActions  map[uuid.UUID]struct{}
+	// deployTasks is the task id and action of a deploy row, keyed by the
+	// row id (migration 0034 columns task_id and task_action).
+	deployTasks map[uuid.UUID]deployTaskRec
+	autoActions map[uuid.UUID]struct{}
 	// valueRequests is keyed by hashKey(id hash); see value_requests.go.
 	valueRequests map[string]store.ValueRequest
 	// fileRequests is keyed by hashKey(id hash); see file_requests.go.
@@ -103,6 +106,8 @@ type Mem struct {
 	// agentUpgrades is the agent upgrade rows, oldest first (api-v1
 	// v1.48); see agent_upgrades.go.
 	agentUpgrades []store.AgentUpgrade
+	// alertSettings is host id → stored alert settings (api-v1 v1.49).
+	alertSettings map[uuid.UUID]store.HostAlertSettings
 }
 
 type sessionRec struct {
@@ -152,6 +157,7 @@ func New() *Mem {
 		users:                     map[uuid.UUID]store.User{},
 		notificationReads:         map[uuid.UUID]map[string]time.Time{},
 		problems:                  map[uuid.UUID]store.Problem{},
+		alertSettings:             map[uuid.UUID]store.HostAlertSettings{},
 		byEmail:                   map[string]uuid.UUID{},
 		idents:                    map[uuid.UUID]store.Identity{},
 		bySubject:                 map[string]uuid.UUID{},
@@ -196,6 +202,7 @@ func New() *Mem {
 		registries:                map[string]registryRec{},
 		projectFiles:              map[string]fileRec{},
 		imageDeploys:              map[uuid.UUID]imageDeployRec{},
+		deployTasks:               map[uuid.UUID]deployTaskRec{},
 		autoActions:               map[uuid.UUID]struct{}{},
 	}
 }

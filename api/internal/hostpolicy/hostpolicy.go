@@ -1,5 +1,5 @@
 // Package hostpolicy is the server side of a host's console-managed policy
-// (api-v1 v1.49, agent-protocol v1.21): the runner.toml image pattern and
+// (api-v1 v1.51, agent-protocol v1.22): the runner.toml image pattern and
 // project slug rules, copied from bot-agent so the API refuses what the
 // host would refuse, the pattern match, and the change summary for audit.
 package hostpolicy

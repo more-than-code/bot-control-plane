@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -21,14 +22,15 @@ const queryMetricsSchema = `{
     "metric": {"type": "string", "enum": ["cpu", "mem", "disk", "diskio", "net", "system", "temp"]},
     "from": {"type": "string", "format": "date-time"},
     "to": {"type": "string", "format": "date-time"},
-    "step": {"type": "integer", "minimum": 10, "maximum": 3600}
+    "step": {"type": "integer", "minimum": 10, "maximum": 3600},
+    "path": {"type": "string", "minLength": 1, "maxLength": 1024}
   }
 }`
 
 func registerQueryMetrics(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "query_metrics",
-		Description: "Read stored metrics for a host. metric is one of cpu, mem, disk, diskio, net, system, temp. Optional from and to are RFC3339 UTC timestamps (default last 1 hour; span at most 31 days). Optional step is the bucket size in seconds (10–3600). Does not contact the host.",
+		Description: "Read stored metrics for a host. metric is one of cpu, mem, disk, diskio, net, system, temp. Optional from and to are RFC3339 UTC timestamps (default last 1 hour; span at most 31 days). Optional step is the bucket size in seconds (10–3600). mem has used_percent, used, total and available (bytes). disk is one mount: optional path (default /; an unknown mount gives an empty series). Does not contact the host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(queryMetricsSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -38,12 +40,16 @@ func registerQueryMetrics(server *mcp.Server, api *apiclient.Client) {
 			From   *string `json:"from"`
 			To     *string `json:"to"`
 			Step   *int    `json:"step"`
+			Path   *string `json:"path"`
 		}
 		if err := decodeArgs(raw, &in); err != nil {
 			return badRequest(err)
 		}
 		if err := validateMetrics(in.HostID, in.Metric, in.From, in.To, in.Step); err != nil {
 			return badRequest(err)
+		}
+		if in.Path != nil && (in.Metric != "disk" || *in.Path == "" || len(*in.Path) > 1024 || strings.ContainsAny(*in.Path, "\x00\r\n")) {
+			return badRequest(errors.New("path is a disk mount such as /data, for metric disk only"))
 		}
 		query := url.Values{}
 		query.Set("m", in.Metric)
@@ -55,6 +61,9 @@ func registerQueryMetrics(server *mcp.Server, api *apiclient.Client) {
 		}
 		if in.Step != nil {
 			query.Set("step", strconv.Itoa(*in.Step))
+		}
+		if in.Path != nil {
+			query.Set("path", *in.Path)
 		}
 		path := idPath("v1", "hosts", in.HostID, "metrics")
 		payload, fail := get(ctx, api, path, query)

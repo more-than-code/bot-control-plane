@@ -11,8 +11,11 @@ import (
 
 const chartBucketLimit = 500
 
+// gaugeSpec is one gauge series. A filter may use $5, bound to arg (the
+// disk mount); arg nil leaves $5 unused.
 type gaugeSpec struct {
 	name, unit, expr, table, filter string
+	arg                             any
 }
 
 type rateSpec struct {
@@ -24,9 +27,12 @@ type rateSpec struct {
 // the value at the earliest time, divided by that series' own dt. Negative
 // deltas are dropped, then the rates are summed. max(v)-min(v) is not used,
 // because that quantity cannot be negative.
-func (d *DB) QueryChart(ctx context.Context, hostID uuid.UUID, measurement string, from, to time.Time, stepSec int) ([]store.ChartSeries, error) {
+func (d *DB) QueryChart(ctx context.Context, hostID uuid.UUID, measurement, path string, from, to time.Time, stepSec int) ([]store.ChartSeries, error) {
 	if stepSec < 1 {
 		return nil, fmt.Errorf("bad step")
+	}
+	if path == "" {
+		path = "/"
 	}
 	switch measurement {
 	case "cpu":
@@ -39,11 +45,12 @@ func (d *DB) QueryChart(ctx context.Context, hostID uuid.UUID, measurement strin
 			{name: "used_percent", unit: "%", expr: "avg(used_percent)", table: "metrics.host_mem", filter: "used_percent IS NOT NULL"},
 			{name: "used", unit: "bytes", expr: "avg(used)", table: "metrics.host_mem", filter: "used IS NOT NULL"},
 			{name: "total", unit: "bytes", expr: "avg(total)", table: "metrics.host_mem", filter: "total IS NOT NULL"},
+			{name: "available", unit: "bytes", expr: "avg(available)", table: "metrics.host_mem", filter: "available IS NOT NULL"},
 		})
 	case "disk":
 		return d.gaugeCharts(ctx, hostID, from, to, stepSec, []gaugeSpec{{
 			name: "used_percent", unit: "%", expr: "avg(used_percent)",
-			table: "metrics.host_disk", filter: "path = '/' AND used_percent IS NOT NULL",
+			table: "metrics.host_disk", filter: "path = $5 AND used_percent IS NOT NULL", arg: path,
 		}})
 	case "diskio":
 		return d.rateCharts(ctx, hostID, from, to, stepSec, []rateSpec{
@@ -74,7 +81,11 @@ func (d *DB) QueryChart(ctx context.Context, hostID uuid.UUID, measurement strin
 func (d *DB) gaugeCharts(ctx context.Context, hostID uuid.UUID, from, to time.Time, stepSec int, specs []gaugeSpec) ([]store.ChartSeries, error) {
 	out := make([]store.ChartSeries, 0, len(specs))
 	for _, spec := range specs {
-		points, err := d.queryBuckets(ctx, gaugeSQL(spec), hostID, from, to, stepSec)
+		var extra []any
+		if spec.arg != nil {
+			extra = append(extra, spec.arg)
+		}
+		points, err := d.queryBuckets(ctx, gaugeSQL(spec), hostID, from, to, stepSec, extra...)
 		if err != nil {
 			return nil, err
 		}
@@ -95,8 +106,9 @@ func (d *DB) rateCharts(ctx context.Context, hostID uuid.UUID, from, to time.Tim
 	return out, nil
 }
 
-func (d *DB) queryBuckets(ctx context.Context, sql string, hostID uuid.UUID, from, to time.Time, stepSec int) ([]store.ChartPoint, error) {
-	rows, err := d.pool.Query(ctx, sql, hostID.String(), from, stepSec, to)
+func (d *DB) queryBuckets(ctx context.Context, sql string, hostID uuid.UUID, from, to time.Time, stepSec int, extra ...any) ([]store.ChartPoint, error) {
+	args := append([]any{hostID.String(), from, stepSec, to}, extra...)
+	rows, err := d.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, mapErr(err)
 	}

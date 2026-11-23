@@ -494,7 +494,7 @@ func TestReadinessRoutesCheck(t *testing.T) {
 		fixOf(row)["action"] != "allow_edge" || fixOf(row)["host_id"] != hostID {
 		t.Fatalf("routes %#v", row)
 	}
-	// api-v1 v1.49: a console-managed host names its Policy tab.
+	// api-v1 v1.51: a console-managed host names its Policy tab.
 	setPrograms(t, w, c.sc.host.ID, &store.HostPrograms{Enabled: true, RunAs: []string{}, ConsolePolicy: true, ImagePatterns: []string{}})
 	if row = routesRow(); row["message"] != "the edge is not allowed on pi4; an org admin turns it on on the host's Policy tab" || fixOf(row)["action"] != "allow_edge" {
 		t.Fatalf("routes %#v", row)

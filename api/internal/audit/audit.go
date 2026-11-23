@@ -27,6 +27,9 @@ const (
 	ActionHostRevoke      = "host.revoke"
 	ActionHostRename      = "host.rename"
 	ActionHostArchive     = "host.archive"
+	// ActionHostAlertSettings is a change of a host's alert settings
+	// (api-v1 v1.49 item 3). Detail: host and the changed fields.
+	ActionHostAlertSettings = "host.alert_settings"
 	// api-v1 v1.24 item 8. The old host.share* and catalog approval
 	// actions stay readable in history; nothing writes them now.
 	ActionHostAccessGrant          = "host.access_grant"
@@ -107,7 +110,7 @@ const (
 	// state and reason when the row settles.
 	ActionHostAgentUpgrade       = "host.agent_upgrade"
 	ActionHostAgentUpgradeResult = "host.agent_upgrade_result"
-	// Console host policy (api-v1 v1.49). Detail: host, the change
+	// Console host policy (api-v1 v1.51). Detail: host, the change
 	// (edge_from, edge_to, images_added, images_removed, projects_added,
 	// projects_removed), the refusal reason on a denied start; host and
 	// outcome (applied, rolled_back, unknown) when it settles.

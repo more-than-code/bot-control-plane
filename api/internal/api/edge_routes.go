@@ -818,7 +818,7 @@ func (s *Server) checkRoutes(ctx context.Context, rd readiness, host *store.Host
 			return err
 		}
 		if !h.Programs.EdgeAvailable() {
-			// api-v1 v1.49: on a console-managed host an org admin allows
+			// api-v1 v1.51: on a console-managed host an org admin allows
 			// the edge on the host's Policy tab.
 			if h.Programs != nil && h.Programs.ConsolePolicy {
 				warn(fmt.Sprintf("the edge is not allowed on %s; an org admin turns it on on the host's Policy tab", h.Name), readyFix{Action: fixAllowEdge, HostID: idPtr(h.ID)})
