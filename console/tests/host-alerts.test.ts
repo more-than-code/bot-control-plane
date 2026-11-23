@@ -6,14 +6,14 @@ import HostAlertsSection from '../src/routes/hosts/[id]/HostAlertsSection.svelte
 import OverviewTab from '../src/routes/hosts/[id]/OverviewTab.svelte';
 import { actions as hostActions, load as hostLoad } from '../src/routes/hosts/[id]/+page.server.ts';
 import { alertSettingsFromForm, DEFAULT_ALERT_SETTINGS } from '../src/lib/host-alerts.ts';
-import { overviewHref, parseDiskPath, withAvailablePercent } from '../src/lib/host-view.ts';
+import { METRIC_SPECS, overviewHref, parseDiskPath, withAvailablePercent } from '../src/lib/host-view.ts';
 import { problemKindOf } from '../src/lib/notifications.ts';
 import { parseAlertSettings, parseHostDisks } from '../src/lib/server/host-alerts.ts';
 import { envelope, fakeEvent, installFetch, ORG, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 import type { Host, Org } from '../src/lib/api-types.ts';
 
-// api-v1 v1.49 (spec-host-resource-alerts §6 and §8): the Alerts card, the memory chart's Available line and the
+// api-v1 v1.49 (spec-host-resource-alerts §6 and §8): the Alerts card, the memory chart's "Free to use" line and the
 // disk mount picker.
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000d1';
@@ -278,5 +278,19 @@ describe('host page load and saveAlerts', { concurrency: false }, () => {
 		assert.ok(isActionFailure(refused));
 		assert.equal((refused as unknown as { status: number; data: { alertsMessage: string } }).status, 403);
 		assert.equal((refused as unknown as { data: { alertsMessage: string } }).data.alertsMessage, 'forbidden');
+	});
+});
+
+describe('memory chart labels (Joe 2026-11-24: "Available 92.9%" read as usage)', () => {
+	test('Used is first and warm; the second line is "Free to use" in green', () => {
+		const mem = METRIC_SPECS.find((spec) => spec.m === 'mem');
+		assert.ok(mem);
+		assert.deepEqual(
+			mem.series.map((s) => [s.name, s.label, s.color]),
+			[
+				['used_percent', 'Used', 'var(--chart-3)'],
+				['available_percent', 'Free to use', 'var(--chart-5)']
+			]
+		);
 	});
 });

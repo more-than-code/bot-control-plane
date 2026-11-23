@@ -42,9 +42,11 @@ export const METRIC_SPECS: readonly MetricSpec[] = [
 		yMax: 100,
 		format: 'percent',
 		series: [
-			{ name: 'used_percent', label: 'Used', color: 'var(--chart-2)' },
+			// Used is the warm line; the second line is memory still free to use (Linux "available", not
+			// "free"), in green, so a high value never reads as a problem (Joe, 2026-11-24).
+			{ name: 'used_percent', label: 'Used', color: 'var(--chart-3)' },
 			// Worked out from `available` and `total` (api-v1 v1.49 item 4), see withAvailablePercent.
-			{ name: 'available_percent', label: 'Available', color: 'var(--chart-4)' }
+			{ name: 'available_percent', label: 'Free to use', color: 'var(--chart-5)' }
 		]
 	},
 	{
