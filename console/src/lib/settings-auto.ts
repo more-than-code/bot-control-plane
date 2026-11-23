@@ -9,7 +9,16 @@ export type ImageAccess = (typeof IMAGE_ACCESSES)[number];
 export const IMAGE_LOGINS = ['none', 'manual', 'github'] as const;
 export type ImageLogin = (typeof IMAGE_LOGINS)[number];
 
-export type ImageAccessResult = { registry: string; access: ImageAccess; login: ImageLogin };
+/**
+ * Why ghcr.io refused the GitHub connection (api-v1 v1.53), when GitHub told: the sign-in itself, an organization that
+ * has not granted the Deploybot GitHub app (`url` is GitHub's page where an org owner clicks Grant), or an account that
+ * cannot see the package.
+ */
+export const REFUSAL_REASONS = ['github_sign_in', 'org_restricted', 'no_package_access'] as const;
+export type RefusalReason = (typeof REFUSAL_REASONS)[number];
+export type AccessRefusal = { reason: RefusalReason; owner?: string; account?: string; url?: string };
+
+export type ImageAccessResult = { registry: string; access: ImageAccess; login: ImageLogin; refusal?: AccessRefusal };
 
 /** The GitHub registry a Connect GitHub stores. */
 export const GITHUB_REGISTRY = 'ghcr.io';
@@ -24,6 +33,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IMAGE_PATTERN = /^[a-z0-9.-]+(:[0-9]{1,5})?(\/[a-z0-9._-]+)+$/;
 /** The project slug rule (the API's store.Slug: up to 80 characters). */
 const PROJECT_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
+/** A GitHub login or organization name. */
+const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+/** GitHub's page for one OAuth App's access, the only link a refusal may carry. */
+const GITHUB_GRANT_URL = /^https:\/\/github\.com\/settings\/connections\/applications\/[A-Za-z0-9._-]{1,64}$/;
 
 function record(value: unknown): Record<string, unknown> | null {
 	return value != null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -37,14 +50,73 @@ function oneOf<T extends string>(list: readonly T[], value: unknown): value is T
 export function parseImageAccess(value: unknown): ImageAccessResult | null {
 	const v = record(value);
 	if (!v || typeof v.registry !== 'string' || !REGISTRY_HOST.test(v.registry) || !oneOf(IMAGE_ACCESSES, v.access) || !oneOf(IMAGE_LOGINS, v.login)) return null;
-	return { registry: v.registry, access: v.access, login: v.login };
+	const out: ImageAccessResult = { registry: v.registry, access: v.access, login: v.login };
+	const refusal = v.access === 'login_failed' && v.login === 'github' ? parseRefusal(v.refusal) : null;
+	if (refusal) out.refusal = refusal;
+	return out;
+}
+
+/** A refusal's allowlisted fields, or null. An org_restricted refusal needs its organization. */
+export function parseRefusal(value: unknown): AccessRefusal | null {
+	const v = record(value);
+	if (!v || !oneOf(REFUSAL_REASONS, v.reason)) return null;
+	const out: AccessRefusal = { reason: v.reason };
+	if (typeof v.owner === 'string' && GITHUB_LOGIN.test(v.owner)) out.owner = v.owner;
+	if (typeof v.account === 'string' && GITHUB_LOGIN.test(v.account)) out.account = v.account;
+	if (typeof v.url === 'string' && GITHUB_GRANT_URL.test(v.url)) out.url = v.url;
+	if (out.reason !== 'github_sign_in' && !out.owner) return null;
+	return out;
+}
+
+/**
+ * The Registries card's refused-login state: false, true (refused, no reason), or the reasons GitHub told (api-v1 v1.53).
+ */
+export type GitHubRefused = boolean | { refusals: AccessRefusal[] };
+
+/** At most 5 refusals, one per reason and owner, organizations that have not granted the app first. */
+export function refusalsOf(list: (AccessRefusal | null | undefined)[]): AccessRefusal[] {
+	const seen = new Set<string>();
+	const out: AccessRefusal[] = [];
+	for (const refusal of list) {
+		if (!refusal) continue;
+		const key = `${refusal.reason}|${refusal.owner?.toLowerCase() ?? ''}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(refusal);
+	}
+	const rank = (r: AccessRefusal) => (r.reason === 'org_restricted' ? 0 : r.reason === 'no_package_access' ? 1 : 2);
+	return out.sort((a, b) => rank(a) - rank(b)).slice(0, 5);
+}
+
+/** The Refused badge's tooltip: Reconnect only when it can help. */
+export function refusedTitle(state: GitHubRefused): string {
+	const refusals = typeof state === 'object' ? state.refusals : [];
+	if (refusals.some((r) => r.reason === 'org_restricted')) return 'ghcr.io refused this login: a GitHub organization has not granted the Deploybot GitHub app access.';
+	if (refusals.some((r) => r.reason === 'no_package_access')) return 'ghcr.io refused this login: the connected GitHub account cannot see a package in the catalog.';
+	return 'ghcr.io refused this login for an image in the catalog. Reconnect GitHub.';
+}
+
+/**
+ * The sentence that says why ghcr.io refused the GitHub connection, or null when the reason is the sign-in or unknown
+ * (Reconnect is then the fix).
+ */
+export function refusalText(refusal: AccessRefusal | null | undefined): string | null {
+	if (!refusal?.owner) return null;
+	if (refusal.reason === 'org_restricted') {
+		return `The ${refusal.owner} organization has not granted the Deploybot GitHub app access, so Reconnect will not help. An owner of ${refusal.owner} clicks Grant (a member clicks Request) next to ${refusal.owner} on GitHub.`;
+	}
+	if (refusal.reason === 'no_package_access') {
+		const account = refusal.account ? `The GitHub account ${refusal.account}` : 'The connected GitHub account';
+		return `${account} cannot see the ${refusal.owner} package. Give it read access to the package on GitHub, or reconnect as an account that can.`;
+	}
+	return null;
 }
 
 /**
  * The one line under the Image field. `connect` asks for the Connect GitHub button, `settings` for a link to
  * Settings → Registries.
  */
-export function accessLine(result: ImageAccessResult): { text: string; connect: boolean; settings: boolean } {
+export function accessLine(result: ImageAccessResult): { text: string; connect: boolean; settings: boolean; github?: string } {
 	const github = result.registry === GITHUB_REGISTRY;
 	switch (result.access) {
 		case 'public':
@@ -60,6 +132,13 @@ export function accessLine(result: ImageAccessResult): { text: string; connect: 
 				? { text: 'Private or missing: Connect GitHub.', connect: true, settings: false }
 				: { text: `Private or missing: add a login for ${result.registry}.`, connect: false, settings: true };
 		case 'login_failed':
+			if (github && result.refusal?.reason === 'org_restricted' && result.refusal.owner) {
+				const line = { text: `ghcr.io refused the GitHub connection: the ${result.refusal.owner} organization has not granted the Deploybot GitHub app access.`, connect: false, settings: false };
+				return result.refusal.url ? { ...line, github: result.refusal.url } : { ...line, settings: true };
+			}
+			if (github && result.refusal?.reason === 'no_package_access') {
+				return { text: `ghcr.io refused the GitHub connection: ${refusalText(result.refusal)}`, connect: true, settings: false };
+			}
 			return github
 				? { text: 'The stored login for ghcr.io was refused: reconnect GitHub.', connect: true, settings: false }
 				: { text: `The stored login for ${result.registry} was refused: update it.`, connect: false, settings: true };
@@ -74,10 +153,21 @@ export const READY_CHECKS = ['env_sets', 'env_values', 'env_refs', 'files', 'reg
 export type ReadyCheckName = (typeof READY_CHECKS)[number];
 export const READY_STATUSES = ['ok', 'missing', 'warn', 'unknown'] as const;
 export type ReadyStatus = (typeof READY_STATUSES)[number];
-export const FIX_ACTIONS = ['create_env_set', 'fill_value', 'add_file', 'connect_github', 'add_registry_login', 'grant_deploy_access', 'host_policy_snippet', 'none'] as const;
+export const FIX_ACTIONS = [
+	'create_env_set',
+	'fill_value',
+	'add_file',
+	'connect_github',
+	'add_registry_login',
+	'grant_deploy_access',
+	'host_policy_snippet',
+	'github_org_access',
+	'none'
+] as const;
 export type FixAction = (typeof FIX_ACTIONS)[number];
 
-export type ReadinessFix = { action: FixAction; set?: string; key?: string; name?: string; registry?: string; host_id?: string };
+/** `owner` and `url` are a github_org_access fix's organization and GitHub's grant page (api-v1 v1.53). */
+export type ReadinessFix = { action: FixAction; set?: string; key?: string; name?: string; registry?: string; host_id?: string; owner?: string; url?: string };
 export type ReadinessCheck = { check: ReadyCheckName; status: ReadyStatus; message: string; fix: ReadinessFix };
 export type Readiness = { ready: boolean; checks: ReadinessCheck[] };
 
@@ -90,6 +180,10 @@ function parseFix(value: unknown): ReadinessFix {
 	if (typeof v.name === 'string' && FILE_NAME.test(v.name)) fix.name = v.name;
 	if (typeof v.registry === 'string' && REGISTRY_HOST.test(v.registry)) fix.registry = v.registry;
 	if (typeof v.host_id === 'string' && UUID.test(v.host_id)) fix.host_id = v.host_id;
+	if (typeof v.owner === 'string' && GITHUB_LOGIN.test(v.owner)) fix.owner = v.owner;
+	if (typeof v.url === 'string' && GITHUB_GRANT_URL.test(v.url)) fix.url = v.url;
+	// Without GitHub's page there is nothing to link: the message says what to do.
+	if (fix.action === 'github_org_access' && !fix.url) return { action: 'none' };
 	return fix;
 }
 
@@ -175,6 +269,8 @@ export function fixLabel(fix: ReadinessFix): string | null {
 			return 'Grant access';
 		case 'host_policy_snippet':
 			return 'Allow on host';
+		case 'github_org_access':
+			return 'Grant on GitHub';
 		default:
 			return null;
 	}
@@ -198,6 +294,8 @@ export function fixHref(fix: ReadinessFix, projectPath: string): string | null {
 			return `${projectPath}?tab=settings#registries`;
 		case 'grant_deploy_access':
 			return fix.host_id ? `/hosts/${fix.host_id}` : null;
+		case 'github_org_access':
+			return fix.url ?? null;
 		default:
 			return null;
 	}
@@ -386,7 +484,7 @@ export function fixAsk(fix: ReadinessFix, rights: FixRights): string | null {
 /** The image-access line's state: a result, a lookup that failed (including 429), or nothing yet. */
 export type AccessLineState = { result: ImageAccessResult } | { failed: true };
 
-export function accessLineText(state: AccessLineState): { text: string; connect: boolean; settings: boolean } {
+export function accessLineText(state: AccessLineState): { text: string; connect: boolean; settings: boolean; github?: string } {
 	if ('failed' in state) return { text: 'Image access could not be checked.', connect: false, settings: false };
 	return accessLine(state.result);
 }

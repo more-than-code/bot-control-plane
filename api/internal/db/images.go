@@ -797,7 +797,7 @@ WHERE project_id = $1::uuid AND name = $2
 }
 
 func (d *DB) PutEnvKey(ctx context.Context, projectID uuid.UUID, name string, in store.EnvKeyPut, actor uuid.UUID, at time.Time) (store.EnvKey, bool, error) {
-	// Only a regenerate reaches a private set "@<entry>" (api-v1 v1.52).
+	// Only a regenerate reaches a private set "@<entry>" (api-v1 v1.54).
 	if !catalog.ValidName(name) && !(in.Regenerate && catalog.IsPrivateSet(name)) {
 		return store.EnvKey{}, false, store.ErrInvalid
 	}
@@ -826,7 +826,7 @@ FOR UPDATE
 `, projectID.String(), name, in.Key).Scan(&isSecret, &needsValue)
 	created := false
 	if in.Regenerate {
-		// api-v1 v1.52: replace an existing secret value only.
+		// api-v1 v1.54: replace an existing secret value only.
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			return store.EnvKey{}, false, store.ErrNotFound

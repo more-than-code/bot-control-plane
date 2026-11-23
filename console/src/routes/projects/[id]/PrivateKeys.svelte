@@ -21,7 +21,7 @@
 	const action = $derived(actionUrlFrom(page.url, 'catalogPrivateKeys'));
 	const revealAction = $derived(actionUrlFrom(page.url, 'revealPrivateKey'));
 	const regenerateAction = $derived(actionUrlFrom(page.url, 'regeneratePrivateKey'));
-	// Regenerate (api-v1 v1.52): a private key belongs to this entry only, so only this entry needs a redeploy.
+	// Regenerate (api-v1 v1.54): a private key belongs to this entry only, so only this entry needs a redeploy.
 	let regenKey = $state<string | null>(null);
 	async function afterRegenerate(key: string, changed: boolean) {
 		regenKey = null;

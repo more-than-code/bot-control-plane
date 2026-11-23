@@ -14,7 +14,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-// assertEnvRegenerate pins PutEnvKey with Regenerate (api-v1 v1.52): it
+// assertEnvRegenerate pins PutEnvKey with Regenerate (api-v1 v1.54): it
 // replaces an existing secret value, generated or typed, with a pending
 // generated one; a plain key is ErrSecretFixed; a missing key or set is
 // ErrNotFound and creates nothing; a private set "@<entry>" is accepted.

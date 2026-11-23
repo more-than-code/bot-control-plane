@@ -87,7 +87,7 @@ export function revealAnswer(result: { type: string; data?: unknown }, key: stri
 
 /**
  * Reveal once is offered on a secret key only while the API says its generated value is pending. Regenerate
- * (api-v1 v1.52) is offered on every secret key that has a value: a lost generated value, or a secret to rotate.
+ * (api-v1 v1.54) is offered on every secret key that has a value: a lost generated value, or a secret to rotate.
  */
 export function envRowActions(item: { is_secret: boolean; reveal_pending: boolean; needs_value?: boolean }): { revealOnce: boolean; regenerate: boolean } {
 	return { revealOnce: item.is_secret && item.reveal_pending, regenerate: item.is_secret && item.needs_value !== true };
@@ -100,7 +100,7 @@ function names(list: readonly string[]): string {
 }
 
 /**
- * The Regenerate confirm text (api-v1 v1.52). `usedBy` is the set's `used_by`, or undefined when the API did not
+ * The Regenerate confirm text (api-v1 v1.54). `usedBy` is the set's `used_by`, or undefined when the API did not
  * send it. Running copies keep the old value until they are redeployed, so the text says which entries those are.
  */
 export function regenerateMessage(key: string, usedBy: readonly string[] | undefined): string {
@@ -146,7 +146,7 @@ export function regenerateAnswer(result: { type: string; data?: unknown }, key: 
 	return { ok: false, message: regenerateFailedText(key) };
 }
 
-/** The env-key deep link an agent sends (api-v1 v1.52): `env.set`, `env.key` and `env.do` on project Settings. */
+/** The env-key deep link an agent sends (api-v1 v1.54): `env.set`, `env.key` and `env.do` on project Settings. */
 export type EnvKeyLink = { set: string; key: string; action: 'reveal' | 'regenerate' };
 
 const LINK_SET = /^[a-z0-9][a-z0-9-]{0,47}$/;

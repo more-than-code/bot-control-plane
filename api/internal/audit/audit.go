@@ -77,7 +77,7 @@ const (
 	ActionEnvSetKeySecret          = "env_set.key_secret"
 	ActionEnvSetKeyReveal          = "env_set.key_reveal"
 	// ActionEnvSetKeyRegenerate replaces a secret value with a generated
-	// one (api-v1 v1.52); detail set, key, kind and used_by, never a value.
+	// one (api-v1 v1.54); detail set, key, kind and used_by, never a value.
 	ActionEnvSetKeyRegenerate     = "env_set.key_regenerate"
 	ActionEnvSetCreate            = "env_set.create"
 	ActionEnvSetWriteConfirmation = "env_set.write_confirmation_issued"

@@ -161,6 +161,12 @@ func TestDomainsFlow(t *testing.T) {
 
 	status, env = w.do(c.tok, http.MethodPost, c.org+"/domains/"+id+"/verify", "")
 	mustHTTP(t, status, env, http.StatusConflict, "conflict", "TXT record not found yet: add _deploybot.example.com = "+d["txt_value"].(string))
+	// The failed attempt shows as Last check; the domain stays pending.
+	status, env = w.do(c.tok, http.MethodGet, c.org+"/domains", "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if items := listItems(t, env); len(items) != 1 || items[0]["status"] != "pending" || items[0]["last_check_at"] == nil || items[0]["verified_at"] != nil {
+		t.Fatalf("after a failed verify %#v", items)
+	}
 	c.dns.set("_deploybot.example.com", "unrelated", d["txt_value"].(string))
 	status, env = w.do(c.tok, http.MethodPost, c.org+"/domains/"+id+"/verify", "")
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")

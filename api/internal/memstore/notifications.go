@@ -79,3 +79,21 @@ func (m *Mem) NotificationReads(_ context.Context, userID uuid.UUID, keys []stri
 	}
 	return out, nil
 }
+
+func (m *Mem) NoticeHostUpdates(_ context.Context, hostIDs []uuid.UUID, version string, at time.Time) (map[uuid.UUID]time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[uuid.UUID]time.Time{}
+	for _, id := range hostIDs {
+		if _, ok := m.hosts[id]; !ok {
+			continue
+		}
+		if t, ok := m.hostUpdateNotices[id][version]; ok {
+			out[id] = t
+			continue
+		}
+		m.hostUpdateNotices[id] = map[string]time.Time{version: at}
+		out[id] = at
+	}
+	return out, nil
+}

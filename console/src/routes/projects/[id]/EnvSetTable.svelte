@@ -63,7 +63,7 @@
 		mergeAction: string;
 		/** revealEnvKey (api-v1 v1.27 item 3): the show-once dialog posts it. */
 		revealAction: string;
-		/** regenerateEnvKey (api-v1 v1.52): the Regenerate dialog posts it. Empty hides Regenerate. */
+		/** regenerateEnvKey (api-v1 v1.54): the Regenerate dialog posts it. Empty hides Regenerate. */
 		regenerateAction?: string;
 		/** An Add variables (paste) failure for this set, shown on that dialog's Paste several tab. */
 		mergeError?: string | null;
@@ -105,7 +105,7 @@
 		target?.focus();
 	}
 
-	// The key the Regenerate dialog is for, or null (api-v1 v1.52). The new value stays in that dialog.
+	// The key the Regenerate dialog is for, or null (api-v1 v1.54). The new value stays in that dialog.
 	let regenKey = $state<string | null>(null);
 
 	async function afterRegenerate(key: string, changed: boolean) {
@@ -122,7 +122,7 @@
 	// Collapse hides the table. It does not clear an edit in progress.
 	let panel = $state(initialEnvSetPanel());
 
-	// An agent's deep link (api-v1 v1.52: env.set, env.key, env.do) opens this set and focuses that row's Reveal once
+	// An agent's deep link (api-v1 v1.54: env.set, env.key, env.do) opens this set and focuses that row's Reveal once
 	// or Regenerate button. It never presses it: the person does. Read once, when the table mounts.
 	let linkFollowed = false;
 	$effect(() => {

@@ -58,6 +58,13 @@ type refreshGitHub struct {
 	delay time.Duration
 	// started is signalled when a refresh request arrives.
 	started chan struct{}
+	// scopes is the X-OAuth-Scopes of GET /user ("" is read:packages).
+	scopes string
+	// packageStatus and packageBody answer an org package read (0 is 404);
+	// packageReads counts them.
+	packageStatus int
+	packageBody   string
+	packageReads  int
 }
 
 func newRefreshGitHub(t *testing.T) *refreshGitHub {
@@ -115,8 +122,32 @@ func newRefreshGitHub(t *testing.T) *refreshGitHub {
 			}
 			_ = json.NewEncoder(w).Encode(body)
 		case r.URL.Path == "/user":
-			w.Header().Set("X-OAuth-Scopes", "read:packages")
+			f.mu.Lock()
+			live := f.live[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+			scopes := f.scopes
+			f.mu.Unlock()
+			if !live {
+				// GitHub answers 401 for an expired or revoked token.
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = io.WriteString(w, `{"message":"Bad credentials GITHUB-BODY"}`)
+				return
+			}
+			if scopes == "" {
+				scopes = "read:packages"
+			}
+			w.Header().Set("X-OAuth-Scopes", scopes)
 			_ = json.NewEncoder(w).Encode(map[string]any{"login": "octo-cat"})
+		case strings.HasPrefix(r.URL.Path, "/orgs/") && strings.Contains(r.URL.Path, "/packages/container/"):
+			// One org package read (api-v1 v1.52 refusal reason).
+			f.mu.Lock()
+			f.packageReads++
+			status, body := f.packageStatus, f.packageBody
+			f.mu.Unlock()
+			if status == 0 {
+				status = http.StatusNotFound
+			}
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, body)
 		case r.Method == http.MethodDelete && r.URL.Path == "/applications/test-client/token":
 			var body map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&body)

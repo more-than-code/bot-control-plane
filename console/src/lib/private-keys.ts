@@ -63,7 +63,7 @@ export function afterPrivateReveal(keys: readonly PrivateKey[], key: string): Pr
 	return keys.map((row) => (row.key === key ? { ...row, reveal_pending: false } : row));
 }
 
-/** The API path that regenerates one entry-private key (api-v1 v1.52), or null for a bad entry or key. */
+/** The API path that regenerates one entry-private key (api-v1 v1.54), or null for a bad entry or key. */
 export function privateKeyRegeneratePath(projectId: string, entry: string, key: string): string | null {
 	const reveal = privateKeyRevealPath(projectId, entry, key);
 	return reveal == null ? null : reveal.replace(/\/reveal$/, '/regenerate');

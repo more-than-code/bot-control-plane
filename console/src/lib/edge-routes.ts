@@ -19,8 +19,6 @@ export const ASSIGNMENTS_MAX = 200;
 /** The runner.toml line the host's root adds before the edge can be turned on (agent-protocol v1.15). */
 export const EDGE_POLICY_LINE = 'edge = true';
 
-export const DOMAIN_PATTERNS = ['@', '*'] as const satisfies readonly DomainPattern[];
-
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const SEGMENT = '[A-Za-z0-9._~-]+';
 const PATH_PREFIX = new RegExp(`^/(?:${SEGMENT}(?:/${SEGMENT})*)?$`);
@@ -57,8 +55,26 @@ export function isNoStorePath(value: string): boolean {
 	return value.length <= PATH_MAX && NO_STORE_PATH.test(value) && !hasDotSegment(value);
 }
 
+/** The pattern shape alone: `@`, `*`, a relative name (`app`, `api.dev`) or `*.` and one (`*.dev`). */
 export function isDomainPattern(value: unknown): value is DomainPattern {
-	return value === '@' || value === '*';
+	if (value === '@' || value === '*') return true;
+	if (typeof value !== 'string' || value.length > DOMAIN_MAX) return false;
+	const rel = value.startsWith('*.') ? value.slice(2) : value;
+	return rel.length > 0 && rel.split('.').every((label) => LABEL.test(label));
+}
+
+/** A pattern the domain can take: the shape, and at most 253 characters written out. */
+export function isDomainPatternFor(domain: string, value: unknown): value is DomainPattern {
+	return isDomainPattern(value) && assignmentText(domain, value).length <= DOMAIN_MAX;
+}
+
+/** Trimmed and lowercased, a trailing `.<domain>` or `.` dropped and a bare domain read as `@`; null when not a pattern. */
+export function cleanDomainPattern(domain: string, raw: unknown): DomainPattern | null {
+	if (typeof raw !== 'string') return null;
+	let value = raw.trim().toLowerCase().replace(/\.$/, '');
+	if (value === domain) value = '@';
+	else if (value.endsWith(`.${domain}`)) value = value.slice(0, -(domain.length + 1));
+	return isDomainPatternFor(domain, value) ? value : null;
 }
 
 /** A route or domain plan (202). `expires_at` is optional: the domain delete answer has none (api-v1 v1.35 item 1). */
@@ -241,5 +257,28 @@ export function edgeStatusBadge(status: EdgeStatus): { status: string; text: str
 
 /** What a domain assignment covers, in words. */
 export function assignmentText(domain: string, pattern: DomainPattern): string {
-	return pattern === '@' ? domain : `*.${domain}`;
+	return pattern === '@' ? domain : `${pattern}.${domain}`;
+}
+
+/** The console link keys that open a domain's Assign dialog with one row filled in (api-v1 v1.52 Assign link). */
+export const ASSIGN_LINK_KEYS = ['domains.assign', 'domains.project', 'domains.pattern'] as const;
+
+/**
+ * The row an Assign link asks for on this domain: its id in `domains.assign`, a project of the org in
+ * `domains.project` and a pattern the domain can take in `domains.pattern`. Null when the link is for another domain
+ * or any part does not fit, so a stale or edited link opens nothing.
+ */
+export function assignLinkRow(params: URLSearchParams, domain: { id: string; name: string }, projectIds: readonly string[]): { project_id: string; pattern: DomainPattern } | null {
+	if (params.get('domains.assign') !== domain.id) return null;
+	const project = params.get('domains.project') ?? '';
+	const pattern = params.get('domains.pattern');
+	if (!projectIds.includes(project) || !isDomainPatternFor(domain.name, pattern)) return null;
+	return { project_id: project, pattern };
+}
+
+/** The same URL without the Assign link keys, so the link opens the dialog once. */
+export function withoutAssignLink(url: URL): URL {
+	const next = new URL(url);
+	for (const key of ASSIGN_LINK_KEYS) next.searchParams.delete(key);
+	return next;
 }

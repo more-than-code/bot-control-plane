@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
+	import { applyAction, enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import Globe from '@lucide/svelte/icons/globe';
@@ -12,6 +13,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { OrgDomain, Project } from '$lib/api-types';
 	import { assignmentText, domainStatusBadge, type DomainPlan } from '$lib/edge-routes';
+	import { toastDomainVerified } from '$lib/success-toast';
 	import { actionUrlFrom } from '$lib/url';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -31,7 +33,8 @@
 		message = null,
 		addMessage = null,
 		rowMessage = null,
-		rowMessageId = null
+		rowMessageId = null,
+		verifiedId = null
 	}: {
 		domains: OrgDomain[];
 		omitted?: number;
@@ -43,10 +46,14 @@
 		/** A Verify or Delete failure of the domain `rowMessageId`. */
 		rowMessage?: string | null;
 		rowMessageId?: string | null;
+		/** The domain a Verify just verified: shown as verified until the list is read again. */
+		verifiedId?: string | null;
 	} = $props();
 
-	/** `verify:<id>` or `delete:<id>` while that post runs. */
+	/** `delete:<id>` while that post runs. */
 	let pending = $state<string | null>(null);
+	/** Domains whose Verify post is running. One per domain; other rows stay usable. */
+	let verifying = $state<Record<string, boolean>>({});
 	// The Delete plan lives here, not in the page data, so its dialog keeps focus and a refused Confirm shows inside it.
 	let plan = $state<DomainPlan | null>(null);
 	let planOpen = $state(false);
@@ -58,8 +65,33 @@
 		return `domain-error-${domainId}`;
 	}
 
-	/** Verify and Delete: one post at a time per button; a refusal shows on the row and takes focus. */
-	function rowEnhance(kind: 'verify' | 'delete', domainId: string): SubmitFunction {
+	/**
+	 * Verify: the button is busy only while the API looks the record up. The outcome shows at once (a toast and the
+	 * Verified badge, or the reason on the row), then the list is read again in the background so Last check and the
+	 * card catch up without holding the button.
+	 */
+	function verifyEnhance(domain: OrgDomain): SubmitFunction {
+		return ({ cancel }) => {
+			if (verifying[domain.id]) {
+				cancel();
+				return;
+			}
+			verifying[domain.id] = true;
+			return async ({ result }) => {
+				verifying[domain.id] = false;
+				await applyAction(result);
+				if (result.type === 'success') toastDomainVerified(domain.name);
+				if (result.type === 'failure') {
+					await tick();
+					document.getElementById(errorId(domain.id))?.focus();
+				}
+				if (result.type === 'success' || result.type === 'failure') void invalidateAll();
+			};
+		};
+	}
+
+	/** Delete: one post at a time; a refusal shows on the row and takes focus. */
+	function rowEnhance(kind: 'delete', domainId: string): SubmitFunction {
 		return ({ cancel }) => {
 			if (pending != null) {
 				cancel();
@@ -171,7 +203,8 @@
 		{/if}
 		<ul class="grid gap-4">
 			{#each domains as domain (domain.id)}
-				{@const badge = domainStatusBadge(domain.status)}
+				{@const status = verifiedId === domain.id ? 'verified' : domain.status}
+				{@const badge = domainStatusBadge(status)}
 				<li class="grid min-w-0 gap-3 rounded-lg border p-3" id="domain-{domain.id}" data-domain={domain.name}>
 					<div class="flex min-w-0 flex-wrap items-center gap-2">
 						<Globe class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
@@ -183,14 +216,14 @@
 							<Notice kind="error">{rowMessage}</Notice>
 						</div>
 					{/if}
-					{#if domain.status === 'lapsed'}
+					{#if status === 'lapsed'}
 						<div class="max-w-full min-w-0 break-words">
 							<Notice kind="info">
 								The TXT record was not found for 7 days. Routes under this domain keep serving, but no new route is accepted. Add the record again and verify.
 							</Notice>
 						</div>
 					{/if}
-					{#if domain.status !== 'verified'}
+					{#if status !== 'verified'}
 						<div class="grid min-w-0 gap-2 text-sm">
 							<p>Add this TXT record at your DNS provider, then verify.</p>
 							<div class="grid min-w-0 gap-1">
@@ -231,11 +264,11 @@
 						{/if}
 					</div>
 					<div class="flex flex-wrap gap-2">
-						{#if domain.status !== 'verified'}
-							<form method="POST" action={actionUrlFrom(page.url, 'verifyDomain')} use:enhance={rowEnhance('verify', domain.id)}>
+						{#if status !== 'verified'}
+							<form method="POST" action={actionUrlFrom(page.url, 'verifyDomain')} use:enhance={verifyEnhance(domain)}>
 								<Input type="hidden" name="domain_id" value={domain.id} />
-								<Button type="submit" variant="outline" size="sm" aria-label="Verify {domain.name}" disabled={pending === `verify:${domain.id}`} aria-busy={pending === `verify:${domain.id}`}>
-									{pending === `verify:${domain.id}` ? 'Verifying…' : 'Verify'}
+								<Button type="submit" variant="outline" size="sm" aria-label="Verify {domain.name}" disabled={verifying[domain.id] === true} aria-busy={verifying[domain.id] === true}>
+									{verifying[domain.id] ? 'Verifying…' : 'Verify'}
 								</Button>
 							</form>
 						{/if}

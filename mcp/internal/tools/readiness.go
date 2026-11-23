@@ -107,7 +107,7 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 			"the image registry is reachable with the stored login, and, with host_id, deploy access, the host being online, containers, the host's image policy and shared networks, and for an entry with routes (set_routes), the routes check: a verified domain, a published port and the edge on the entry's host (an org admin turns the edge on in the console). " +
 			"Each check has a status (ok, missing, warn, unknown) and a fix. Fixes you can do yourself: fill_value with request_env_value, create_env_set with create_env_set, add_file with request_file (the person adds the file in the browser); " +
 			"you can start connect_github with connect_registry, and the person approves on github.com. " +
-			"Fixes for the person (add_registry_login, grant_deploy_access, host_policy_snippet, allow_edge, turn_on_edge, verify_domain): the fix carries console_url, the console page for that step, already pointed at the change; post it for the person. " +
+			"Fixes for the person (add_registry_login, grant_deploy_access, host_policy_snippet, allow_edge, turn_on_edge, verify_domain, assign_domain): the fix carries console_url, the console page for that step, already pointed at the change; post it for the person. " +
 			"Never edit a host's runner.toml or enter a secret yourself. For host_policy_snippet on a host whose root has not let the console manage its policy, also call host_policy_snippet and show the person the snippet. " + linkRule + " Advisory only: deploy keeps its own refusals. " +
 			"Needs owner or admin, or the entry's deploy permission on a host the project deploys to. Reads stored API data and may ask the image registry (cached). Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
@@ -171,6 +171,7 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 		Description: noSecretRule + " Say whether an image can be pulled with the project's registry logins: public (no login needed), private_ok (the stored login works), " +
 			"private_no_login (private or missing; ask the person to connect GitHub for ghcr.io, or add a registry login, in the console, " + settingsHint + "), " +
 			"login_failed (the stored login was refused; ask the person to reconnect GitHub or update the login in the console), not_found, or unknown. " +
+			"For a refused GitHub connection, refusal says why when GitHub told: github_sign_in (reconnect GitHub), org_restricted (the owner organization has not granted the Deploybot GitHub app; github_url is the GitHub page where an org owner clicks Grant, so send the person that link instead of reconnecting), or no_package_access (the connected account cannot see the package). " +
 			"login says which login is stored: none, manual or github. Needs owner or admin. Asks the image registry (cached 60 s, 20 lookups per minute). Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(imageAccessSchema),
@@ -195,16 +196,30 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 			return fail
 		}
 		var body struct {
-			Registry string `json:"registry"`
-			Access   string `json:"access"`
-			Login    string `json:"login"`
+			Registry string         `json:"registry"`
+			Access   string         `json:"access"`
+			Login    string         `json:"login"`
+			Refusal  map[string]any `json:"refusal"`
 		}
 		if err := json.Unmarshal(payload, &body); err != nil || !imageAccesses[body.Access] || !imageLogins[body.Login] || !registryHostPattern.MatchString(body.Registry) {
 			return toolError("error", errStatusShape.Error())
 		}
 		result := map[string]any{"registry": body.Registry, "access": body.Access, "login": body.Login}
 		summary := accessSummary(body.Registry, body.Access, body.Login)
-		if body.Access == "private_no_login" || body.Access == "login_failed" {
+		var refusal map[string]any
+		if body.Access == "login_failed" && body.Login == "github" {
+			refusal = githubRefusal(body.Refusal)
+		}
+		if refusal != nil {
+			result["refusal"] = refusal
+			summary = refusalSummary(refusal)
+		}
+		if refusal != nil && refusal["reason"] == "org_restricted" {
+			// The fix is on github.com; the console cannot do it.
+			if link, _ := refusal["url"].(string); link != "" {
+				result["github_url"] = link
+			}
+		} else if body.Access == "private_no_login" || body.Access == "login_failed" {
 			if link := projectSettingsURL(api, in.ProjectID, "registries"); link != "" {
 				result["console_url"] = link
 				summary = withLink(summary, link)
@@ -376,7 +391,7 @@ func projectFix(in map[string]any) map[string]any {
 	action, _ := in["action"].(string)
 	switch action {
 	case "create_env_set", "fill_value", "add_file", "connect_github", "add_registry_login", "grant_deploy_access", "host_policy_snippet",
-		"allow_edge", "turn_on_edge", "verify_domain", "none":
+		"allow_edge", "turn_on_edge", "verify_domain", "assign_domain", "github_org_access", "none":
 	default:
 		return map[string]any{"action": "none"}
 	}
@@ -393,6 +408,26 @@ func projectFix(in map[string]any) map[string]any {
 	keep("host_id", uuidPattern)
 	keep("org_id", uuidPattern)
 	keep("image_pattern", imagePatternRule)
+	if action == "github_org_access" {
+		// api-v1 v1.53: the organization and GitHub's grant page.
+		keep("owner", githubLoginPattern)
+		keep("url", githubGrantPattern)
+		if out["owner"] == nil {
+			return map[string]any{"action": "none"}
+		}
+	}
+	if action == "assign_domain" {
+		// api-v1 v1.52: only the org, the domain, the pattern and its
+		// written-out name mean anything on this fix; fixURL builds the
+		// Assign link from them. The agent never assigns anything itself.
+		out = map[string]any{"action": action}
+		keep("org_id", uuidPattern)
+		keep("domain_id", uuidPattern)
+		keep("name", routeHostPattern)
+		if p, ok := in["pattern"].(string); ok && len(p) <= 253 && assignLinkPattern.MatchString(p) {
+			out["pattern"] = p
+		}
+	}
 	return out
 }
 
@@ -426,6 +461,11 @@ func nextStep(fix map[string]any, projectID, entry string) string {
 		return fmt.Sprintf("ask the person to add file %s in the console (%s, Files).", str("name"), settingsHint)
 	case "grant_deploy_access":
 		return "ask an org owner or admin to grant this project deploy access to the host in the console (the host's Access section)."
+	case "assign_domain":
+		if str("name") != "" {
+			return fmt.Sprintf("ask an org owner or admin to assign %s to this project in the organization's Domains in the console (Assign); assigning a domain is console only.", str("name"))
+		}
+		return "ask an org owner or admin to assign that name to this project in the organization's Domains in the console (Assign); assigning a domain is console only."
 	case "host_policy_snippet":
 		return fmt.Sprintf("ask an org owner or admin to allow the image on the host's Policy tab in the console; if the host's root has not set console_policy = true, call host_policy_snippet with project_id %s, entry %s and host_id %s, and show the person the snippet.", projectID, entry, str("host_id"))
 	case "allow_edge":
@@ -434,8 +474,28 @@ func nextStep(fix map[string]any, projectID, entry string) string {
 		return "ask an org owner or admin to turn the edge on in the host's Edge section in the console."
 	case "verify_domain":
 		return "ask an org owner or admin to add, verify and assign the domain to this project in the organization's Domains in the console."
+	case "github_org_access":
+		return orgGrantStep(str("owner"), str("url"))
 	default:
 		return ""
+	}
+}
+
+// refusalSummary is the image_access summary when GitHub told why ghcr.io
+// refused the GitHub connection (api-v1 v1.53).
+func refusalSummary(r map[string]any) string {
+	str := func(k string) string { s, _ := r[k].(string); return s }
+	switch str("reason") {
+	case "org_restricted":
+		return "ghcr.io refused the GitHub connection because the " + str("owner") + " organization has not granted the Deploybot GitHub app access to its packages. Next: " + orgGrantStep(str("owner"), str("url"))
+	case "no_package_access":
+		account := "The connected GitHub account"
+		if str("account") != "" {
+			account = "The GitHub account " + str("account")
+		}
+		return "ghcr.io refused the GitHub connection. " + account + " cannot see the " + str("owner") + " package: ask the person to give it read access to the package on GitHub, or to reconnect GitHub as an account that can (" + settingsHint + ", Registries)."
+	default:
+		return "The GitHub sign-in for ghcr.io expired, was revoked or lost read:packages. Ask the person to reconnect GitHub in the console (" + settingsHint + ", Registries)."
 	}
 }
 

@@ -114,7 +114,7 @@ func TestHostAndProblemLinks(t *testing.T) {
 
 // list_env_sets: a secret key with a value links to its console button,
 // Reveal once while pending, else Regenerate; a private key links to its
-// entry; plain keys and placeholders get none (api-v1 v1.52).
+// entry; plain keys and placeholders get none (api-v1 v1.54).
 func TestEnvKeyLinks(t *testing.T) {
 	sets := []envSetView{
 		{Name: "mos-dev-secrets", Keys: []envSetKeyView{

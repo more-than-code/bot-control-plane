@@ -637,7 +637,7 @@ export async function revealPrivateKey(event: RequestEvent) {
 }
 
 /**
- * Regenerate a secret key and show the new value once (api-v1 v1.52): `POST …/regenerate` with the chosen kind, then
+ * Regenerate a secret key and show the new value once (api-v1 v1.54): `POST …/regenerate` with the chosen kind, then
  * the v1.27 reveal. As revealEnvKey, the value is only in this action's result, read by the Regenerate dialog's own
  * fetch, and a post that is not that fetch is refused before the API is called. When the reveal answer is lost the
  * key stays pending, so the row offers Reveal once.
@@ -679,7 +679,7 @@ async function regenerateAndReveal(
 	}
 }
 
-/** Regenerate a key of a shared env set (api-v1 v1.52), for the Regenerate dialog's fetch only. */
+/** Regenerate a key of a shared env set (api-v1 v1.54), for the Regenerate dialog's fetch only. */
 export async function regenerateEnvKey(event: RequestEvent) {
 	requireUser(event);
 	const id = projectIdOf(event.params);
@@ -689,7 +689,7 @@ export async function regenerateEnvKey(event: RequestEvent) {
 	return regenerateAndReveal(event, 'settings', key, formText(form, 'generate_kind'), path && `${path}/regenerate`, path && `${path}/reveal`);
 }
 
-/** Regenerate a key of an entry's private set (api-v1 v1.52); the dialog posts `set` `@<entry>`. */
+/** Regenerate a key of an entry's private set (api-v1 v1.54); the dialog posts `set` `@<entry>`. */
 export async function regeneratePrivateKey(event: RequestEvent) {
 	requireUser(event);
 	const id = projectIdOf(event.params);

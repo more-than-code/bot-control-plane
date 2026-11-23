@@ -13,7 +13,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
-// Regenerate (api-v1 v1.52): a new generated value for an existing secret
+// Regenerate (api-v1 v1.54): a new generated value for an existing secret
 // key, for when the one-time reveal was missed or the secret must rotate.
 // The value is not returned here; the key becomes reveal_pending and the
 // v1.27 item 3 reveal route shows it once. Console only (the routes refuse

@@ -264,7 +264,7 @@ type envSetKeyView struct {
 	IsSecret      bool   `json:"is_secret"`
 	NeedsValue    bool   `json:"needs_value"`
 	RevealPending bool   `json:"reveal_pending"`
-	// ConsoleURL (api-v1 v1.52) is set on a secret key that has a value:
+	// ConsoleURL (api-v1 v1.54) is set on a secret key that has a value:
 	// the console row's Reveal once button while reveal_pending, else its
 	// Regenerate button. The agent never reveals or regenerates.
 	ConsoleURL string `json:"console_url,omitempty"`

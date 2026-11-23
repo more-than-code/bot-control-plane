@@ -1,4 +1,4 @@
-# Regenerate a secret env value (api-v1 v1.52)
+# Regenerate a secret env value (api-v1 v1.54)
 
 Rev 1, 2026-11-23. DD `DEF-20261123-no-way-to-regenerate-or-reveal-again-a-g-ltzh`; follows the privileged-steps principle (`DEF-20261123-design-principle-privileged-steps-are-do-exut`, api-v1 v1.51 deep links). Additive, no migration, no agent-protocol change.
 

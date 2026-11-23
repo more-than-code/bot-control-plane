@@ -231,7 +231,7 @@ func contractRoutes() []route {
 		{"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}", false, (*Server).handleEnvKeyDelete, delegatedDeny},
 		{"POST /v1/projects/{id}/env-sets/{set}/secret", false, (*Server).handleEnvKeysSecret, delegatedDeny},
 		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal", false, (*Server).handleEnvKeyReveal, delegatedDeny},
-		// api-v1 v1.52: a new generated value for an existing secret key, console only.
+		// api-v1 v1.54: a new generated value for an existing secret key, console only.
 		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/regenerate", false, (*Server).handleEnvKeyRegenerate, delegatedDeny},
 		// api-v1 v1.28 value requests: create decides in its handler; the fill page, fill and decline are console only.
 		{"POST /v1/projects/{id}/env-sets/{set}/value-requests", false, (*Server).handleValueRequestCreate, delegatedHandler},

@@ -13,7 +13,7 @@ func regeneratePath(project, set, key string) string {
 	return envKeyPath(project, set, key) + "/regenerate"
 }
 
-// TestEnvKeyRegenerate (api-v1 v1.52): a secret key, generated or typed,
+// TestEnvKeyRegenerate (api-v1 v1.54): a secret key, generated or typed,
 // gets a new generated value that is shown once through reveal; the answer
 // names the entries that use the set; the value is in no answer or audit
 // row; plain, missing and delegated calls change nothing.

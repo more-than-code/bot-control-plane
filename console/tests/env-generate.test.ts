@@ -260,7 +260,7 @@ describe('reveal once (api-v1 v1.27 item 3)', () => {
 });
 
 describe('env row actions', () => {
-	test('secret row actions are Edit, Reveal once (only while pending), Regenerate (api-v1 v1.52) and Delete', () => {
+	test('secret row actions are Edit, Reveal once (only while pending), Regenerate (api-v1 v1.54) and Delete', () => {
 		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: true }), { revealOnce: true, regenerate: true });
 		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false }), { revealOnce: false, regenerate: true });
 		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false, needs_value: true }), { revealOnce: false, regenerate: false });

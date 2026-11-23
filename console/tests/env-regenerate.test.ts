@@ -13,7 +13,7 @@ import { privateKeyRegeneratePath } from '../src/lib/private-keys.ts';
 import { actions as projectActions } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 
-// Regenerate a secret key and show the new value once (api-v1 v1.52).
+// Regenerate a secret key and show the new value once (api-v1 v1.54).
 
 const NEW_VALUE = 'Regen3ratedValueNeverInPageData0123456789';
 const base = { session: TOKEN, user: USER, projects: [PROJECT], params: { id: PROJECT.id } };

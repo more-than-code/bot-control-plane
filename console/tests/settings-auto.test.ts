@@ -19,6 +19,9 @@ import {
 	isGitHubAuthorizeUrl,
 	parseHostPolicySnippet,
 	parseImageAccess,
+	parseRefusal,
+	refusalText,
+	refusedTitle,
 	parseReadiness,
 	readinessSummary,
 	type UsedByEntry,
@@ -650,9 +653,95 @@ test('the refused badge checks every ghcr.io repository once', async () => {
 		const entry = (name: string, image: string) => ({ name, kind: 'image', spec: { image } }) as never;
 		const catalog = [entry('a1', 'ghcr.io/joe/a:v1'), entry('a2', 'ghcr.io/joe/a:v2'), entry('b', 'ghcr.io/joe/b:v1'), entry('hub', 'nginx')];
 		const { event } = fakeEvent({ url: `http://console.example/projects/${PROJECT.id}?tab=settings`, params: { id: PROJECT.id }, user: USER, session: TOKEN });
-		assert.equal(await githubRefused(event as never, PROJECT.id, [github], catalog), true);
+		assert.deepEqual(await githubRefused(event as never, PROJECT.id, [github], catalog), { refusals: [] });
 		assert.deepEqual(asked.sort(), ['ghcr.io/joe/a:v1', 'ghcr.io/joe/b:v1']);
 		assert.equal(await githubRefused(event as never, PROJECT.id, [{ ...github, source: 'manual' }], catalog), false);
+	} finally {
+		globalThis.fetch = originalFetch;
+		restoreEnv();
+	}
+});
+
+// api-v1 v1.53: why ghcr.io refused the GitHub connection.
+const GRANT = 'https://github.com/settings/connections/applications/Iv1.abc123';
+
+test('image access keeps an allowlisted refusal on a refused GitHub connection only', () => {
+	const org = { reason: 'org_restricted', owner: 'kea-studio', account: 'octo-cat', url: GRANT };
+	assert.deepEqual(parseImageAccess({ registry: 'ghcr.io', access: 'login_failed', login: 'github', refusal: org }), {
+		registry: 'ghcr.io',
+		access: 'login_failed',
+		login: 'github',
+		refusal: org
+	});
+	// Only GitHub's grant page passes, and an org refusal needs its organization.
+	assert.deepEqual(parseRefusal({ reason: 'org_restricted', owner: 'kea-studio', url: 'https://evil.example/x' }), { reason: 'org_restricted', owner: 'kea-studio' });
+	assert.equal(parseRefusal({ reason: 'org_restricted', owner: 'kea studio' }), null);
+	assert.equal(parseRefusal({ reason: 'later' }), null);
+	assert.equal(parseImageAccess({ registry: 'ghcr.io', access: 'private_ok', login: 'github', refusal: org })?.refusal, undefined);
+	assert.equal(parseImageAccess({ registry: 'ghcr.io', access: 'login_failed', login: 'manual', refusal: org })?.refusal, undefined);
+});
+
+test('the image line names the organization and links GitHub instead of Connect GitHub', () => {
+	const base = { registry: 'ghcr.io', access: 'login_failed', login: 'github' } as const;
+	assert.deepEqual(accessLine({ ...base, refusal: { reason: 'org_restricted', owner: 'kea-studio', url: GRANT } }), {
+		text: 'ghcr.io refused the GitHub connection: the kea-studio organization has not granted the Deploybot GitHub app access.',
+		connect: false,
+		settings: false,
+		github: GRANT
+	});
+	const noAccess = accessLine({ ...base, refusal: { reason: 'no_package_access', owner: 'kea-studio', account: 'octo-cat' } });
+	assert.equal(noAccess.text, 'ghcr.io refused the GitHub connection: The GitHub account octo-cat cannot see the kea-studio package. Give it read access to the package on GitHub, or reconnect as an account that can.');
+	assert.equal(noAccess.connect, true);
+	assert.equal(accessLine({ ...base, refusal: { reason: 'github_sign_in' } }).text, 'The stored login for ghcr.io was refused: reconnect GitHub.');
+});
+
+test('a github_org_access fix links GitHub and is dropped without the link', () => {
+	const parsed = parseReadiness({
+		ready: false,
+		checks: [
+			{ check: 'registry', status: 'missing', message: 'm', fix: { action: 'github_org_access', registry: 'ghcr.io', owner: 'kea-studio', url: GRANT } },
+			{ check: 'registry', status: 'missing', message: 'm', fix: { action: 'github_org_access', owner: 'kea-studio', url: 'https://evil.example' } }
+		]
+	});
+	assert.ok(parsed);
+	assert.equal(fixLabel(parsed.checks[0].fix), 'Grant on GitHub');
+	assert.equal(fixHref(parsed.checks[0].fix, '/projects/p'), GRANT);
+	assert.deepEqual(parsed.checks[1].fix, { action: 'none' });
+});
+
+test('the refused badge carries the reasons, organizations first, once each', async () => {
+	useApi('https://api.test');
+	try {
+		installFetch((call) => {
+			const image = call.url.searchParams.get('image') ?? '';
+			const refusal = image.includes('/kea-studio/')
+				? { reason: 'org_restricted', owner: 'kea-studio', url: GRANT }
+				: { reason: 'no_package_access', owner: 'other', account: 'octo' };
+			return envelope({ registry: 'ghcr.io', access: 'login_failed', login: 'github', refusal });
+		});
+		const github: Registry = { host: 'ghcr.io', username: 'octo', updated_at: '2026-11-16T10:00:00Z', updated_by: USER.id, source: 'github', connected_by: null, delete_packages: false };
+		const entry = (name: string, image: string) => ({ name, kind: 'image', spec: { image } }) as never;
+		const catalog = [entry('o', 'ghcr.io/other/x:v1'), entry('a', 'ghcr.io/kea-studio/a:v1'), entry('b', 'ghcr.io/kea-studio/b:v1')];
+		const { event } = fakeEvent({ url: `http://console.example/projects/${PROJECT.id}?tab=settings`, params: { id: PROJECT.id }, user: USER, session: TOKEN });
+		const state = await githubRefused(event as never, PROJECT.id, [github], catalog);
+		assert.deepEqual(state, {
+			refusals: [
+				{ reason: 'org_restricted', owner: 'kea-studio', url: GRANT },
+				{ reason: 'no_package_access', owner: 'other', account: 'octo' }
+			]
+		});
+		assert.match(refusedTitle(state), /organization has not granted/);
+		assert.equal(refusedTitle(true), 'ghcr.io refused this login for an image in the catalog. Reconnect GitHub.');
+		assert.equal(refusalText({ reason: 'github_sign_in' }), null);
+
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(SettingsSection, {
+			props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, envSets: [], files: [], registries: [github], githubRefused: state }
+		}).body;
+		assert.match(html, />Refused</);
+		assert.match(html, /data-refusal="org_restricted"[^>]*>\s*The kea-studio organization has not granted the Deploybot GitHub app access, so Reconnect will not help\./);
+		assert.ok(html.includes(`href="${GRANT}"`));
+		assert.match(html, /data-refusal="no_package_access"/);
 	} finally {
 		globalThis.fetch = originalFetch;
 		restoreEnv();

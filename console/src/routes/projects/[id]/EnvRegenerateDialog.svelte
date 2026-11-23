@@ -22,7 +22,7 @@
 	import { envDomId } from './env-set-panel';
 
 	/**
-	 * Regenerate a secret key (api-v1 v1.52): pick a kind, confirm, then the new value is shown once here. The value
+	 * Regenerate a secret key (api-v1 v1.54): pick a kind, confirm, then the new value is shown once here. The value
 	 * lives only in this dialog's state while it is open, as in EnvRevealDialog. The fetch is the action's only reader.
 	 */
 	let {

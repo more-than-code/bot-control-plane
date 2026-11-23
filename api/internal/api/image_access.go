@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/registry"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
@@ -36,6 +37,25 @@ type imageAccess struct {
 	Registry string `json:"registry"`
 	Access   string `json:"access"`
 	Login    string `json:"login"`
+	// Refusal says why a GitHub-connection login was refused (api-v1
+	// v1.53): only with access login_failed, login github, and only when
+	// GitHub told the reason.
+	Refusal *accessRefusal `json:"refusal,omitempty"`
+}
+
+// accessRefusal is the reason ghcr.io refused the GitHub connection
+// (api-v1 v1.53). URL is the GitHub page that fixes org_restricted.
+type accessRefusal struct {
+	Reason  string `json:"reason"`
+	Owner   string `json:"owner,omitempty"`
+	Account string `json:"account,omitempty"`
+	URL     string `json:"url,omitempty"`
+}
+
+// accessAnswer is one cached image-access answer.
+type accessAnswer struct {
+	access  string
+	refusal *accessRefusal
 }
 
 // accessLimited is a lookup refused by the concurrency cap or the per-user
@@ -114,11 +134,11 @@ func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, proje
 	}
 	key := "access|" + projectID.String() + "|" + ref.Host + "|" + ref.Path + "|" + reference + "|" + loginKey
 	if v, hit := svc.Cache.Get(key, s.now()); hit {
-		if access, ok := v.(string); ok {
-			out.Access = access
+		if got, ok := v.(accessAnswer); ok {
+			out.Access, out.Refusal = got.access, got.refusal
 			s.logLookup("access", ref, "cache", 0, "cache", nil)
 			if stored {
-				s.noteRegistryAccess(ctx, projectID, ref.Host, out.Login, out.Access)
+				s.noteRegistryAccess(ctx, projectID, ref.Host, out.Login, out.Access, out.Refusal)
 			}
 			return out, nil
 		}
@@ -135,17 +155,21 @@ func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, proje
 	}
 	start := time.Now()
 	var refused *registry.Error
-	out.Access, refused = s.probeAccess(ctx, projectID, ref, reference, stored, mat)
+	var token string
+	out.Access, refused, token = s.probeAccess(ctx, projectID, ref, reference, stored, mat)
 	auth := "anonymous"
 	if stored && out.Access != accessPublic {
 		auth = "stored"
 	}
 	s.logLookup("access", ref, out.Access, time.Since(start), auth, refused)
+	if out.Access == accessLoginFailed && out.Login == loginGitHub {
+		out.Refusal = s.diagnoseGitHubRefusal(ctx, token, ref)
+	}
 	if out.Access != accessUnknown {
-		svc.Cache.Put(key, out.Access, s.now())
+		svc.Cache.Put(key, accessAnswer{access: out.Access, refusal: out.Refusal}, s.now())
 	}
 	if stored {
-		s.noteRegistryAccess(ctx, projectID, ref.Host, out.Login, out.Access)
+		s.noteRegistryAccess(ctx, projectID, ref.Host, out.Login, out.Access, out.Refusal)
 	}
 	return out, nil
 }
@@ -154,36 +178,37 @@ func (s *Server) lookupImageAccessAs(ctx context.Context, limitKey string, proje
 // A 401, 403 or 404 without a credential (registry code not_found) counts
 // as refused: the registry cannot tell private from missing without a login,
 // so not_found is only an authenticated 404. For login_failed it also
-// returns the registry error, for the lookup log; otherwise nil.
-func (s *Server) probeAccess(ctx context.Context, projectID uuid.UUID, ref catalog.ImageRef, reference string, stored bool, mat store.RegistryMaterial) (string, *registry.Error) {
+// returns the registry error, for the lookup log, and the token that was
+// refused, for the refusal reason (api-v1 v1.53); otherwise nil and "".
+func (s *Server) probeAccess(ctx context.Context, projectID uuid.UUID, ref catalog.ImageRef, reference string, stored bool, mat store.RegistryMaterial) (string, *registry.Error, string) {
 	repo := registry.Repo{Host: ref.Host, Path: ref.Path}
 	_, _, err := s.Registry.Client.Digest(ctx, repo, reference)
 	if err == nil {
-		return accessPublic, nil
+		return accessPublic, nil, ""
 	}
 	if registryCode(err) != registry.CodeNotFound {
-		return accessUnknown, nil
+		return accessUnknown, nil, ""
 	}
 	if !stored {
-		return accessPrivateNoLogin, nil
+		return accessPrivateNoLogin, nil, ""
 	}
 	fresh, token, err := s.registryToken(ctx, projectID, mat.Host, refreshOnUse)
 	if err != nil {
-		return accessUnknown, nil
+		return accessUnknown, nil, ""
 	}
 	repo.Cred = &registry.Credential{Username: fresh.Username, Token: token}
 	_, sent, err := s.Registry.Client.Digest(ctx, repo, reference)
 	switch {
 	case err == nil:
-		return accessPrivateOK, nil
+		return accessPrivateOK, nil, ""
 	case registryCode(err) == registry.CodeAuthFailed:
 		var rerr *registry.Error
 		errors.As(err, &rerr)
-		return accessLoginFailed, rerr
+		return accessLoginFailed, rerr, token
 	case registryCode(err) == registry.CodeNotFound && sent:
-		return accessNotFound, nil
+		return accessNotFound, nil, ""
 	default:
-		return accessUnknown, nil
+		return accessUnknown, nil, ""
 	}
 }
 
@@ -193,4 +218,23 @@ func registryCode(err error) string {
 		return rerr.Code
 	}
 	return registry.CodeBadResponse
+}
+
+// diagnoseGitHubRefusal asks GitHub, with the token ghcr.io refused, why
+// it refused the project's GitHub connection for ref (api-v1 v1.53). nil
+// when it cannot tell: no GitHub client, a failed call or no clear reason.
+// The answer is cached with the access answer (60 s).
+func (s *Server) diagnoseGitHubRefusal(ctx context.Context, token string, ref catalog.ImageRef) *accessRefusal {
+	if s.GitHub == nil || token == "" || ref.Host != store.GitHubRegistry {
+		return nil
+	}
+	got, err := s.GitHub.DiagnoseRefusal(ctx, token, ref.Path)
+	if err != nil || got.Reason == "" {
+		return nil
+	}
+	out := &accessRefusal{Reason: got.Reason, Owner: got.Owner, Account: got.Account}
+	if got.Reason == github.RefusalOrgRestricted {
+		out.URL = s.GitHub.ApplicationURL()
+	}
+	return out
 }

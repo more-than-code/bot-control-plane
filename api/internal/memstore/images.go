@@ -717,7 +717,7 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 	if !m.projectAliveLocked(projectID) {
 		return store.EnvKey{}, false, store.ErrNotFound
 	}
-	// Only a regenerate reaches a private set "@<entry>" (api-v1 v1.52).
+	// Only a regenerate reaches a private set "@<entry>" (api-v1 v1.54).
 	if !catalog.ValidName(name) && !(in.Regenerate && catalog.IsPrivateSet(name)) {
 		return store.EnvKey{}, false, store.ErrInvalid
 	}
@@ -742,7 +742,7 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 	created := idx < 0
 	secret := true
 	if in.Regenerate {
-		// api-v1 v1.52: replace an existing secret value only.
+		// api-v1 v1.54: replace an existing secret value only.
 		if !exists || created {
 			return store.EnvKey{}, false, store.ErrNotFound
 		}

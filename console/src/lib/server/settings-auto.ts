@@ -19,6 +19,8 @@ import {
 	parseImageAccess,
 	parseNetworkSnippet,
 	parseReadiness,
+	refusalsOf,
+	type GitHubRefused,
 	type HostPolicySnippet,
 	type ImageAccessResult,
 	type Readiness
@@ -191,9 +193,10 @@ async function githubConnectFor(event: RequestEvent, id: string): Promise<boolea
 /**
  * Whether ghcr.io refuses the project's GitHub connection, for the Registries card badge. Only with a GitHub row, it
  * asks image-access once per ghcr.io repository in the catalog (cached lookups, in parallel); any `login_failed` is a
- * refusal. No such image, or a failed lookup, does not count.
+ * refusal. No such image, or a failed lookup, does not count. A refusal comes with the reasons GitHub told (api-v1
+ * v1.53), one per reason and owner, organizations that have not granted the app first.
  */
-export async function githubRefused(event: RequestEvent, id: string, registries: Registry[], catalog: CatalogEntry[]): Promise<boolean> {
+export async function githubRefused(event: RequestEvent, id: string, registries: Registry[], catalog: CatalogEntry[]): Promise<GitHubRefused> {
 	if (!registries.some((row) => row.host === GITHUB_REGISTRY && row.source === 'github')) return false;
 	const byRepository = new Map<string, string>();
 	for (const entry of catalog) {
@@ -204,12 +207,14 @@ export async function githubRefused(event: RequestEvent, id: string, registries:
 	const answers = await Promise.all(
 		[...byRepository.values()].map(async (image) => {
 			try {
-				return parseImageAccess(await apiFetch(event, `/v1/projects/${id}/image-access?image=${encodeURIComponent(image)}`))?.access === 'login_failed';
+				return parseImageAccess(await apiFetch(event, `/v1/projects/${id}/image-access?image=${encodeURIComponent(image)}`));
 			} catch (err) {
 				if (isRedirect(err) || isHttpError(err)) throw err;
-				return false;
+				return null;
 			}
 		})
 	);
-	return answers.some(Boolean);
+	const refused = answers.filter((answer) => answer?.access === 'login_failed');
+	if (refused.length === 0) return false;
+	return { refusals: refusalsOf(refused.map((answer) => answer?.refusal)) };
 }

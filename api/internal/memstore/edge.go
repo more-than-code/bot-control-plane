@@ -169,6 +169,22 @@ func (m *Mem) MarkDomainVerified(_ context.Context, orgID, domainID uuid.UUID, a
 	return m.domainViewLocked(d), nil
 }
 
+func (m *Mem) TouchDomainCheck(_ context.Context, orgID, domainID uuid.UUID, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.liveDomainLocked(orgID, domainID)
+	if !ok {
+		return store.ErrNotFound
+	}
+	if d.Status == store.DomainVerified {
+		return nil
+	}
+	check := at
+	d.LastCheckAt = &check
+	m.edgeLocked().domains[d.ID] = d
+	return nil
+}
+
 func (m *Mem) RecordDomainCheck(_ context.Context, domainID uuid.UUID, ok bool, at time.Time) (store.OrgDomain, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -245,10 +261,10 @@ func (m *Mem) PutDomainAssignments(_ context.Context, orgID, domainID uuid.UUID,
 	next := make([]store.DomainAssignment, 0, len(in))
 	for _, a := range in {
 		p, ok := m.projects[a.ProjectID]
-		if !ok || p.DeletedAt != nil || p.OrgID != orgID || (a.Pattern != "@" && a.Pattern != "*") {
+		if !ok || p.DeletedAt != nil || p.OrgID != orgID || !store.ValidPattern(d.Name, a.Pattern) {
 			return store.OrgDomain{}, store.ErrInvalid
 		}
-		key := a.ProjectID.String() + a.Pattern
+		key := a.ProjectID.String() + " " + a.Pattern
 		if seen[key] {
 			return store.OrgDomain{}, store.ErrInvalid
 		}
@@ -354,6 +370,9 @@ func (m *Mem) routesUnderLocked(d store.OrgDomain) []store.Route {
 		if !store.UnderDomain(d.Name, r.Hostname) || !m.projectAliveLocked(r.ProjectID) {
 			continue
 		}
+		if !store.OneLabelUnder(d.Name, r.Hostname) && m.deeperDomainLocked(d, r.Hostname) {
+			continue
+		}
 		if m.projects[r.ProjectID].OrgID != d.OrgID || m.coveredElsewhereLocked(d, r) {
 			continue
 		}
@@ -362,6 +381,18 @@ func (m *Mem) routesUnderLocked(d store.OrgDomain) []store.Route {
 	}
 	sortRoutesByHost(out)
 	return out
+}
+
+// deeperDomainLocked reports whether another domain of d's org, more
+// specific than d, holds hostname (api-v1 v1.52): a route that deep was
+// never d's, whatever that domain's status or assignments.
+func (m *Mem) deeperDomainLocked(d store.OrgDomain, hostname string) bool {
+	for _, other := range m.edgeLocked().domains {
+		if other.ID != d.ID && other.OrgID == d.OrgID && len(other.Name) > len(d.Name) && store.UnderDomain(other.Name, hostname) {
+			return true
+		}
+	}
+	return false
 }
 
 // coveredElsewhereLocked reports whether another verified or lapsed domain
