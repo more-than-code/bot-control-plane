@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -32,6 +33,13 @@ func vrSession(t *testing.T, opts *mcp.ClientOptions, reply func(r *http.Request
 // vrSessionAt is vrSession on one protocol version ("" is the SDK's latest).
 func vrSessionAt(t *testing.T, protocol string, opts *mcp.ClientOptions, reply func(r *http.Request) (int, string)) (*mcp.ClientSession, func() []apiRequest) {
 	t.Helper()
+	return vrSessionCaller(t, protocol, "test-caller", opts, reply)
+}
+
+// vrSessionCaller is vrSessionAt for one caller: every request carries the
+// digest of caller as the caller key, as auth.RequireDelegated sets it.
+func vrSessionCaller(t *testing.T, protocol, caller string, opts *mcp.ClientOptions, reply func(r *http.Request) (int, string)) (*mcp.ClientSession, func() []apiRequest) {
+	t.Helper()
 	var mu sync.Mutex
 	var seen []apiRequest
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +61,8 @@ func vrSessionAt(t *testing.T, protocol string, opts *mcp.ClientOptions, reply f
 	Register(server, api)
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			return next(auth.WithDelegatedToken(ctx, "test-delegated", nil), method, req)
+			ctx = auth.WithCallerKey(auth.WithDelegatedToken(ctx, "test-delegated", nil), sha256.Sum256([]byte(caller)))
+			return next(ctx, method, req)
 		}
 	})
 	ctx := context.Background()

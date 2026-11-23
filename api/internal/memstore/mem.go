@@ -100,6 +100,9 @@ type Mem struct {
 	// hostFiles is host config file versions, applies and status (api-v1
 	// v1.44); see host_files.go.
 	hostFiles hostFileData
+	// agentUpgrades is the agent upgrade rows, oldest first (api-v1
+	// v1.48); see agent_upgrades.go.
+	agentUpgrades []store.AgentUpgrade
 }
 
 type sessionRec struct {

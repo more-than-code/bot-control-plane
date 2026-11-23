@@ -59,6 +59,10 @@ type HostPrograms struct {
 	// v1.18): host file applies are then unsupported. The API never puts it
 	// on a Host answer; the files route lists it.
 	HostFiles []HostFile `json:"host_files,omitzero"`
+	// AgentUpgrade is hello.programs.agent_upgrade (agent-protocol v1.20
+	// item 2); absent = false. The API never puts it on a Host answer; the
+	// Host carries agent_upgrade_allowed instead (api-v1 v1.48 item 4).
+	AgentUpgrade bool `json:"agent_upgrade,omitempty"`
 }
 
 // HostEdgePolicy is the runner.toml edge switch and the Caddy image digest

@@ -125,6 +125,7 @@ TRUNCATE TABLE
     app.notification_reads,
     app.host_file_applies,
     app.host_file_versions,
+    app.host_agent_upgrades,
     app.hosts,
     app.project_members,
     app.sessions,

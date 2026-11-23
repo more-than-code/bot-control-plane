@@ -56,6 +56,8 @@ type Hub struct {
 	// deployHook evaluates the deploy problem after an auto action row
 	// (api-v1 v1.41); nil when unset.
 	deployHook DeployHook
+	// upgradeHook settles agent upgrade rows (api-v1 v1.48); nil when unset.
+	upgradeHook UpgradeHook
 	// hooks counts deploy hook calls still running off the read loop.
 	hooks sync.WaitGroup
 }
@@ -92,6 +94,9 @@ type agentConn struct {
 	// host_files_status throttle, owned by the read loop.
 	statusTokens float64
 	statusAt     time.Time
+	// upgradeAt is the last agent_upgrade_result frame taken, owned by the
+	// read loop.
+	upgradeAt time.Time
 }
 
 // errFrameTooLarge is returned when a serialized outbound frame exceeds maxFrame.

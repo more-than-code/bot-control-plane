@@ -260,6 +260,8 @@ func (h *Hub) hello(ac *agentConn, token string, f frame) bool {
 	// api-v1 v1.35 item 5: the full edge config again on every hello. The
 	// hook runs apart from the read loop, which delivers the task result.
 	h.notifyEdge(host.ID, true)
+	// api-v1 v1.48 item 2: an acknowledged hello may settle an upgrade.
+	h.helloUpgrade(ac, f.AgentVersion, f.LastUpgrade)
 	return true
 }
 
@@ -286,6 +288,9 @@ func (h *Hub) dispatch(ac *agentConn, f frame) error {
 		return h.onAutoAction(ac, f)
 	case "host_files_status":
 		h.onHostFilesStatus(ac, f)
+		return nil
+	case "agent_upgrade_result":
+		h.onUpgradeResult(ac, f)
 		return nil
 	default:
 		h.log.Info("ignored agent frame", "type", f.Type)

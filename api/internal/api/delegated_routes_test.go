@@ -83,6 +83,7 @@ var delegatedAllowPatterns = []string{
 	"POST /v1/projects/{id}/catalog/parse",
 	"POST /v1/auth/signout",
 	"POST /v1/confirmations/{confirmation_id}",
+	"POST /v1/hosts/{id}/agent-upgrade",
 }
 
 func TestDelegatedWriteRoutesDenied(t *testing.T) {

@@ -8,7 +8,8 @@
 	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import type { Host, SnapshotView } from '$lib/api-types';
+	import type { AgentUpgrade, Host, SnapshotView } from '$lib/api-types';
+	import { upgradeLine } from '$lib/agent-upgrade';
 	import { formatBytes, formatCapacity, formatLoad, formatPercent, formatRate, formatTemp, formatUptime } from '$lib/format';
 	import { alignSeries, hostPolicyLine, hostSharedNetworks, METRIC_SPECS, type MetricChart, type MetricFormat } from '$lib/host-view';
 	import type { Column } from '$lib/table';
@@ -21,12 +22,20 @@
 		host,
 		range,
 		metrics,
-		snapshot
+		snapshot,
+		canUpgrade = false,
+		upgrades = [],
+		upgradesMessage = null
 	}: {
 		host: Host;
 		range: RangeKey;
 		metrics: MetricChart[];
 		snapshot: SnapshotView | null;
+		/** Org owner or admin of the host's org: the Upgrade action (api-v1 v1.48). */
+		canUpgrade?: boolean;
+		/** The host's agent upgrades, newest first. */
+		upgrades?: AgentUpgrade[];
+		upgradesMessage?: string | null;
 	} = $props();
 
 	const formatters: Record<MetricFormat, (value: number) => string> = {
@@ -79,11 +88,29 @@
 <dl class="mb-4 grid gap-3 sm:grid-cols-2">
 	<div><dt class="text-muted-foreground text-sm">Status</dt><dd><StatusBadge status={host.status} /></dd></div>
 	<div><dt class="text-muted-foreground text-sm">Last seen</dt><dd><LocalTime iso={host.last_seen_at} /></dd></div>
-	<div><dt class="text-muted-foreground text-sm">Agent</dt><dd><AgentVersion {host} /></dd></div>
+	<div><dt class="text-muted-foreground text-sm">Agent</dt><dd><AgentVersion {host} {canUpgrade} /></dd></div>
 	<div><dt class="text-muted-foreground text-sm">System</dt><dd>{host.os}/{host.arch}</dd></div>
 	<div><dt class="text-muted-foreground text-sm">Always on</dt><dd>{host.always_on ? 'yes' : 'no'}</dd></div>
 	{#if policyLine}
 		<div><dt class="text-muted-foreground text-sm">Host policy</dt><dd class="break-words">{policyLine}</dd></div>
+	{/if}
+	{#if upgrades.length > 0 || upgradesMessage}
+		<div class="sm:col-span-2">
+			<dt class="text-muted-foreground text-sm">Agent upgrades</dt>
+			<dd>
+				{#if upgradesMessage}
+					<Notice kind="error">{upgradesMessage}</Notice>
+				{:else}
+					<ul class="grid gap-0.5 text-sm">
+						{#each upgrades.slice(0, 5) as row (row.id)}
+							<li>
+								<LocalTime iso={row.started_at} />: {upgradeLine(row)}{row.started_by.name ? `, by ${row.started_by.name}` : ''}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</dd>
+		</div>
 	{/if}
 	{#if sharedNetworks}
 		<div>

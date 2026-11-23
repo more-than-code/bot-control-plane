@@ -100,13 +100,24 @@ func newHFCast(t *testing.T, programs map[string]any) *hfCast {
 // connect says hello with programs and answers tasks until the test ends.
 func (c *hfCast) connect(t *testing.T, programs map[string]any) {
 	t.Helper()
+	c.connectHello(t, map[string]any{"agent_version": "0.2.12", "programs": programs})
+}
+
+// connectHello is connect with the hello fields in extra (agent_version
+// and programs at least).
+func (c *hfCast) connectHello(t *testing.T, extra map[string]any) {
+	t.Helper()
 	conn := c.w.dial(c.sc.credPlain)
 	// A 64 KiB file is an ~88 KiB task frame, above the library's 32 KiB default.
 	conn.SetReadLimit(1 << 20)
-	writeFrame(t, conn, map[string]any{
+	hello := map[string]any{
 		"v": 1, "type": "hello", "host_id": c.sc.host.ID.String(), "credential_id": c.sc.credID.String(),
-		"agent_version": "0.2.12", "os": "linux", "arch": "arm64", "services": []any{}, "programs": programs,
-	})
+		"os": "linux", "arch": "arm64", "services": []any{},
+	}
+	for k, v := range extra {
+		hello[k] = v
+	}
+	writeFrame(t, conn, hello)
 	if hello := readFrame(t, conn); hello["type"] != "hello_ok" {
 		t.Fatalf("hello %#v", hello)
 	}

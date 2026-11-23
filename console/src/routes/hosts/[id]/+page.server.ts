@@ -23,6 +23,7 @@ import {
 import { isUuid } from '$lib/server/validate';
 import { setEdge } from '$lib/server/edge-actions';
 import { applyHostFile, loadHostFiles, saveHostFile, saveSecretHostFile } from '$lib/server/host-files';
+import { loadAgentUpgrades } from '$lib/server/agent-upgrade';
 import { parseHostEdge } from '$lib/server/edge-shape';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
@@ -76,7 +77,11 @@ async function loadMetric(event: RequestEvent, id: string, spec: (typeof METRIC_
 async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, processSort: ProcessSort, accessLoad: Promise<AccessData>): Promise<HostPage> {
 	event.depends('host:metrics');
 	const window = rangeWindow(range, Date.now());
-	const [metrics, access] = await Promise.all([Promise.all(METRIC_SPECS.map((spec) => loadMetric(event, host.id, spec, window))), accessLoad]);
+	const [metrics, access, upgrades] = await Promise.all([
+		Promise.all(METRIC_SPECS.map((spec) => loadMetric(event, host.id, spec, window))),
+		accessLoad,
+		loadAgentUpgrades(event, host.id)
+	]);
 	return {
 		host,
 		tab: 'overview',
@@ -87,6 +92,8 @@ async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, proce
 		metrics,
 		processes: null,
 		processesMessage: null,
+		upgrades: upgrades.items,
+		upgradesMessage: upgrades.message,
 		...access
 	};
 }

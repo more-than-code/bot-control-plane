@@ -110,7 +110,7 @@
 			<td class="p-2 align-middle"><StatusBadge status={host.status} /></td>
 			<td class="p-2 align-middle whitespace-normal">{accessSummary(host.access)}</td>
 			<td class="p-2 align-middle"><LocalTime iso={host.last_seen_at} /></td>
-			<td class="p-2 align-middle"><AgentVersion {host} /></td>
+			<td class="p-2 align-middle"><AgentVersion {host} canUpgrade compact /></td>
 			<td class="p-2 align-middle">
 				<div class="flex items-center gap-1">
 					<Dialog.Root

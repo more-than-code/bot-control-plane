@@ -270,6 +270,15 @@ func TestTools(t *testing.T) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
 			}
+		case tool.Name == "upgrade_agent":
+			if readOnly || open {
+				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
+			}
+			for _, phrase := range []string{"Nothing runs until confirm", "agent_upgrade = true", "puts the previous agent back by itself", "does not contact the host"} {
+				if !strings.Contains(tool.Description, phrase) {
+					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
+				}
+			}
 		case tool.Name == "request_env_value":
 			if readOnly || open {
 				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
@@ -375,7 +384,7 @@ func TestTools(t *testing.T) {
 		"connect_registry", "get_registry_connect_request",
 		"check_readiness", "image_access", "host_policy_snippet",
 		"update_env_set", "delete_env_set", "shared_network_snippet", "whats_new",
-		"set_routes", "list_routes", "list_problems",
+		"set_routes", "list_routes", "list_problems", "upgrade_agent",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
@@ -383,8 +392,9 @@ func TestTools(t *testing.T) {
 	}
 	// 37 before api-v1 v1.34 and v1.35, plus whats_new, set_routes and
 	// list_routes, plus list_problems (v1.41), plus get_catalog_entry and
-	// set_entry_image, plus list_image_tags (v1.46), plus deploy_history (v1.47).
-	if len(seen) != 45 {
+	// set_entry_image, plus list_image_tags (v1.46), plus deploy_history (v1.47),
+	// plus upgrade_agent (v1.48).
+	if len(seen) != 46 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 

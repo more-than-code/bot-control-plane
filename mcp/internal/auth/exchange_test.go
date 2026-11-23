@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -396,6 +397,10 @@ func TestRejectDropsCacheAndStripsCaller(t *testing.T) {
 		tok, ok := DelegatedFromContext(r.Context())
 		if !ok || tok != "delegated.token" {
 			t.Errorf("delegated %q ok %v", tok, ok)
+		}
+		// The caller key is the digest of the caller's token, never the token.
+		if key, ok := CallerKeyFromContext(r.Context()); !ok || key != sha256.Sum256([]byte(subject)) {
+			t.Errorf("caller key ok %v", ok)
 		}
 		seen = append(seen, tok)
 		if len(seen) == 1 {

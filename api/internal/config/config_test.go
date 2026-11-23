@@ -39,7 +39,7 @@ func TestLatestAgentVersion(t *testing.T) {
 			t.Fatalf("%q: got %q", val, cfg.LatestAgentVersion)
 		}
 	}
-	for _, val := range []string{"v0.2.10", "0.2", "latest", "0.2.10-rc1", "0.2.10.1"} {
+	for _, val := range []string{"v0.2.10", "0.2", "latest", "0.2.10-rc1", "0.2.10.1", "12345.0.0", "0.2.00010"} {
 		env := map[string]string{"BOT_API_LATEST_AGENT_VERSION": val}
 		for k, v := range base {
 			env[k] = v

@@ -85,6 +85,9 @@ type Server struct {
 	hostFiles hostFileRuns
 	// hostFileWaitTest, when non-zero, replaces the 430 s apply wait. Tests only.
 	hostFileWaitTest time.Duration
+	// agentUpgradeWaitTest, when non-zero, replaces the 130 s agent upgrade
+	// task wait. Tests only.
+	agentUpgradeWaitTest time.Duration
 }
 
 // delegatedPolicy says what an api_delegated session may do on a route.
@@ -274,6 +277,9 @@ func contractRoutes() []route {
 		// api-v1 v1.35 item 2: the host edge, console only.
 		{"GET /v1/hosts/{id}/edge", false, (*Server).handleEdgeGet, delegatedDenyRead},
 		{"PUT /v1/hosts/{id}/edge", false, (*Server).handleEdgePut, delegatedDeny},
+		// api-v1 v1.48: agent upgrades; the MCP server asks for confirm first.
+		{"POST /v1/hosts/{id}/agent-upgrade", false, (*Server).handleAgentUpgrade, delegatedAllow},
+		{"GET /v1/hosts/{id}/agent-upgrades", false, (*Server).handleAgentUpgrades, delegatedAllow},
 		// api-v1 v1.24 items 3 and 4: removed routes answer 410 for one release.
 		{"GET /v1/hosts/{id}/shares", false, (*Server).handleSharesGone, delegatedAllow},
 		{"GET /v1/hosts/{id}/shares/{project_id}", false, (*Server).handleSharesGone, delegatedAllow},
@@ -663,20 +669,31 @@ type hostView struct {
 	store.Host
 	LatestAgentVersion *string `json:"latest_agent_version"`
 	UpdateAvailable    bool    `json:"update_available"`
+	// AgentUpgradeAllowed and AgentUpgrade are api-v1 v1.48 item 4.
+	AgentUpgradeAllowed bool              `json:"agent_upgrade_allowed"`
+	AgentUpgrade        *agentUpgradeView `json:"agent_upgrade"`
 }
 
-// withUpdateHint adds latest_agent_version (null when unset) and
+// withUpdateHint adds latest_agent_version (null when unset),
 // update_available (the host's agent_version is a lower X.Y.Z; always
-// false for a revoked host).
-func (s *Server) withUpdateHint(h store.Host) hostView {
+// false for a revoked host), agent_upgrade_allowed and agent_upgrade, the
+// host's newest upgrade row (last; nil for none).
+func (s *Server) withUpdateHint(h store.Host, last *store.AgentUpgrade) hostView {
+	allowed := agentUpgradeAllowed(h)
 	// api-v1 v1.44: host files are listed by their own route, never on a
-	// Host. Every Host answer goes through here (hostViews, hostRead).
-	if h.Programs != nil && h.Programs.HostFiles != nil {
+	// Host; v1.48: nor is programs.agent_upgrade. Every Host answer goes
+	// through here (hostViews, hostRead).
+	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade) {
 		cp := *h.Programs
 		cp.HostFiles = nil
+		cp.AgentUpgrade = false
 		h.Programs = &cp
 	}
-	v := hostView{Host: h}
+	v := hostView{Host: h, AgentUpgradeAllowed: allowed}
+	if last != nil {
+		view := upgradeView(*last)
+		v.AgentUpgrade = &view
+	}
 	if s.LatestAgentVersion != "" {
 		latest := s.LatestAgentVersion
 		v.LatestAgentVersion = &latest
@@ -685,12 +702,24 @@ func (s *Server) withUpdateHint(h store.Host) hostView {
 	return v
 }
 
-func (s *Server) hostViews(hosts []store.Host) []hostView {
+func (s *Server) hostViews(ctx context.Context, hosts []store.Host) ([]hostView, error) {
+	ids := make([]uuid.UUID, len(hosts))
+	for i, h := range hosts {
+		ids[i] = h.ID
+	}
+	latest, err := s.Store.LatestAgentUpgrades(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]hostView, len(hosts))
 	for i, h := range hosts {
-		out[i] = s.withUpdateHint(h)
+		var last *store.AgentUpgrade
+		if row, ok := latest[h.ID]; ok {
+			last = &row
+		}
+		out[i] = s.withUpdateHint(h, last)
 	}
-	return out
+	return out, nil
 }
 
 func (s *Server) auditOK(ctx context.Context, p principal, row store.AuditRow) {

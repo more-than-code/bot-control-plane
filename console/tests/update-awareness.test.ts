@@ -10,7 +10,9 @@ import {
 	parseChangelog,
 	SEEN_VERSION_COOKIE
 } from '../src/lib/changelog.ts';
-import { agentUpdateText } from '../src/lib/host-view.ts';
+import { agentUpdateTooltip } from '../src/lib/agent-upgrade.ts';
+
+const agentUpdateText = (latest: string) => agentUpdateTooltip(latest, 'view');
 import { parseHost } from '../src/lib/server/shape.ts';
 import { changelogEntries, latestVersion } from '../src/lib/server/changelog.ts';
 import { IMPORT_TIMEOUT_MS } from '../src/lib/server/notifications.ts';
@@ -314,7 +316,8 @@ describe('agent update hint (api-v1 v1.34)', () => {
 	test('all three host views use AgentVersion beside the agent version', () => {
 		for (const file of ['src/routes/projects/[id]/HostsSection.svelte', 'src/routes/orgs/[id]/OrgHostsSection.svelte', 'src/routes/hosts/[id]/OverviewTab.svelte']) {
 			const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
-			assert.match(source, /<AgentVersion \{host\} \/>/, file);
+			// api-v1 v1.48: with the caller's upgrade right (and icon-only in the tables).
+			assert.match(source, /<AgentVersion \{host\} [^>]*canUpgrade[^>]*\/>/, file);
 			assert.equal(source.includes("host.agent_version ?? 'n/a'"), false, file);
 		}
 	});

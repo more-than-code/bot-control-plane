@@ -12,6 +12,7 @@ import (
 )
 
 type delegatedTokenKey struct{}
+type callerKey struct{}
 type rejectKey struct{}
 
 // MaxTokenBytes is the longest Bearer token this server will accept.
@@ -28,6 +29,19 @@ func WithDelegatedToken(ctx context.Context, token string, onReject func()) cont
 		ctx = context.WithValue(ctx, rejectKey{}, onReject)
 	}
 	return ctx
+}
+
+// WithCallerKey returns a context that carries a digest that identifies
+// the caller's own token (its SHA-256), never the token. Server-side state
+// such as a pending confirmation is bound to it.
+func WithCallerKey(ctx context.Context, key [32]byte) context.Context {
+	return context.WithValue(ctx, callerKey{}, key)
+}
+
+// CallerKeyFromContext returns the caller digest; false when none is set.
+func CallerKeyFromContext(ctx context.Context) ([32]byte, bool) {
+	key, ok := ctx.Value(callerKey{}).([32]byte)
+	return key, ok
 }
 
 // DelegatedFromContext returns the delegated API token for this request.

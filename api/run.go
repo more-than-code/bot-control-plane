@@ -164,6 +164,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	// api-v1 v1.35: hello and services reports re-apply host edges, and
 	// verified domains are re-checked daily.
 	hub.SetEdgeHook(srv.EdgeHook)
+	// api-v1 v1.48: hello and agent_upgrade_result settle agent upgrades;
+	// rows left open past 15 minutes become unknown.
+	hub.SetUpgradeHook(srv.UpgradeHook)
+	go srv.RunAgentUpgrades(ctx)
 	go srv.RunDomainChecks(ctx)
 	startBackground(ctx, cfg, log, func() { hub.SetDeployHook(srv.DeployHook) }, srv.RunProblems, srv.RunGitHubRefresh)
 	return d.serve(cfg.Listen, root, hub.CloseAll)

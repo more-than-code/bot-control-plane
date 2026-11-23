@@ -148,6 +148,28 @@ export type Host = {
 	latest_agent_version?: string | null;
 	/** True only when the host's agent is older than `latest_agent_version`. */
 	update_available?: boolean;
+	/**
+	 * api-v1 v1.48: the host's runner.toml allows upgrades from Deploybot (`agent_upgrade = true`). False when
+	 * revoked, never reported, or from an older API.
+	 */
+	agent_upgrade_allowed?: boolean;
+	/** api-v1 v1.48: the host's newest agent upgrade, or null. */
+	agent_upgrade?: AgentUpgrade | null;
+};
+
+/** An agent upgrade row state (api-v1 v1.48). `started` and `running` are still open. */
+export type AgentUpgradeState = 'started' | 'running' | 'succeeded' | 'rolled_back' | 'failed' | 'unknown';
+
+/** One agent upgrade (api-v1 v1.48 item 3). */
+export type AgentUpgrade = {
+	id: string;
+	from: string;
+	to: string;
+	state: AgentUpgradeState;
+	reason: string | null;
+	started_by: { id: string; name: string };
+	started_at: string;
+	finished_at: string | null;
 };
 
 /** What the caller may do with one catalog entry. `status` comes with any other action. */

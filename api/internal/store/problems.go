@@ -17,6 +17,9 @@ const (
 	ProblemDeploy        = "deploy"
 	// ProblemHostFile is a host config file (api-v1 v1.44 item 8).
 	ProblemHostFile = "host_file"
+	// ProblemAgentUpgrade is an agent upgrade that did not succeed (api-v1
+	// v1.48 item 6).
+	ProblemAgentUpgrade = "agent_upgrade"
 )
 
 // Problem levels.
@@ -97,7 +100,7 @@ type RegistryLogin struct {
 // title of 1 to 300 and a detail of at most 300.
 func ValidProblemOpen(in ProblemOpen) bool {
 	switch in.Kind {
-	case ProblemHostOffline, ProblemRegistryLogin, ProblemDeploy, ProblemHostFile:
+	case ProblemHostOffline, ProblemRegistryLogin, ProblemDeploy, ProblemHostFile, ProblemAgentUpgrade:
 	default:
 		return false
 	}

@@ -32,6 +32,8 @@ type frame struct {
 	Payload          json.RawMessage `json:"payload"`
 	// Files is the host_files_status list (agent-protocol v1.18 item 5).
 	Files json.RawMessage `json:"files"`
+	// LastUpgrade is hello last_upgrade (agent-protocol v1.20 item 2).
+	LastUpgrade json.RawMessage `json:"last_upgrade"`
 	// Raw is the whole frame, for handlers that decode a strict shape.
 	Raw []byte `json:"-"`
 }
