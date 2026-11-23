@@ -200,3 +200,29 @@ func TestDeployReasonUnit(t *testing.T) {
 		t.Fatalf("tail %d", len(got))
 	}
 }
+
+// A host that drops after the task frame was sent did not refuse it: the
+// deploy may have run, so the row is not kept as refused (deleted as before).
+func TestDeployDroppedNotRefused(t *testing.T) {
+	w := newWorld(t)
+	owner := w.user("owner@ex.com", "Owner")
+	sc := w.scene(owner, w.user("a@ex.com", "A"), w.user("v@ex.com", "V"), w.user("s@ex.com", "S"), w.user("e@ex.com", "E"))
+	tok := w.token(owner.ID)
+	project := sc.project.ID.String()
+	host := sc.host.ID.String()
+	created := createImage(t, w, tok, sc.project.ID, "web", `{"kind":"service","image":"nginx"}`)
+	entryID := uuid.MustParse(created["id"].(string))
+	conn := helloAgent(t, w, sc.host, sc.credPlain, sc.credID, allowImages(), nil)
+	watchTasks(t, conn, func(msg map[string]any) map[string]any {
+		_ = conn.CloseNow()
+		return map[string]any{}
+	})
+	status, env, _ := postImage(t, w, tok, project, "web", "deploy", host, "d-1", nil)
+	if status == http.StatusOK {
+		t.Fatalf("dropped host answered ok %#v", env)
+	}
+	rows, err := w.mem.ListImageDeploys(context.Background(), entryID, sc.host.ID)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("history %#v %v", rows, err)
+	}
+}

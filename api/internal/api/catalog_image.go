@@ -518,8 +518,10 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 			s.auditImageDeny(ctx, p, projectID, host, entry.Name, action, got.code, reason, forms)
 			// A deploy or rollback the host refused stays in history as
 			// refused (api-v1 v1.47 item 2). A failed write leaves the row
-			// to the defer, which deletes it as before.
-			if (action == "deploy" || action == "rollback") && hostRejection(got.code) {
+			// to the defer, which deletes it as before. A host that dropped
+			// after the frame may have been sent did not refuse: that row is
+			// deleted as before, since the deploy may have run.
+			if (action == "deploy" || action == "rollback") && hostRejection(got.code) && !got.maybeSent {
 				err := s.settle(func(c context.Context) error {
 					_, ferr := s.Store.FinishImageDeployWith(c, opID, store.DeployFinish{
 						Outcome: "refused", Reason: refusedReason(got.code, reason), At: s.now(),
@@ -1652,8 +1654,11 @@ type imageCall struct {
 	lines   []string
 	logs    imageLogsBody
 	// agentReason is the agent's own reason for the outcome, checked and
-	// redacted (agent-protocol v1.15); "" when it sent none.
+	// redacted (agent-protocol v1.19); "" when it sent none.
 	agentReason string
+	// maybeSent: the host became unavailable after the frame may have
+	// been sent, so the task may have run. Such a row is not refused.
+	maybeSent bool
 }
 
 func takeImage(action string, res agentws.LiveResult, err error, forms []secretForm) imageCall {
@@ -1765,7 +1770,7 @@ func requestCall(call *agentws.CallError, forms []secretForm) imageCall {
 	if code == "" {
 		code = "error"
 	}
-	return imageCall{request: true, code: code, msg: shown, reason: reason}
+	return imageCall{request: true, code: code, msg: shown, reason: reason, maybeSent: call.MaybeSent}
 }
 
 // agentError returns the redacted agent message when it contains a known secret.

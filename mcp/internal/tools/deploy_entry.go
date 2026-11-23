@@ -168,9 +168,13 @@ func projectHistory(raw json.RawMessage) []any {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return []any{}
 	}
-	out := make([]any, 0, 3)
+	// Three rows that reached the host, so a rollback digest can be
+	// chosen, plus at most the newest refused row (api-v1 v1.47), which
+	// has no digest and does not take one of the three places.
+	out := make([]any, 0, 4)
+	kept, refused := 0, false
 	for _, item := range body.Items {
-		if len(out) == 3 {
+		if kept == 3 {
 			break
 		}
 		if strings.HasPrefix(item.Outcome, "auto_") {
@@ -178,6 +182,14 @@ func projectHistory(raw json.RawMessage) []any {
 		}
 		if item.Digest == "" && item.Outcome == "" {
 			continue
+		}
+		if item.Outcome == "refused" {
+			if refused {
+				continue
+			}
+			refused = true
+		} else {
+			kept++
 		}
 		when := item.FinishedAt
 		if when == "" {

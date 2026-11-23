@@ -375,7 +375,7 @@ WHERE entry_id = $1::uuid AND host_id = $2::uuid AND via = 'agent' AND finished_
 	err = tx.QueryRow(ctx, `
 SELECT COALESCE((
     SELECT spec_hash FROM app.image_deploys
-    WHERE entry_id = $1::uuid AND host_id = $2::uuid AND NOT in_flight
+    WHERE entry_id = $1::uuid AND host_id = $2::uuid AND NOT in_flight AND outcome <> 'refused'
     ORDER BY finished_at DESC, id DESC
     LIMIT 1
 ), (SELECT spec_hash FROM app.catalog_entries WHERE id = $1::uuid))

@@ -331,7 +331,9 @@ func (m *Mem) RecordAutoAction(ctx context.Context, in store.AutoAction) (store.
 		if r.Via == "agent" && r.FinishedAt.After(since) {
 			recent++
 		}
-		if last == nil || r.FinishedAt.After(*last.FinishedAt) {
+		// A refused row never reached the host: its spec hash is not
+		// what runs there (api-v1 v1.47).
+		if r.Outcome != "refused" && (last == nil || r.FinishedAt.After(*last.FinishedAt)) {
 			last = &r
 		}
 		inheritable := r.Via != "agent" && (r.Outcome == "succeeded" || r.Outcome == "unchanged")

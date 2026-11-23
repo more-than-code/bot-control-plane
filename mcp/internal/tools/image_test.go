@@ -484,3 +484,28 @@ func TestDeployResultReason(t *testing.T) {
 		t.Fatalf("success text %q", text)
 	}
 }
+
+// api-v1 v1.47: refused rows have no digest and do not take the three
+// places kept for rollback choices; only the newest one is shown.
+func TestProjectHistoryRefused(t *testing.T) {
+	ab := "sha256:" + strings.Repeat("ab", 32)
+	cd := "sha256:" + strings.Repeat("cd", 32)
+	ef := "sha256:" + strings.Repeat("ef", 32)
+	raw := []byte(`{"items":[
+		{"outcome":"refused","finished_at":"2026-11-23T05:00:00Z","reason":"host unavailable"},
+		{"outcome":"refused","finished_at":"2026-11-23T04:00:00Z"},
+		{"outcome":"refused","finished_at":"2026-11-23T03:00:00Z"},
+		{"digest":"` + ab + `","outcome":"succeeded","finished_at":"2026-11-23T02:00:00Z"},
+		{"digest":"` + cd + `","outcome":"succeeded","finished_at":"2026-11-23T01:00:00Z"},
+		{"digest":"` + ef + `","outcome":"failed","finished_at":"2026-11-23T00:00:00Z"}
+	]}`)
+	got := projectHistory(raw)
+	if len(got) != 4 {
+		t.Fatalf("len %d %#v", len(got), got)
+	}
+	first, _ := got[0].(map[string]any)
+	last, _ := got[3].(map[string]any)
+	if first["outcome"] != "refused" || first["reason"] != "host unavailable" || last["digest"] != ef {
+		t.Fatalf("history %#v", got)
+	}
+}

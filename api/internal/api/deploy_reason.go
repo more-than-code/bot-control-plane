@@ -15,7 +15,7 @@ import (
 // Why a deploy failed (api-v1 v1.47, spec docs/spec-deploy-reason.md).
 
 const (
-	// maxAgentReason caps the agent's own reason (agent-protocol v1.15).
+	// maxAgentReason caps the agent's own reason (agent-protocol v1.19).
 	maxAgentReason = 512
 	// maxStoredReason is the column check of migration 0031.
 	maxStoredReason = 1024
@@ -250,11 +250,19 @@ func (s *Server) handleCatalogDeployRead(w http.ResponseWriter, r *http.Request)
 		s.fail(w, err)
 		return
 	}
+	// A running row reads like the list's first row; one past its
+	// deadline is no longer running and the next begin records it as
+	// timeout, so it reads as timeout here too.
 	if row.InFlight {
 		until := row.InFlightUntil.UTC()
-		row.Outcome = "in_flight"
-		row.FinishedAt = nil
-		row.EndsBy = &until
+		if row.InFlightUntil.After(s.now()) {
+			row.Outcome = "in_flight"
+			row.FinishedAt = nil
+			row.EndsBy = &until
+		} else {
+			row.Outcome = "timeout"
+			row.FinishedAt = &until
+		}
 	}
 	img, err := catalog.ParseStored(entry.ImageRaw)
 	if err != nil {
