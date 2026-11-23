@@ -203,6 +203,7 @@ func contractRoutes() []route {
 		{"POST /v1/projects/{id}/catalog/{name}/rollback", false, (*Server).handleCatalogRollback, delegatedHandler},
 		{"POST /v1/projects/{id}/catalog/{name}/remove", false, (*Server).handleCatalogRemove, delegatedHandler},
 		{"GET /v1/projects/{id}/catalog/{name}/deploys", false, (*Server).handleCatalogDeploys, delegatedAllow},
+		{"GET /v1/projects/{id}/catalog/{name}/deploys/{deploy_id}", false, (*Server).handleCatalogDeployRead, delegatedAllow},
 		// api-v1 v1.35 item 3: routes; the replace is a plan for both session kinds.
 		{"GET /v1/projects/{id}/routes", false, (*Server).handleProjectRoutes, delegatedAllow},
 		{"GET /v1/projects/{id}/catalog/{name}/routes", false, (*Server).handleEntryRoutes, delegatedAllow},

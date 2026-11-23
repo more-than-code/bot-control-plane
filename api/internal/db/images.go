@@ -14,7 +14,7 @@ import (
 )
 
 const deployCols = `id::text, entry_id::text, host_id::text, digest, spec_hash, outcome, exit_code,
-          started_at, finished_at, by_user::text, via, in_flight, in_flight_until`
+          started_at, finished_at, by_user::text, via, in_flight, in_flight_until, reason, final_status`
 
 // beginImageOpAfterSelect is nil in production. A test sets it so two
 // transactions can both pass the empty in-flight SELECT before either inserts.
@@ -99,19 +99,62 @@ LIMIT 1
 }
 
 func (d *DB) FinishImageDeploy(ctx context.Context, id uuid.UUID, outcome string, digest *string, exitCode *int, at time.Time) (store.ImageDeploy, error) {
+	return d.FinishImageDeployWith(ctx, id, store.DeployFinish{Outcome: outcome, Digest: digest, ExitCode: exitCode, At: at})
+}
+
+func (d *DB) FinishImageDeployWith(ctx context.Context, id uuid.UUID, in store.DeployFinish) (store.ImageDeploy, error) {
+	digest := in.Digest
 	if digest != nil && !catalog.ValidDigest(*digest) {
 		digest = nil
 	}
+	var final, tail []byte
+	if in.FinalStatus != nil {
+		b, err := json.Marshal(in.FinalStatus)
+		if err != nil {
+			return store.ImageDeploy{}, err
+		}
+		final = b
+	}
+	if in.LogTail != nil {
+		b, err := json.Marshal(in.LogTail)
+		if err != nil {
+			return store.ImageDeploy{}, err
+		}
+		tail = b
+	}
 	row, err := scanDeploy(d.pool.QueryRow(ctx, `
 UPDATE app.image_deploys
-SET digest = $2, outcome = $3, exit_code = $4, finished_at = $5, in_flight = false
+SET digest = $2, outcome = $3, exit_code = $4, finished_at = $5, in_flight = false,
+    reason = $6, final_status = $7::jsonb, log_tail = $8::jsonb
 WHERE id = $1::uuid AND in_flight
 RETURNING `+deployCols+`
-`, id.String(), digest, outcome, exitCode, at))
+`, id.String(), digest, in.Outcome, in.ExitCode, in.At, in.Reason, nullJSON(final), nullJSON(tail)))
 	if err != nil {
 		return store.ImageDeploy{}, err
 	}
 	return row, nil
+}
+
+func (d *DB) GetImageDeploy(ctx context.Context, entryID, hostID, id uuid.UUID) (store.ImageDeploy, error) {
+	var tail []byte
+	var row deployScan
+	err := d.pool.QueryRow(ctx, `
+SELECT `+deployCols+`, log_tail
+FROM app.image_deploys
+WHERE id = $1::uuid AND entry_id = $2::uuid AND host_id = $3::uuid
+`, id.String(), entryID.String(), hostID.String()).Scan(append(deployDest(&row), &tail)...)
+	if err != nil {
+		return store.ImageDeploy{}, mapErr(err)
+	}
+	if err := row.finish(); err != nil {
+		return store.ImageDeploy{}, err
+	}
+	if len(tail) > 0 {
+		if err := json.Unmarshal(tail, &row.LogTail); err != nil {
+			return store.ImageDeploy{}, err
+		}
+	}
+	return row.ImageDeploy, nil
 }
 
 func (d *DB) ReleaseImageOp(ctx context.Context, id uuid.UUID) error {
@@ -205,38 +248,63 @@ func collectDeploys(rows pgx.Rows) ([]store.ImageDeploy, error) {
 	return out, nil
 }
 
-func scanDeploy(row pgx.Row) (store.ImageDeploy, error) {
-	var d store.ImageDeploy
-	var id, entryID, hostID string
-	var by *string
-	var until *time.Time
-	if err := row.Scan(
-		&id, &entryID, &hostID, &d.Digest, &d.SpecHash, &d.Outcome, &d.ExitCode,
-		&d.StartedAt, &d.FinishedAt, &by, &d.Via, &d.InFlight, &until,
-	); err != nil {
-		return store.ImageDeploy{}, mapErr(err)
+// deployScan holds the text and JSON columns of deployCols until finish
+// parses them into the row.
+type deployScan struct {
+	store.ImageDeploy
+	id, entryID, hostID string
+	by                  *string
+	until               *time.Time
+	final               []byte
+}
+
+func deployDest(d *deployScan) []any {
+	return []any{
+		&d.id, &d.entryID, &d.hostID, &d.Digest, &d.SpecHash, &d.Outcome, &d.ExitCode,
+		&d.StartedAt, &d.FinishedAt, &d.by, &d.Via, &d.InFlight, &d.until, &d.Reason, &d.final,
 	}
-	if until != nil {
-		d.InFlightUntil = *until
+}
+
+func (d *deployScan) finish() error {
+	if d.until != nil {
+		d.InFlightUntil = *d.until
 	}
 	var err error
-	if d.ID, err = parseID(id); err != nil {
-		return store.ImageDeploy{}, err
+	if d.ID, err = parseID(d.id); err != nil {
+		return err
 	}
-	if d.EntryID, err = parseID(entryID); err != nil {
-		return store.ImageDeploy{}, err
+	if d.EntryID, err = parseID(d.entryID); err != nil {
+		return err
 	}
-	if d.HostID, err = parseID(hostID); err != nil {
-		return store.ImageDeploy{}, err
+	if d.HostID, err = parseID(d.hostID); err != nil {
+		return err
 	}
-	if by != nil {
-		userID, err := parseID(*by)
+	if d.by != nil {
+		userID, err := parseID(*d.by)
 		if err != nil {
-			return store.ImageDeploy{}, err
+			return err
 		}
 		d.By = &userID
 	}
-	return d, nil
+	if len(d.final) > 0 {
+		var st store.DeployFinalStatus
+		if err := json.Unmarshal(d.final, &st); err != nil {
+			return err
+		}
+		d.FinalStatus = &st
+	}
+	return nil
+}
+
+func scanDeploy(row pgx.Row) (store.ImageDeploy, error) {
+	var d deployScan
+	if err := row.Scan(deployDest(&d)...); err != nil {
+		return store.ImageDeploy{}, mapErr(err)
+	}
+	if err := d.finish(); err != nil {
+		return store.ImageDeploy{}, err
+	}
+	return d.ImageDeploy, nil
 }
 
 func (d *DB) AutoActionTarget(ctx context.Context, hostID uuid.UUID, projectSlug, entry string) (store.AutoTarget, error) {
@@ -307,7 +375,7 @@ WHERE entry_id = $1::uuid AND host_id = $2::uuid AND via = 'agent' AND finished_
 	err = tx.QueryRow(ctx, `
 SELECT COALESCE((
     SELECT spec_hash FROM app.image_deploys
-    WHERE entry_id = $1::uuid AND host_id = $2::uuid AND NOT in_flight
+    WHERE entry_id = $1::uuid AND host_id = $2::uuid AND NOT in_flight AND outcome <> 'refused'
     ORDER BY finished_at DESC, id DESC
     LIMIT 1
 ), (SELECT spec_hash FROM app.catalog_entries WHERE id = $1::uuid))

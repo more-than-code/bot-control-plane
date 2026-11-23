@@ -843,6 +843,12 @@ type Store interface {
 	BeginImageOp(ctx context.Context, entryID, hostID uuid.UUID, specHash string, by uuid.UUID, via string, at, until time.Time) (ImageDeploy, error)
 	// FinishImageDeploy records the outcome and clears in-flight.
 	FinishImageDeploy(ctx context.Context, id uuid.UUID, outcome string, digest *string, exitCode *int, at time.Time) (ImageDeploy, error)
+	// FinishImageDeployWith is FinishImageDeploy that also stores the
+	// reason, final container state and log tail (api-v1 v1.47).
+	FinishImageDeployWith(ctx context.Context, id uuid.UUID, in DeployFinish) (ImageDeploy, error)
+	// GetImageDeploy returns one finished or in-flight row of (entry, host)
+	// with its LogTail, or ErrNotFound (api-v1 v1.47).
+	GetImageDeploy(ctx context.Context, entryID, hostID, id uuid.UUID) (ImageDeploy, error)
 	// ReleaseImageOp deletes an in-flight row. A finished row is left as it is.
 	ReleaseImageOp(ctx context.Context, id uuid.UUID) error
 	// ListImageDeploys returns finished rows newest first: the newest 50

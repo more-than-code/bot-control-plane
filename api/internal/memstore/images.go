@@ -112,6 +112,10 @@ func (m *Mem) BeginImageOp(ctx context.Context, entryID, hostID uuid.UUID, specH
 }
 
 func (m *Mem) FinishImageDeploy(ctx context.Context, id uuid.UUID, outcome string, digest *string, exitCode *int, at time.Time) (store.ImageDeploy, error) {
+	return m.FinishImageDeployWith(ctx, id, store.DeployFinish{Outcome: outcome, Digest: digest, ExitCode: exitCode, At: at})
+}
+
+func (m *Mem) FinishImageDeployWith(ctx context.Context, id uuid.UUID, in store.DeployFinish) (store.ImageDeploy, error) {
 	if err := ctx.Err(); err != nil {
 		return store.ImageDeploy{}, err
 	}
@@ -121,20 +125,56 @@ func (m *Mem) FinishImageDeploy(ctx context.Context, id uuid.UUID, outcome strin
 	if !ok || !row.InFlight {
 		return store.ImageDeploy{}, store.ErrNotFound
 	}
-	row.Outcome = outcome
+	digest := in.Digest
 	if digest != nil && !catalog.ValidDigest(*digest) {
 		digest = nil
 	}
+	// Mirror the DB checks (migration 0031).
+	if in.Reason != nil && len(*in.Reason) > 1024 {
+		return store.ImageDeploy{}, store.ErrConflict
+	}
+	if len(in.LogTail) > 50 {
+		return store.ImageDeploy{}, store.ErrConflict
+	}
+	if in.Outcome == "refused" && (digest != nil || row.Via == "agent") {
+		return store.ImageDeploy{}, store.ErrConflict
+	}
+	row.Outcome = in.Outcome
 	row.Digest = cloneString(digest)
-	if exitCode != nil {
-		n := *exitCode
+	if in.ExitCode != nil {
+		n := *in.ExitCode
 		row.ExitCode = &n
 	}
-	finished := at
+	row.Reason = cloneString(in.Reason)
+	if in.FinalStatus != nil {
+		st := *in.FinalStatus
+		row.FinalStatus = &st
+	}
+	if in.LogTail != nil {
+		row.LogTail = append([]string{}, in.LogTail...)
+	}
+	finished := in.At
 	row.FinishedAt = &finished
 	row.InFlight = false
 	m.imageDeploys[id] = row
-	return row, nil
+	return copyDeploy(row), nil
+}
+
+func (m *Mem) GetImageDeploy(ctx context.Context, entryID, hostID, id uuid.UUID) (store.ImageDeploy, error) {
+	if err := ctx.Err(); err != nil {
+		return store.ImageDeploy{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row, ok := m.imageDeploys[id]
+	if !ok || row.EntryID != entryID || row.HostID != hostID {
+		return store.ImageDeploy{}, store.ErrNotFound
+	}
+	out := copyDeploy(row)
+	if row.LogTail != nil {
+		out.LogTail = append([]string{}, row.LogTail...)
+	}
+	return out, nil
 }
 
 func (m *Mem) ReleaseImageOp(ctx context.Context, id uuid.UUID) error {
@@ -291,7 +331,9 @@ func (m *Mem) RecordAutoAction(ctx context.Context, in store.AutoAction) (store.
 		if r.Via == "agent" && r.FinishedAt.After(since) {
 			recent++
 		}
-		if last == nil || r.FinishedAt.After(*last.FinishedAt) {
+		// A refused row never reached the host: its spec hash is not
+		// what runs there (api-v1 v1.47).
+		if r.Outcome != "refused" && (last == nil || r.FinishedAt.After(*last.FinishedAt)) {
 			last = &r
 		}
 		inheritable := r.Via != "agent" && (r.Outcome == "succeeded" || r.Outcome == "unchanged")
@@ -326,8 +368,20 @@ func (m *Mem) RecordAutoAction(ctx context.Context, in store.AutoAction) (store.
 	return copyDeploy(row), true, nil
 }
 
+// copyDeploy copies a row as the DB list queries return it: LogTail is
+// read only by GetImageDeploy.
 func copyDeploy(row store.ImageDeploy) store.ImageDeploy {
 	row.Digest = cloneString(row.Digest)
+	row.Reason = cloneString(row.Reason)
+	row.LogTail = nil
+	if row.FinalStatus != nil {
+		st := *row.FinalStatus
+		if st.ExitCode != nil {
+			n := *st.ExitCode
+			st.ExitCode = &n
+		}
+		row.FinalStatus = &st
+	}
 	if row.By != nil {
 		by := *row.By
 		row.By = &by

@@ -199,7 +199,7 @@ func (h *Hub) CloseAll() {
 	}
 	h.mu.Unlock()
 	for _, w := range pending {
-		w.ch <- taskOut{err: &CallError{Code: "unavailable", Msg: "host unavailable"}}
+		w.ch <- taskOut{err: &CallError{Code: "unavailable", Msg: "host unavailable", MaybeSent: true}}
 	}
 	var wg sync.WaitGroup
 	for _, ac := range all {
@@ -239,7 +239,7 @@ func (h *Hub) retire(old *agentConn) {
 	}
 	h.mu.Unlock()
 	for _, w := range pending {
-		w.ch <- taskOut{err: &CallError{Code: "unavailable", Msg: "host unavailable"}}
+		w.ch <- taskOut{err: &CallError{Code: "unavailable", Msg: "host unavailable", MaybeSent: true}}
 	}
 	go old.close(websocket.StatusNormalClosure, "")
 }
@@ -261,7 +261,7 @@ func (h *Hub) take(hostID uuid.UUID) *agentConn {
 	}
 	h.mu.Unlock()
 	for _, w := range pending {
-		w.ch <- taskOut{err: &CallError{Code: "unavailable", Msg: "host unavailable"}}
+		w.ch <- taskOut{err: &CallError{Code: "unavailable", Msg: "host unavailable", MaybeSent: true}}
 	}
 	return ac
 }
@@ -288,7 +288,7 @@ func (h *Hub) disconnect(ac *agentConn) {
 	}
 	h.mu.Unlock()
 	for _, w := range pending {
-		w.ch <- taskOut{err: &CallError{Code: "unavailable", Msg: "host unavailable"}}
+		w.ch <- taskOut{err: &CallError{Code: "unavailable", Msg: "host unavailable", MaybeSent: true}}
 	}
 }
 

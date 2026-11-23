@@ -480,7 +480,7 @@ func TestImageStateOnTools(t *testing.T) {
 		"confirmation_id": confirmationID, "idempotency_key": "confirm-1",
 		"project_id": projectID, "entry": imageEntry,
 	})
-	if res.IsError || textOf(t, res) != "timeout unknown" {
+	if res.IsError || textOf(t, res) != "timeout unknown\n"+deployHistoryHintText {
 		t.Fatalf("deploy confirm %q", textOf(t, res))
 	}
 	status, _ := structuredMap(t, res)["status"].(map[string]any)
@@ -506,7 +506,7 @@ func TestImageStateOnTools(t *testing.T) {
 		"confirmation_id": confirmationID, "idempotency_key": "confirm-2",
 		"project_id": projectID, "entry": imageEntry,
 	})
-	if res.IsError || textOf(t, res) != "timeout unknown" {
+	if res.IsError || textOf(t, res) != "timeout unknown\n"+deployHistoryHintText {
 		t.Fatalf("rollback confirm %q", textOf(t, res))
 	}
 
@@ -647,7 +647,7 @@ func TestDeployTimeoutText(t *testing.T) {
 		"confirmation_id": confirmationID, "idempotency_key": "confirm-1",
 		"project_id": projectID, "entry": imageEntry,
 	})
-	if textOf(t, res) != "error: still running on the host, ends by 05:09 UTC at the latest; the entry's deploy history shows the outcome (deploy_entry for that host lists it)" {
+	if textOf(t, res) != "error: still running on the host, ends by 05:09 UTC at the latest; deploy_history for that entry and host shows the outcome and why" {
 		t.Fatalf("running confirm text %q", textOf(t, res))
 	}
 	deploysPath := "/v1/projects/" + projectID + "/catalog/" + imageEntry + "/deploys"
@@ -665,7 +665,11 @@ func TestDeployTimeoutText(t *testing.T) {
 	}
 }
 
-const stillRunningPlain = "error: still running on the host; the entry's deploy history shows the outcome (deploy_entry for that host lists it)"
+const stillRunningPlain = "error: still running on the host; deploy_history for that entry and host shows the outcome and why"
+
+// deployHistoryHintText ends a deploy or rollback result that did not
+// succeed (api-v1 v1.47).
+const deployHistoryHintText = "Run deploy_history for this entry and host to read why it failed and the stored log tail."
 
 // spec-deploy-stuck §2.4: deploy_entry's history shows a running row
 // (rollback_entry attaches no history; TestDeployEntryConfirm keeps that).

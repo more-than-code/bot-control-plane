@@ -28,9 +28,36 @@ type ImageDeploy struct {
 	Via        string     `json:"via"`
 	// EndsBy is set by the HTTP layer on the in-flight row of a history
 	// list (api-v1 v1.42 item 1); null on every other row.
-	EndsBy        *time.Time `json:"ends_by"`
-	InFlight      bool       `json:"-"`
-	InFlightUntil time.Time  `json:"-"`
+	EndsBy *time.Time `json:"ends_by"`
+	// Reason says why a deploy, rollback or refusal did not succeed
+	// (api-v1 v1.47). The HTTP layer fills a stored null from the outcome.
+	Reason *string `json:"reason"`
+	// FinalStatus is the container state the agent reported at the end;
+	// null for rows without one (api-v1 v1.47).
+	FinalStatus *DeployFinalStatus `json:"final_status"`
+	// LogTail is the stored, redacted log tail. Only the single-deploy
+	// route returns it, as lines.
+	LogTail       []string  `json:"-"`
+	InFlight      bool      `json:"-"`
+	InFlightUntil time.Time `json:"-"`
+}
+
+// DeployFinalStatus is the part of ImageStatus a deploy row keeps.
+type DeployFinalStatus struct {
+	State        string `json:"state"`
+	ExitCode     *int   `json:"exit_code"`
+	RestartCount int    `json:"restart_count"`
+}
+
+// DeployFinish is what FinishImageDeployWith stores on an in-flight row.
+type DeployFinish struct {
+	Outcome     string
+	Digest      *string
+	ExitCode    *int
+	Reason      *string
+	FinalStatus *DeployFinalStatus
+	LogTail     []string
+	At          time.Time
 }
 
 // ImageOpRunning is BeginImageOp refused because another deploy, rollback

@@ -162,7 +162,7 @@ func (s *Server) handleCatalogDeploys(w http.ResponseWriter, r *http.Request) {
 	// The stored digest stays so rollback can match it. This is a copy.
 	forms := s.redactValues(r.Context(), projectID, img)
 	for i := range items {
-		items[i] = redactImageDeploy(items[i], forms)
+		items[i] = redactDeployRead(items[i], forms)
 	}
 	writeOK(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -516,6 +516,22 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 				reason = got.msg
 			}
 			s.auditImageDeny(ctx, p, projectID, host, entry.Name, action, got.code, reason, forms)
+			// A deploy or rollback the host refused stays in history as
+			// refused (api-v1 v1.47 item 2). A failed write leaves the row
+			// to the defer, which deletes it as before. A host that dropped
+			// after the frame may have been sent did not refuse: that row is
+			// deleted as before, since the deploy may have run.
+			if (action == "deploy" || action == "rollback") && hostRejection(got.code) && !got.maybeSent {
+				err := s.settle(func(c context.Context) error {
+					_, ferr := s.Store.FinishImageDeployWith(c, opID, store.DeployFinish{
+						Outcome: "refused", Reason: refusedReason(got.code, reason), At: s.now(),
+					})
+					return ferr
+				})
+				if err == nil {
+					hold = false
+				}
+			}
 		}
 		s.imageFail(ctx, w, p.User.ID, key, &agentws.CallError{Code: got.code, Msg: got.msg}, forms)
 		return
@@ -543,7 +559,14 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 	var finished store.ImageDeploy
 	err = s.settle(func(c context.Context) error {
 		var ferr error
-		finished, ferr = s.Store.FinishImageDeploy(c, opID, got.outcome, got.digest, got.exit, s.now())
+		final := finalStatus(got.status)
+		finished, ferr = s.Store.FinishImageDeployWith(c, opID, store.DeployFinish{
+			Outcome: got.outcome, Digest: got.digest, ExitCode: got.exit,
+			Reason:      deployReason(got.outcome, got.agentReason, got.exit, final),
+			FinalStatus: final,
+			LogTail:     storedTail(got.lines),
+			At:          s.now(),
+		})
 		return ferr
 	})
 	if err != nil {
@@ -554,7 +577,7 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 	s.auditImageOK(ctx, p, projectID, host, entry.Name, action, finished.Outcome, finished.Digest, forms)
 	s.DeployHook(ctx, projectID, entry.ID, entry.Name, host.ID)
 	s.imageDone(w, p.User.ID, key, map[string]any{
-		"deploy": redactImageDeploy(finished, forms),
+		"deploy": redactDeployRead(finished, forms),
 		"status": got.status,
 		"lines":  got.lines,
 	})
@@ -1630,6 +1653,12 @@ type imageCall struct {
 	status  imageStatusBody
 	lines   []string
 	logs    imageLogsBody
+	// agentReason is the agent's own reason for the outcome, checked and
+	// redacted (agent-protocol v1.19); "" when it sent none.
+	agentReason string
+	// maybeSent: the host became unavailable after the frame may have
+	// been sent, so the task may have run. Such a row is not refused.
+	maybeSent bool
 }
 
 func takeImage(action string, res agentws.LiveResult, err error, forms []secretForm) imageCall {
@@ -1741,7 +1770,7 @@ func requestCall(call *agentws.CallError, forms []secretForm) imageCall {
 	if code == "" {
 		code = "error"
 	}
-	return imageCall{request: true, code: code, msg: shown, reason: reason}
+	return imageCall{request: true, code: code, msg: shown, reason: reason, maybeSent: call.MaybeSent}
 }
 
 // agentError returns the redacted agent message when it contains a known secret.
@@ -1769,13 +1798,17 @@ func acceptedDeploy(raw json.RawMessage, forms []secretForm) (imageCall, bool) {
 	if !linesOK {
 		return imageCall{}, false
 	}
-	return imageCall{
+	got := imageCall{
 		outcome: p.Outcome,
 		digest:  cleanDigest(p.Digest),
 		exit:    p.ExitCode,
 		status:  redactStatus(st, forms),
 		lines:   redactLines(lines, forms),
-	}, true
+	}
+	if agentReasonOK(p.Reason) {
+		got.agentReason = redactExact(*p.Reason, forms)
+	}
+	return got, true
 }
 
 func failedFixed() imageCall {
@@ -1790,6 +1823,7 @@ type agentImage struct {
 	Lines     []string        `json:"lines"`
 	Container *string         `json:"container"`
 	Truncated bool            `json:"truncated"`
+	Reason    *string         `json:"reason"`
 }
 
 func parseAgentImage(raw json.RawMessage) (agentImage, bool) {

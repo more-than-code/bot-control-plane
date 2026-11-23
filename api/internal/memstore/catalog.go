@@ -251,7 +251,7 @@ func (m *Mem) CatalogLastDeployed(_ context.Context, projectID uuid.UUID, entrie
 		}
 	}
 	for _, row := range m.imageDeploys {
-		if images[row.EntryID] && m.entries[row.EntryID].ProjectID == projectID && byPersonOrAI(row.Via) {
+		if images[row.EntryID] && m.entries[row.EntryID].ProjectID == projectID && byPersonOrAI(row.Via) && row.Outcome != "refused" {
 			keep(row.EntryID, row.StartedAt)
 		}
 	}

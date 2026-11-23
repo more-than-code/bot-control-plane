@@ -1241,7 +1241,8 @@ const IMAGE_OUTCOMES = new Set<ImageOutcome>([
 	'auto_restarted',
 	'auto_rolled_back',
 	'auto_gave_up',
-	'auto_failed'
+	'auto_failed',
+	'refused'
 ]);
 
 const IMAGE_STATES = new Set<ImageState>(['running', 'exited', 'created', 'paused', 'restarting', 'dead', 'missing', 'unknown']);
@@ -1562,6 +1563,8 @@ export function parseImageDeploy(value: unknown): ImageDeploy | null {
 	const finished_at = optionalText(value.finished_at, 64);
 	const digest = imageDigestOf(value.digest);
 	const exit_code = parseExitCode(value.exit_code);
+	// api-v1 v1.47: one line of at most 1024 bytes; anything else is dropped, not the row.
+	const reason = text(value.reason, 1024);
 	if (!id || !isUuid(id) || !entry_id || !isUuid(entry_id) || !host_id || !isUuid(host_id)) return null;
 	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !started_at || finished_at === undefined) return null;
 	if (digest === undefined || exit_code === undefined) return null;
@@ -1594,7 +1597,8 @@ export function parseImageDeploy(value: unknown): ImageDeploy | null {
 		finished_at,
 		by,
 		via: value.via,
-		ends_by
+		ends_by,
+		reason
 	};
 }
 

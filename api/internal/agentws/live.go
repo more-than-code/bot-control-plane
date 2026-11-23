@@ -22,6 +22,10 @@ type CallError struct {
 	// result), "" for a timeout or an unavailable host. The edge maps it
 	// to a sentence (api-v1 v1.35).
 	Agent string
+	// MaybeSent marks an unavailable answer given after the task frame
+	// may already have reached the host (the socket dropped or was
+	// replaced while waiting). The task may have run (api-v1 v1.47).
+	MaybeSent bool
 }
 
 func (e *CallError) Error() string {

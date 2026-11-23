@@ -173,9 +173,10 @@ func TestTools(t *testing.T) {
 		"get_health_checks": true, "list_catalog": true, "get_catalog_entry": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
 		"get_registry_connect_request": true,
 		"check_readiness":              true, "image_access": true, "list_image_tags": true, "host_policy_snippet": true, "shared_network_snippet": true,
-		"whats_new":     true,
-		"list_routes":   true,
-		"list_problems": true,
+		"whats_new":      true,
+		"list_routes":    true,
+		"list_problems":  true,
+		"deploy_history": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true,
@@ -368,7 +369,7 @@ func TestTools(t *testing.T) {
 		"list_catalog", "run_entry", "stop_entry", "restart_entry",
 		"deploy_entry", "rollback_entry", "set_health_checks",
 		"create_catalog_entry", "update_catalog_entry", "delete_catalog_entry",
-		"get_catalog_entry", "set_entry_image", "list_image_tags",
+		"get_catalog_entry", "set_entry_image", "list_image_tags", "deploy_history",
 		"confirm", "entry_logs", "entry_status", "create_env_set", "list_env_sets",
 		"request_env_value", "get_env_value_request", "request_file", "get_file_request",
 		"connect_registry", "get_registry_connect_request",
@@ -382,8 +383,8 @@ func TestTools(t *testing.T) {
 	}
 	// 37 before api-v1 v1.34 and v1.35, plus whats_new, set_routes and
 	// list_routes, plus list_problems (v1.41), plus get_catalog_entry and
-	// set_entry_image, plus list_image_tags (v1.46).
-	if len(seen) != 44 {
+	// set_entry_image, plus list_image_tags (v1.46), plus deploy_history (v1.47).
+	if len(seen) != 45 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -2053,7 +2054,12 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 		return http.StatusOK, "ok", "", fullImageEntry()
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/catalog/"+entryName:
 		return http.StatusOK, "ok", "", programCatalogItem()
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/projects/"+projectID+"/catalog/") && strings.Contains(r.URL.Path, "/deploys/"):
+		return deployDetailReply(mode)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/projects/"+projectID+"/catalog/") && strings.HasSuffix(r.URL.Path, "/deploys"):
+		if mode == "history-reason" {
+			return http.StatusOK, "ok", "", reasonDeployHistory()
+		}
 		if mode == "history-down" {
 			return http.StatusInternalServerError, "error", "history down", nil
 		}

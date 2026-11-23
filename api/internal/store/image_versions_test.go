@@ -59,3 +59,22 @@ func TestDeployHolds(t *testing.T) {
 		t.Fatal("empty")
 	}
 }
+
+// api-v1 v1.47: refused rows do not push a deployed digest out of the
+// recent slots.
+func TestDeployHoldsSkipRefused(t *testing.T) {
+	at := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	entry, host := uuid.New(), uuid.New()
+	var rows []ImageDeploy
+	for i, c := range []string{"a", "b", "c", "d", "e"} {
+		done := at.Add(time.Duration(i) * time.Minute)
+		rows = append(rows, ImageDeploy{ID: uuid.New(), EntryID: entry, HostID: host, Outcome: "failed", Digest: holdDigest(c), StartedAt: done, FinishedAt: &done})
+	}
+	for i := 0; i < 6; i++ {
+		done := at.Add(time.Hour + time.Duration(i)*time.Minute)
+		rows = append(rows, ImageDeploy{ID: uuid.New(), EntryID: entry, HostID: host, Outcome: "refused", StartedAt: done, FinishedAt: &done})
+	}
+	if got := DeployHolds(entry, host, rows); len(got) != 5 {
+		t.Fatalf("holds %+v", got)
+	}
+}
