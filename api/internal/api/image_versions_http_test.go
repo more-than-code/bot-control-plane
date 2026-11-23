@@ -329,6 +329,18 @@ func TestImageTagsNewestFirstWithGitHub(t *testing.T) {
 	if want := "sha-d,release-2,sha-a,dev,sha-b,zz-untracked"; strings.Join(got, ",") != want {
 		t.Fatalf("tags %s, want %s", strings.Join(got, ","), want)
 	}
+	// api-v1 v1.46 item 1: the order and each known tag's push time.
+	payload := objectPayload(t, env)
+	if payload["order"] != "time" {
+		t.Fatalf("order %v, want time", payload["order"])
+	}
+	items := payload["items"].([]any)
+	if at := items[0].(map[string]any)["updated_at"]; at != f.w.now.Add(-time.Hour).UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("sha-d updated_at %v", at)
+	}
+	if _, has := items[5].(map[string]any)["updated_at"]; has {
+		t.Fatal("zz-untracked has updated_at")
+	}
 
 	// Without GitHub's versions the plain order stays.
 	f.pkg.mu.Lock()
@@ -339,5 +351,8 @@ func TestImageTagsNewestFirstWithGitHub(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	if first := objectPayload(t, env)["items"].([]any)[0].(map[string]any)["tag"]; first != "zz-untracked" {
 		t.Fatalf("first tag %v", first)
+	}
+	if order := objectPayload(t, env)["order"]; order != "name" {
+		t.Fatalf("order %v, want name", order)
 	}
 }

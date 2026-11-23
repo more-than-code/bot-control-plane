@@ -24,7 +24,7 @@ type registryFixture struct {
 	sc                               scene
 	project                          string
 	owner, admin, viewer, extra, del string
-	adminDel                         string
+	adminDel, viewerDel              string
 
 	mu    sync.Mutex
 	calls map[string]int
@@ -43,9 +43,10 @@ func newRegistryFixture(t *testing.T) *registryFixture {
 	return &registryFixture{
 		w: w, fake: f, sc: sc, project: sc.project.ID.String(),
 		owner: w.token(owner.ID), admin: w.token(admin.ID), viewer: w.token(viewer.ID), extra: w.token(extra.ID),
-		del:      tokenKind(t, w, owner.ID, store.KindDelegated),
-		adminDel: tokenKind(t, w, admin.ID, store.KindMCPAccess),
-		calls:    map[string]int{},
+		del:       tokenKind(t, w, owner.ID, store.KindDelegated),
+		adminDel:  tokenKind(t, w, admin.ID, store.KindMCPAccess),
+		viewerDel: tokenKind(t, w, viewer.ID, store.KindDelegated),
+		calls:     map[string]int{},
 	}
 }
 
@@ -123,17 +124,25 @@ func TestImageTagsAccess(t *testing.T) {
 	f := newRegistryFixture(t)
 	f.public([]string{"latest", "v1.4.1", "v1.4.2", "edge"}, "")
 	path := tagsPath(f.project, "ghcr.io/joe/mo-services:v1@sha256:"+strings.Repeat("a", 64))
-	for _, tok := range []string{f.owner, f.admin} {
+	// api-v1 v1.46 item 1: an MCP-delegated owner reads tags like the console.
+	for _, tok := range []string{f.owner, f.admin, f.del} {
 		status, env, _ := mustCall(t, f.w, tok, http.MethodGet, path, "")
 		mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 		tags, truncated := tagNames(t, env)
 		if strings.Join(tags, ",") != "v1.4.2,v1.4.1,latest,edge" || truncated {
 			t.Fatalf("tags %v truncated %v", tags, truncated)
 		}
+		p := objectPayload(t, env)
+		if p["order"] != "name" {
+			t.Fatalf("order %v, want name", p["order"])
+		}
+		if _, has := p["items"].([]any)[0].(map[string]any)["updated_at"]; has {
+			t.Fatal("updated_at without GitHub times")
+		}
 	}
 	status, env, _ := mustCall(t, f.w, f.viewer, http.MethodGet, path, "")
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
-	status, env, _ = mustCall(t, f.w, f.del, http.MethodGet, path, "")
+	status, env, _ = mustCall(t, f.w, f.viewerDel, http.MethodGet, path, "")
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
 	status, env, _ = mustCall(t, f.w, f.adminDel, http.MethodGet, path, "")
 	mustHTTP(t, status, env, http.StatusUnauthorized, "invalid_token", "invalid token")
@@ -150,12 +159,15 @@ func TestImageTagsAccess(t *testing.T) {
 	if n := f.upstream("GET ghcr.io/v2/joe/mo-services/tags/list"); n != 1 {
 		t.Fatalf("upstream %d, want 1 (the project cache serves the admin)", n)
 	}
-	// Viewer and delegated digest calls are refused too.
+	// Viewer digest calls are refused too, delegated or not; a delegated
+	// owner reads the digest (v1.46 item 1).
 	dpath := digestPath(f.project, "ghcr.io/joe/app:v1")
 	status, env, _ = mustCall(t, f.w, f.viewer, http.MethodGet, dpath, "")
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
-	status, env, _ = mustCall(t, f.w, f.del, http.MethodGet, dpath, "")
+	status, env, _ = mustCall(t, f.w, f.viewerDel, http.MethodGet, dpath, "")
 	mustHTTP(t, status, env, http.StatusForbidden, "forbidden", "forbidden")
+	status, env, _ = mustCall(t, f.w, f.del, http.MethodGet, dpath, "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 }
 
 func TestImageTagsStoredHostAllowed(t *testing.T) {

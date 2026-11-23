@@ -172,7 +172,7 @@ func TestTools(t *testing.T) {
 		"query_metrics": true, "list_processes": true, "service_health_history": true,
 		"get_health_checks": true, "list_catalog": true, "get_catalog_entry": true, "list_env_sets": true, "get_env_value_request": true, "get_file_request": true,
 		"get_registry_connect_request": true,
-		"check_readiness":              true, "image_access": true, "host_policy_snippet": true, "shared_network_snippet": true,
+		"check_readiness":              true, "image_access": true, "list_image_tags": true, "host_policy_snippet": true, "shared_network_snippet": true,
 		"whats_new":     true,
 		"list_routes":   true,
 		"list_problems": true,
@@ -368,7 +368,7 @@ func TestTools(t *testing.T) {
 		"list_catalog", "run_entry", "stop_entry", "restart_entry",
 		"deploy_entry", "rollback_entry", "set_health_checks",
 		"create_catalog_entry", "update_catalog_entry", "delete_catalog_entry",
-		"get_catalog_entry", "set_entry_image",
+		"get_catalog_entry", "set_entry_image", "list_image_tags",
 		"confirm", "entry_logs", "entry_status", "create_env_set", "list_env_sets",
 		"request_env_value", "get_env_value_request", "request_file", "get_file_request",
 		"connect_registry", "get_registry_connect_request",
@@ -382,8 +382,8 @@ func TestTools(t *testing.T) {
 	}
 	// 37 before api-v1 v1.34 and v1.35, plus whats_new, set_routes and
 	// list_routes, plus list_problems (v1.41), plus get_catalog_entry and
-	// set_entry_image.
-	if len(seen) != 43 {
+	// set_entry_image, plus list_image_tags (v1.46).
+	if len(seen) != 44 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 
@@ -1759,6 +1759,8 @@ func (f *fakeAPI) reply(r *http.Request) (int, string, string, any) {
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/catalog/"+imageEntry+"/readiness":
 		return http.StatusOK, "ok", "ok", readinessReply()
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/image-tags":
+		return http.StatusOK, "ok", "ok", imageTagsReply(mode)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/image-access":
 		return http.StatusOK, "ok", "ok", map[string]any{"registry": "ghcr.io", "access": "private_no_login", "login": "none", "token": readinessLeak}
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/"+projectID+"/catalog/"+imageEntry+"/host-policy-snippet":
