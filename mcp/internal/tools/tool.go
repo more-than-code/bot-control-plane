@@ -61,6 +61,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerListEnvSets(server, api)
 	registerUpdateEnvSet(server, api)
 	registerDeleteEnvSet(server, api)
+	registerUpgradeAgent(server, api)
 	registerConfirm(server, api)
 	registerEntryLogs(server, api)
 	registerEntryStatus(server, api)

@@ -35,6 +35,9 @@ var entryNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
 var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 
 // confirmationIDPattern is the 43-character base64url confirmation id.
+// versionPattern is a bot-agent release version (agent-protocol v1.20 item 5).
+var versionPattern = regexp.MustCompile(`^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$`)
+
 var confirmationIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 // digestPattern is sha256: and 64 lowercase hex digits (api-v1 v1.8).

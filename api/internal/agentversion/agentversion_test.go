@@ -2,6 +2,19 @@ package agentversion
 
 import "testing"
 
+func TestValidRelease(t *testing.T) {
+	for _, s := range []string{"0.2.15", "9999.9999.9999", "1.0.0"} {
+		if !ValidRelease(s) {
+			t.Fatalf("%q refused", s)
+		}
+	}
+	for _, s := range []string{"", "0.2", "v0.2.15", "12345.0.0", "0.2.15\n", "0.2.15-rc1"} {
+		if ValidRelease(s) {
+			t.Fatalf("%q accepted", s)
+		}
+	}
+}
+
 func TestOlder(t *testing.T) {
 	for _, tc := range []struct {
 		host, latest string

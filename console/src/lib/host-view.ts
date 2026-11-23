@@ -1,4 +1,4 @@
-import type { Host, HostAccess, HostEdge, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
+import type { AgentUpgrade, Host, HostAccess, HostEdge, OrgRole, Project, ProcessItem, ProcessSample } from './api-types';
 import type { HostFilesTab } from './host-files';
 import { isCatalogHost } from './catalog';
 import { parseRange, type RangeKey } from './ranges';
@@ -135,6 +135,10 @@ export type HostPage = {
 	edgeMessage?: string | null;
 	/** The Config files tab (api-v1 v1.44), read only on `tab=files`. */
 	files?: HostFilesTab | null;
+	/** The host's agent upgrades, newest first (api-v1 v1.48), read only on the Overview tab. */
+	upgrades?: AgentUpgrade[];
+	/** The upgrade history read failed. */
+	upgradesMessage?: string | null;
 };
 
 export function parseHostTab(value: string | null): HostTab {
@@ -278,7 +282,3 @@ export function hostSharedNetworks(host: Pick<Host, 'access' | 'programs'>): Hos
 	return { status: shared == null ? 'not reported' : 'none' };
 }
 
-/** The "Update available" badge's tooltip (api-v1 v1.34): names the newest bot-agent release. */
-export function agentUpdateText(latest: string): string {
-	return `bot-agent ${latest} is available. Upgrading a host is an operator step.`;
-}

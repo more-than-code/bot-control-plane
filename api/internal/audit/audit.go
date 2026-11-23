@@ -102,7 +102,12 @@ const (
 	// a value or a secret file's hash.
 	ActionHostFileSave  = "host_file.save"
 	ActionHostFileApply = "host_file.apply"
-	ActionFileDelete    = "file.delete"
+	// Agent upgrades (api-v1 v1.48 item 5). Detail: host, from and to on a
+	// start (allowed, or denied with the refusal as error_code); host, to,
+	// state and reason when the row settles.
+	ActionHostAgentUpgrade       = "host.agent_upgrade"
+	ActionHostAgentUpgradeResult = "host.agent_upgrade_result"
+	ActionFileDelete             = "file.delete"
 	// File requests (api-v1 v1.30). The fill itself is file.put with
 	// detail via "file_request".
 	ActionFileRequested       = "file.requested"

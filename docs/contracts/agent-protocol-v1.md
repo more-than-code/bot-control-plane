@@ -580,3 +580,96 @@ A value-only env change used to be reported `unchanged` (rule 11 compares digest
    - no other placeholder anywhere. `config_hash` is the sha256 of the exact compact bytes of `config` as framed.
 8. **Results and gating as implemented:** `edge_disabled`, `port_in_use` and `invalid_config` come back as `task_result` `failed` with `error_code` and payload `{"outcome":code,"detail":"<one sanitised line, ≤ 300 bytes>"}`; further codes `conflict` (a container or volume named like the edge that Deploybot does not own), `bad_spec`, `docker_unavailable`, `image_unavailable`, `io_error`, `helper_unavailable`. `edge_stop` and `edge_status` work whatever the policy key says. While the pinned image digest is the all-zero placeholder, hello reports `edge.enabled:false` and apply is refused `edge_disabled` before any Docker call (a release-gate test fails until the real digest is set). `port_in_use` also checks UDP 443; an unreadable `/proc/net/tcp` or `udp` is `docker_unavailable`.
 9. **Container as implemented:** host network; `CapDrop ALL` + `CapAdd NET_BIND_SERVICE`; `no-new-privileges`; read-only root filesystem with tmpfs `/config` and `/tmp`; memory 512 MiB; restart `unless-stopped`; private cgroup namespace; pids limit; json-file logs 10m × 3. A failed start restores the previous config and container. An unlabelled local volume `deploybot-edge-data` is adopted (the certificate-migration path). The `config_hash` label is informational. Discovery reports the running edge as one row named `deploybot-edge` with owner `{"kind":"edge","project":"","entry":""}` and ports 80 and 443; the API recognises it by that name.
+
+## v1.16 a restart loop fails the health wait; time kept for the failure path (2026-11-21, approved spec `docs/spec-deploy-stuck.md` rev 1; bot-agent v0.2.12)
+
+1. **Health wait after a service deploy or rollback** (v1.4/v1.5 service deploy, v1.6 item 7): in every branch (configured health checks, Docker healthcheck, or neither), a new container with `restart_count > 0` or state `restarting` is not healthy, and the wait ends at once. Before, only the branch without checks counted restarts; the others waited until the task deadline. The failure then follows `on_deploy_failure` as before (v1.6.1, v1.9 item 2).
+2. **The health wait ends 60 s before the task deadline** (or at the deadline when the budget is 60 s or less). Rollback, stop, log tail and status for the failure path run in that reserve, on a context that has not expired, so the rollback or stop the policy asks for can complete. The task result is sent before the deadline.
+3. In every branch, a `container_status` state of `exited`, `dead` or `missing` also ends the wait at once as not healthy, so a service with restart `no` that crashes fails without waiting out the budget. The reserve also applies when the budget comes from the `healthcheck` floor (the budget is not raised, so the agent never outlasts the server's wait), and it counts from the task start, so a pull that runs past budget − 60 s ends the wait at once.
+4. No frame, field or outcome value changes. Servers need no change; an older agent keeps the old wait.
+
+## v1.17 Docker API version negotiation; the docker flag follows Docker (2026-11-21, approved spec `docs/spec-agent-docker-versions.md` rev 1; bot-agent v0.2.12)
+
+1. **Engine API version:** the root helper no longer fixes `/v1.47`. Each helper run first calls `GET /_ping` and reads the daemon's `API-Version` header, then uses the lower of 1.47 and that version for every request. The minimum is 1.41 (Docker 20.10): below it every verb refuses `docker_unavailable`, and the helper logs both versions.
+2. **Below API 1.44** (Docker 20.10 to 24):
+   - network create sends `CheckDuplicate: true`;
+   - a deploy or rollback whose spec has shared `networks` (v1.13) and would create a container is refused before any container, network or volume change (the image pull may already have run; a job's previous container is kept). The task result is `failed`, and the first of at most 50 `lines` says that shared networks need Docker 25 (API 1.44). A rollback to the kept container (no create) is not refused.
+3. **`hello.programs.docker`** is no longer latched for the life of the agent. The agent re-evaluates it on every discovery pass. When the value changes and holds for two passes in a row, the agent closes the session and reconnects, so the next `hello` carries the new value. It waits while a task is running. A change to `false` reconnects at most once per 5 minutes; a change back to `true` reconnects as soon as it is confirmed. No frame or field changes; servers need no change.
+4. **Helper diagnostics:** Docker failures are logged by the helper with method, path (without query), HTTP status, the Engine message (at most 300 bytes, redacted) and the negotiated version. Not logged as failures: a 404 on a lookup or delete, and a 409 on volume or network create. The ping has its own deadline. Codes, outcomes and result fields are unchanged. This supersedes the fixed `/v1.47` in the image section above.
+5. **New helper verb `docker_check`** (between the installer and the helper; never sent by the server): it is not gated by the runner policy, and it answers `present`, `api`, `ok`, `networks_ok` and a fixed `reason`. `install.sh check` uses it, and fails when the policy needs Docker (images or edge) and the check is not ok.
+
+
+## v1.18 host config files (2026-11-22, approved spec `docs/spec-host-config-files.md` rev 1a; additive, gated; implemented in bot-agent work-hostfiles-agent 2026-11-22, pi3 live check passed; not yet released)
+1. **`runner.toml` keys** (one-line string arrays; any violation makes the policy invalid with reason `parse`): `host_files = ["<name>=<path>"]`, `host_file_modes = ["<name>:0600|0640|0644"]`, `host_file_secret = ["<name>"]`, `host_file_units = ["<name>:<unit>.service"]`, `host_file_run_as = ["<name>:<account>"]`, `host_file_checks = ["<name>:<abs exe> <args…>"]`, `host_file_health = [...]`, `host_file_idle = [...]`. Rules as spec §2.1: name `^[a-z][a-z0-9-]{0,31}$`, at most 8 files; path exactly `/etc/<dir>/<file>` with reserved dirs refused; reserved units refused; `run_as` uid and gid ≥ 1000; commands split on single spaces, no shell, at most 16 arguments, executable (after resolving symlinks) and every directory to it root-owned and not group- or world-writable, rechecked at every apply. An older agent refuses the keys (`unknown_key`). (The `run_as` rule is superseded by v1.18.1.)
+2. **`policy check`** prints `host_files=<count>` and one `host_file <name> <path> <mode> <unit> <run_as> secret=<bool> health=<bool>` line per file after the `shared_network` lines.
+3. **`hello.programs.host_files`:** `[{"name","path","secret":bool,"unit","health":bool}]` from the loaded policy; `[]` when none. No content, no command lines. The API must know this field before an agent sends it.
+4. **Task kind `host_file_apply`:** spec `{"name", "content_b64", "settle_sec", "force"}`; timeout 420 s. Refused `forbidden` by an agent whose hello has no `host_files`. Result `{"outcome", "stage", "reason", "took_ms", "sha256"?}` with outcome `succeeded | unchanged | worker_busy | check_failed | rolled_back | rollback_failed | forbidden_spec`; `sha256` only for a non-secret file; never bytes or stderr beyond the reason token (`^bad_[a-z0-9_]{1,64}$`, `check_error`, `idle_error`, `not_connected`, `policy_invalid`, `not_running`, `health_error`). `settle_sec` 30–180 (default 60), at least the health command's `--wait` + 15. Order and safety rules: spec §2.3.
+5. **Frame `host_files_status`** (agent → API, at hello, after each apply, every 10 minutes): `{"files":[{"name","exists","owner_ok","reason"?,"matches_applied":bool|null,"size"?,"sha256"?}]}`; `size` and `sha256` only for a non-secret file.
+6. **Helper verbs** `host_file_apply` and `host_file_status` (agent → helper only); checks, idle and health run as `run_as` in transient `systemd-run` units with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateNetwork`; the previous file is kept at `/var/lib/bot-agent-runner/host-files/<name>.prev`.
+7. **Installer:** `install|upgrade --runner` writes `/etc/systemd/system/bot-agent-runner@.service.d/host-files.conf` with one `ReadWritePaths=-/etc/<dir>` per distinct host-file directory, or removes it when there are none.
+8. **Amendments (spec rev 1a §10 A1–A6, approved 2026-11-22; supersede items 1, 4 and 6 where they differ):** the helper serialises applies per unit (`/run/bot-agent/hostfile-unit-<unit>.lock`), not per file. An unsafe or missing check, health or idle executable does not invalidate the policy: the apply is `forbidden_spec` stage `exec` and `policy check` prints `exec=unsafe` on that file's line; syntax errors stay `parse`. Task timeout **600 s** (was 420); the health window starts after `systemctl restart` returns, the restart bounded at 60 s. Result: `succeeded` and `unchanged` are task state `succeeded`; the other five outcomes are state `failed` with `error_code` = outcome and payload `{outcome, stage, reason, took_ms}`; helper refusals and transport failures are state `failed` with `error_code` `bad_spec | policy_denied | io_error | helper_unavailable` and no `outcome`; `sha256` only on `succeeded`/`unchanged` of a non-secret file. Stages `lookup, settle, exec, target, check, idle, restart, health, rollback`. Status frame items may carry `reason` (`missing, symlink, not_regular, owner, mode, nlink, dir, too_large, io_error`). `unchanged` records the applied hash. Default settle 60, raised to the health `--wait` + 15; an explicit value below that is `forbidden_spec` stage `settle`; a health `--wait` above 165 s is `parse`. Check, health and idle units also get `InaccessiblePaths=` (Docker, containerd and Podman sockets), `PrivateDevices`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectControlGroups`, `RestrictSUIDSGID`, `LockPersonality`, `LimitCORE=0`, `TimeoutStopSec=2`, `MemoryMax=256M`, `TasksMax=64`, `ProtectProc=invisible`, `ProcSubset=pid`. More reserved dirs and unit prefixes (spec A6); a unit starts with a letter or digit; a secret file is mode 0600 or 0640; path components start with a letter, digit or `_`.
+
+## v1.18.1 host-file run_as accepts a service account (2026-11-22, spec `docs/spec-host-config-files.md` §11 A8; bot-agent v0.2.14; implemented, pi3 live check passed; tagged, not yet released)
+1. **`host_file_run_as`** (supersedes the `run_as` rule in v1.18 item 1). Before: "`run_as` uid and gid ≥ 1000". After: `host_file_run_as` names an existing account other than `bot-agent` and `nobody`, with uid ≥ 100 and a primary gid ≥ 100 that is not `root`/`0` or `nogroup` (gid 65534), and that shares neither uid nor primary gid with `bot-agent`. Any other account still makes the policy invalid with `parse`. Programs' `run_as` keeps uid and gid ≥ 1000.
+2. **Older agents:** an agent ≤ 0.2.13 refuses a system account here with `parse`, so a host owner upgrades before naming one. No wire change.
+
+## v1.19 deploy failure reason (2026-11-23, spec `docs/spec-deploy-reason.md` rev 1 in bot-control-plane; additive; implemented on bot-agent `dev` 2c84a27, merged fe8c1ef)
+The full text is in bot-agent's copy, `docs/contracts/agent-protocol-v1.md` §v1.19. It was written in another session and is not yet copied into this umbrella file.
+
+## v1.20 agent upgrade from the server (renumbered from v1.19 on 2026-11-23 because of the clash above) (2026-11-23, approved spec `docs/spec-agent-self-upgrade.md` rev 1; additive, gated; not yet implemented)
+1. **`runner.toml` keys:**
+   - `agent_upgrade = true|false` (bool; missing = false).
+   - Optional `agent_upgrade_https_proxy = "http(s)://host:port"`: no userinfo or path, at most 256 bytes; anything else makes the policy invalid with `parse`. `policy check` prints `agent_upgrade_https_proxy=<set|unset>`.
+   - An older agent refuses it as `unknown_key`.
+   - `policy check` prints `agent_upgrade=<bool>` after the `host_file` lines.
+2. **Hello:**
+   - `programs.agent_upgrade` (bool). It is true only when the policy is valid and the key is true. It is absent where there is no `programs` block (no helper), which the API reads as false.
+   - Top-level **`last_upgrade`**: `{"version","outcome","reason","at"}` or `null`.
+     - `outcome` is one of `succeeded`, `rolled_back` or `failed`.
+     - `reason` is a token: `download_failed`, `signature_invalid`, `bundle_invalid`, `version_mismatch`, `install_failed`, `not_reconnected`, or empty.
+     - `at` is RFC 3339 UTC.
+     - It comes from the helper's result file, read at start.
+   - The API must know these fields before an agent sends them.
+3. **Frame `agent_upgrade_result`** (agent → API): `{"result":{same as last_upgrade}}`.
+   - It is sent whenever the helper's result differs from the last one this agent process sent or put in its hello.
+   - The result file is written after the installer finishes, so the new or restored agent usually starts before it exists.
+   - When the host is opted in, the agent polls the helper's `agent_upgrade_result` every 10 s, for up to 15 minutes: at start, and after it accepts an `agent_upgrade` task. It stops early once the upgrade unit is inactive and a new result has been sent.
+4. **Task kind `agent_upgrade`**, spec `{"version":"X.Y.Z"}`, timeout 120 s.
+   - The agent refuses it with `forbidden` when its hello had `agent_upgrade` false.
+   - It forwards the task to the helper verb `agent_upgrade`.
+   - **Success:** state `succeeded`, payload `{"state":"accepted"}`. The upgrade runs on after the task ends.
+   - **Failure:** state `failed` with `error_code` one of `policy_denied`, `busy`, `not_newer`, `bad_spec` or `helper_unavailable`.
+5. **Helper verb `agent_upgrade {"version"}`.**
+   - Checks, in order:
+     - it re-reads `runner.toml`; `agent_upgrade` must be true, else `policy_denied`;
+     - `version` matches `^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$` and is newer than the installed version (the installer record's `version` line), else `bad_spec` or `not_newer`;
+     - it takes the helper-wide lock without waiting, and no other helper lock may be held, else `busy`;
+     - no `bot-agent-upgrade.service` may be active, activating or deactivating, else `busy`;
+     - if the result file is under 10 minutes old, its outcome is not `succeeded` and its version equals the requested one, `busy` (a cool-down).
+   - It then starts `systemd-run --unit=bot-agent-upgrade --collect --property=RuntimeMaxSec=900 /usr/local/libexec/bot-agent-runner upgrade-run <version>` and answers `accepted`.
+   - While that unit is active, the mutating helper verbs (programs, images, edge, `host_file_apply`) answer `busy`.
+   - The host checks only "newer than installed, and signed". "Latest" is enforced by the server.
+   - Nothing from the request reaches the command except the checked version.
+6. **`bot-agent-runner upgrade-run <version>`** (root, transient unit, not the helper's sandbox):
+   1. **Download** from the fixed base `https://github.com/more-than-code/bot-agent/releases/download/v<version>/`: first `SHA256SUMS` and `SHA256SUMS.sig`, then only after step 2 passes `bot-agent-v<version>.tar.gz`.
+      - HTTPS only; redirects only to `github.com`, `objects.githubusercontent.com` or `release-assets.githubusercontent.com` on port 443 with no userinfo, at most 5.
+      - 64 MiB per file and 120 s per file.
+      - A proxy is used only from the root-owned `runner.toml` key `agent_upgrade_https_proxy` (item 1), never from the agent's env file.
+   2. **Verify** `SHA256SUMS.sig` (base64 Ed25519 over the exact `SHA256SUMS` bytes) with the public key compiled into the helper, else `signature_invalid`.
+      - A release built with the placeholder key refuses every bundle.
+   3. **Unpack** into `/var/lib/bot-agent-runner/upgrade/<version>/` (0700 root). Only regular files and directories are allowed, under one top directory `bot-agent-v<version>/`, with no `..`, absolute paths or links, and 256 MiB in total, including the decompressed stream. Otherwise `bundle_invalid`.
+      - The bundled `SHA256SUMS` must equal the signed one byte for byte.
+      - It must list `install.sh` and the four `units/*` files.
+      - Every listed file must match, and no unlisted file may be present.
+      - The bundled `bot-agent` for this architecture must print `<version>`, else `version_mismatch`.
+   4. **Install:** run the bundled `install.sh upgrade`, with `--runner` when the runner is installed, with `BOT_AGENT_INSTALL_BUNDLE` set to that directory.
+      - Exit 0 means `succeeded`.
+      - The installer's own restore means `rolled_back` with `not_reconnected` or `install_failed`.
+      - Anything else, including a stop by SIGTERM (passed on to the installer, which then gets 120 s to roll back), means `failed` with `install_failed`.
+   5. **Result:** write `/var/lib/bot-agent-runner/upgrade/result.json` (0600) with the outcome. Old staged versions are removed except the current one.
+7. **Helper verb `agent_upgrade_result {}`:** the result file's content, or `null`. Read only.
+8. **Installer (bundled `install.sh`):** `verify_active_version` additionally waits up to 90 s for `/var/lib/bot-agent/last_hello` to have an mtime after the restart.
+   - The agent writes that file on every acknowledged hello.
+   - A missing or old marker fails the verify, so the existing rollback runs. The rollback's verify keeps the existing checks (active, `NRestarts` 0, version) and does **not** wait for the marker: an agent older than 0.2.15 never writes it, and with the server down no agent can say hello. A rollback whose verify passes is `rolled_back`; a failed rollback verify is `failed` `install_failed`.
+   - `install.sh` documents the marker check. A plain SSH upgrade gets it as well.
+9. **Bootstrap:** this needs bot-agent 0.2.15 or later, installed once by the host owner, with `agent_upgrade = true` in `runner.toml`.

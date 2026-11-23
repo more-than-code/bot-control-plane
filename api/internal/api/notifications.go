@@ -94,7 +94,7 @@ func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]not
 			return nil, err
 		}
 		for _, h := range hosts {
-			v := s.withUpdateHint(h)
+			v := s.withUpdateHint(h, nil)
 			if !v.UpdateAvailable {
 				continue
 			}

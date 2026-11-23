@@ -168,7 +168,14 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 			// api-v1 v1.34 item 2: the agent update hint.
 			UpdateAvailable    bool   `json:"update_available"`
 			LatestAgentVersion string `json:"latest_agent_version"`
-			Access             *[]struct {
+			// api-v1 v1.48 item 4: upgrades from Deploybot.
+			AgentUpgradeAllowed *bool `json:"agent_upgrade_allowed"`
+			AgentUpgrade        *struct {
+				To     string `json:"to"`
+				State  string `json:"state"`
+				Reason string `json:"reason"`
+			} `json:"agent_upgrade"`
+			Access *[]struct {
 				ProjectName string `json:"project_name"`
 				Level       string `json:"level"`
 			} `json:"access"`
@@ -212,7 +219,23 @@ func summarizeHosts(payload json.RawMessage, org bool) string {
 			line += " (" + summaryField(h.AccessLevel) + ")"
 		}
 		if h.UpdateAvailable && h.LatestAgentVersion != "" {
-			line += " (agent update available: " + summaryField(h.LatestAgentVersion) + ")"
+			// An API before v1.48 sends no flag: say nothing about how.
+			how := ""
+			switch {
+			case h.AgentUpgradeAllowed == nil:
+			case *h.AgentUpgradeAllowed:
+				how = "; upgrade_agent can install it"
+			default:
+				how = "; upgrades from Deploybot are off on this host"
+			}
+			line += " (agent update available: " + summaryField(h.LatestAgentVersion) + how + ")"
+		}
+		if u := h.AgentUpgrade; u != nil && u.State != "" {
+			text := "agent upgrade to " + summaryField(u.To) + " " + summaryField(u.State)
+			if u.Reason != "" {
+				text += " (" + summaryField(u.Reason) + ")"
+			}
+			line += " (" + text + ")"
 		}
 		// api-v1 v1.25 item 6: the shared networks the API showed this caller.
 		if h.Programs != nil && len(h.Programs.SharedNetworks) > 0 {

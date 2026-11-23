@@ -1,4 +1,6 @@
 import type {
+	AgentUpgrade,
+	AgentUpgradeState,
 	CatalogAction,
 	CatalogEntry,
 	CatalogGrant,
@@ -247,6 +249,9 @@ export function parseHost(value: unknown): Host | null {
 	// everyone else (api-v1 v1.24 item 1, amended), so the console shows it whenever it is present.
 	const programs = parseProgramsField(value);
 	const { latest_agent_version, update_available } = agentUpdateHint(value);
+	// api-v1 v1.48. A hint like the update hint: a missing or odd value never fails the host.
+	const agent_upgrade_allowed = value.agent_upgrade_allowed === true;
+	const agent_upgrade = parseAgentUpgrade(value.agent_upgrade);
 	return {
 		id,
 		org_id,
@@ -265,7 +270,41 @@ export function parseHost(value: unknown): Host | null {
 		access,
 		programs,
 		latest_agent_version,
-		update_available
+		update_available,
+		agent_upgrade_allowed,
+		agent_upgrade
+	};
+}
+
+const UPGRADE_STATES = new Set<AgentUpgradeState>(['started', 'running', 'succeeded', 'rolled_back', 'failed', 'unknown']);
+const UPGRADE_REASON = /^[a-z0-9_]{1,64}$/;
+
+/**
+ * One agent upgrade row (api-v1 v1.48 item 3), or null when it is missing or not that shape. A reason that is
+ * not a plain token is dropped, never shown.
+ */
+export function parseAgentUpgrade(value: unknown): AgentUpgrade | null {
+	if (!isRecord(value)) return null;
+	const id = text(value.id, 36);
+	const from = optionalText(value.from, 80);
+	const to = text(value.to, 20);
+	const started_at = timestamp(value.started_at);
+	const finished_at = value.finished_at == null ? null : timestamp(value.finished_at);
+	const by = isRecord(value.started_by) ? value.started_by : null;
+	const byId = by ? text(by.id, 36) : null;
+	const byName = by ? optionalText(by.name, 200) : null;
+	if (!id || !isUuid(id) || from === undefined || !to || !AGENT_VERSION.test(to) || !started_at) return null;
+	if (typeof value.state !== 'string' || !UPGRADE_STATES.has(value.state as AgentUpgradeState)) return null;
+	const reason = typeof value.reason === 'string' && UPGRADE_REASON.test(value.reason) ? value.reason : null;
+	return {
+		id,
+		from: from ?? '',
+		to,
+		state: value.state as AgentUpgradeState,
+		reason,
+		started_by: { id: byId && isUuid(byId) ? byId : '', name: byName ?? '' },
+		started_at,
+		finished_at
 	};
 }
 

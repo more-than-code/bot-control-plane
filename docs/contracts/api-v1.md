@@ -1117,3 +1117,107 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
 7. **Audit:** `host_file.save {"host","name","version","secret","size"}`, `host_file.apply {"host","name","version","outcome","stage","reason"}`.
 8. **Problems:** kind `host_file` for org owners and admins: the last apply was `rollback_failed`, or the status is `different`, `missing` or `wrong_owner` for 30 minutes after an apply.
 9. **Migration 0029:** `app.host_file_versions`, `app.host_file_applies`, `app.hosts.host_files_status`; the down script drops them and never refuses.
+
+## v1.45 delete stale image versions (2026-11-22, spec `docs/spec-image-version-delete.md` rev 1 with §13 amendment A; migration 0030; additive; implemented on bot-control-plane `dev` (d27c6fb, 833099d, 77231bc); in the v0.2.45 release commit 5b986f2 on `main`, which has no tag on origin yet)
+1. **Connect GitHub with delete access (opt-in).**
+   - `POST /v1/projects/{id}/registries/github/start` accepts an optional `"delete_packages": true`. GitHub is then also asked for `delete:packages`.
+   - If GitHub leaves that scope out, the connect fails with `bad_request` "GitHub did not grant delete:packages", and the stored login stays as it was.
+   - A plain connect records whatever GitHub granted. A token refresh keeps the scopes.
+   - The registry object gains **`delete_packages`** (bool): true only for a `github`-source login whose last connect was granted `delete:packages`; false for a manual row.
+2. **`GET /v1/projects/{id}/image-versions?image=<ref>`**: project owner or admin, console sessions only (MCP-delegated: 403). Checks, in order:
+   - GitHub must be configured (`unavailable` "GitHub is not configured").
+   - The image must be on `ghcr.io` (`bad_request` "image versions are only available for ghcr.io images").
+   - The project must have a Connect GitHub login (`bad_request` "connect GitHub in Settings to list image versions").
+   - The per-user lookup limit applies (`rate_limited`).
+   - The GitHub token is never echoed.
+3. **Response** `payload {"items":[...],"truncated":bool,"can_delete":bool,"can_delete_reason":string|null}`.
+   - Each item is `{"version_id","digest","tags","created_at","updated_at","in_use":[holder],"stale":bool,"release":bool}`.
+     - `stale`: nothing holds the version and it was not updated for 14 days.
+     - `release`: a tag looks like a release (`release-*`, `v1.2`, `1.2.3`).
+   - `can_delete` is false, with a reason, when the caller is not an org owner or admin, or the login lacks `delete:packages`.
+4. **Holders.** A holder is `{"project_id","project_name","entry","host_id","host_name","why"}`, ordered running first.
+   - Holders come from the image entries of the same repository in every project of the org that the caller reaches; an org owner or admin reaches them all.
+   - `why` is one of:
+     - `running`;
+     - `rollback_target`: one of the rollback route's newest distinct succeeded or unchanged digests (v1.6);
+     - `recent_deploy`: among the newest 5 deploy rows per entry and host, whatever their outcome, an in-flight row included.
+5. **`DELETE /v1/projects/{id}/image-versions/{version_id}?image=<ref>`** with body `{"digest","confirm"}`: same start checks as item 2, plus:
+   - The caller must be an org owner or admin; otherwise `forbidden` "only org owners and admins can delete image versions".
+   - The login must have `delete:packages`; otherwise `forbidden` with the reason.
+   - An unknown `version_id` (not a positive integer, or not found at GitHub) → `not_found`.
+   - The version's current digest must equal `digest`; otherwise `conflict` "this version changed; reload".
+   - A held version → `conflict` "in use: <entry> on <host> (<why>)" with `payload {"in_use":[at most 10 holders],"count"}`.
+   - `confirm` must be the first 12 hex characters of the digest (case-insensitive); otherwise `bad_request`.
+   - On success: `200 {"deleted":true,"version_id","digest","tags"}`. The project's cached tags and digests for that repository are dropped.
+   - GitHub failures (list and delete) → `registry_unavailable` with `payload {"reason"}`, one of `not_found`, `delete_refused`, `timeout` or `unreachable`; no GitHub body is echoed.
+6. **Audit:**
+   - `registry.image_version_deleted {"host","package","version_id","digest","tags","via"}`;
+   - `registry.github_connected` gains `delete_packages`.
+7. **`image-tags` order (amendment A):** for a `ghcr.io` image whose project has a Connect GitHub login, tags with a package-version `updated_at` come first, newest first (a tie keeps the v1.16 order). The rest follow in the v1.16 order. Other images keep the v1.16 order.
+8. **Migration 0030:**
+   - Adds `app.registries.delete_packages boolean NOT NULL DEFAULT false`, false for every existing row, and grants `deploybot_api` UPDATE on that column.
+   - The down script drops the column.
+
+## v1.46 image tags for agents (2026-11-23, spec `docs/spec-mcp-deploy-image.md` rev 1, option A; additive, no migration; implemented on bot-control-plane `dev` 414c61e (PR 5, on top of the v0.2.45 release commit); not yet released)
+1. **MCP-delegated sessions may call `GET /v1/projects/{id}/image-tags` and `GET /v1/projects/{id}/image-digest`** (v1.16 items 1–2).
+   - Before: console sessions only; any other session kind got 403.
+   - After: console sessions and MCP-delegated tokens. Everything else is unchanged: the owner-or-admin rule, the allowed hosts, the outbound rules, the limits, the shared rate bucket, the cache and the errors.
+   - The image-version routes (v1.45) stay console only.
+2. **`image-tags` response, two additive fields.**
+   - **`items[].updated_at`** (RFC 3339, UTC). It is present when GitHub's package versions gave the tag a time: a `ghcr.io` image whose project uses a Connect GitHub login (v1.45 amendment A). A tag on more than one package version takes the latest `updated_at`. Otherwise it is absent.
+   - **`order`**: `"time"` when at least one item carries `updated_at`, meaning the list is newest first by push time; otherwise `"name"`, meaning the v1.16 version-name order.
+   - New shape: `payload {"items":[{"tag":string,"updated_at"?:string}],"truncated":bool,"order":"time"|"name"}`.
+   - Clients ignore unknown fields. A client talking to an API before v1.46 sees no `order`, and treats the list as `"name"`.
+3. **Consumer:** the MCP tool `list_image_tags` (bot-control-plane `mcp/docs/design.md`).
+   - Input: `project_id`, exactly one of `entry` (an image entry) or `image`, and `limit` (1–50, default 20).
+   - Output: `tag`, `image` (`<repository>:<tag>`), `updated_at` and, with `entry`, `current`. It also returns `repository`, `order` and `truncated`.
+   - Deploys still go through `set_entry_image`, `confirm` and `deploy_entry`.
+
+## v1.47 why a deploy failed (2026-11-23, spec `docs/spec-deploy-reason.md` in bot-control-plane; migration 0031_deploy_reason; implemented on bot-control-plane `dev` 48e1d4c/2451123, merged 949dc69)
+Summary from bot-control-plane `AGENTS.md`: `ImageDeploy.reason` and `final_status`, the stored redacted log tail, and outcome `refused` for a deploy or rollback the host refused. Refused rows are kept in history but not counted for last deployed, rollback targets, recent image-version holds or deploy problems. The full section was written in another session and is not yet copied here.
+
+## v1.48 agent upgrade from the console or MCP (renumbered from v1.47 on 2026-11-23 because of the clash above; migration **0032**) (2026-11-23, approved spec `docs/spec-agent-self-upgrade.md` rev 1; migration 0031; additive; not yet implemented)
+1. **`POST /v1/hosts/{id}/agent-upgrade {"version"}`**: org owner or admin of the host's org. Console sessions and MCP-delegated tokens are allowed; the MCP server asks for `confirm` first.
+   - Refusals, in order:
+     - not found, or no access → `not_found` / `forbidden`;
+     - a revoked host → `conflict`;
+     - `version` differs from `latest_agent_version`, or the host is not older → `bad_request`;
+     - the host's hello has no `programs.agent_upgrade: true` → `unsupported_agent` (409), msg "this host does not allow upgrades from Deploybot (runner.toml agent_upgrade)";
+     - the host is offline → `host_offline` (503);
+     - an upgrade for this host is `started` or `running` → `conflict`.
+   - It inserts a row (`started`) and sends task `agent_upgrade` (agent-protocol v1.20).
+     - **Task succeeded (accepted):** the row becomes `running`, and the route answers **`202 {"upgrade_id","state":"running"}`**.
+     - **Task failed:** the row becomes `failed` with `reason` = the error code, and the route answers 409 `conflict` with `payload {"reason"}`.
+     - **Transport failure:** the row becomes `failed`, reason `unavailable`, and the route answers 503.
+2. **Settling a running row:**
+   - **Implementation notes (2026-11-23):**
+     - Only a result whose `version` equals the row's `to` and whose `at` is no earlier than 30 s before `started_at` settles the row. Hello repeats `last_upgrade`, so an older attempt must not settle a new row.
+     - A row may settle from `started` as well as `running`.
+     - On a task timeout or a lost connection after the task was sent, the route answers 503 `unavailable` but **leaves the row open**. The helper may already have started the upgrade, so a later result settles the row, or the 15-minute sweep marks it `unknown`. Only an answer from the agent (a failure or reject) marks the row `failed`.
+   - From hello `last_upgrade` or the frame `agent_upgrade_result` whose `version` equals the row's `to`: `succeeded`, `rolled_back` or `failed`, with `reason`.
+   - A hello with `agent_version == to` and no result also means `succeeded`.
+   - After 15 minutes with neither, the row becomes `unknown`.
+   - `finished_at` is set when the row settles.
+3. **`GET /v1/hosts/{id}/agent-upgrades`**: anyone who can see the host. Returns `payload {"items":[{"id","from","to","state","reason","started_by":{"id","name"},"started_at","finished_at"}]}`, newest first, at most 20.
+4. **Host object:**
+   - `agent_upgrade_allowed` (bool): the hello flag, false when revoked or never seen;
+   - `agent_upgrade`: the newest row or `null`.
+   - Both appear wherever `update_available` does (v1.34).
+5. **Audit:**
+   - `host.agent_upgrade {"host","from","to"}` when an upgrade is started;
+   - `host.agent_upgrade_result {"host","to","state","reason"}` when it settles.
+6. **Problems:** kind `agent_upgrade`, needs_action, for org owners and admins.
+   - It opens when a row settles `rolled_back`, `failed` from a host result, or `unknown`.
+   - It does **not** open for a synchronous refusal from the agent: `busy`, `not_newer`, `bad_spec`, `forbidden`, `policy_denied` or `helper_unavailable`. The admin already saw the 409, and the row still records it.
+   - It closes on the next `succeeded` for that host, or when the host reports an `agent_version` at or above `latest_agent_version`, or equal to the newest row's `to`. An `unknown` row with that `to` then becomes `succeeded`.
+   - A host result whose `at` is more than 5 minutes ahead of the API clock is ignored.
+7. **Migration 0032:**
+   - `app.host_agent_upgrades` (id, host_id, from_version, to_version, state, reason, started_by, started_at, finished_at), with an index on (host_id, started_at desc);
+   - the problems kind check gains `agent_upgrade`;
+   - narrow grants to `deploybot_api`.
+   - The down script deletes `agent_upgrade` problems, restores the previous kind check and drops the table.
+8. **MCP:** tool `upgrade_agent {host_id}`, which goes through `confirm`. `list_hosts` passes `agent_upgrade_allowed` and `agent_upgrade` through.
+9. **Console:**
+   - The "Update available" badge offers **Upgrade** when `agent_upgrade_allowed` is true. Otherwise the tooltip says how to opt in.
+   - Upgrade opens a confirm dialog, then shows a running state and the outcome.
+   - The host Overview lists the history.

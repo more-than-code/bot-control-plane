@@ -125,7 +125,8 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	if strings.ContainsAny(cfg.AgentWSURL, "' \t\r\n") {
 		return Config{}, fmt.Errorf("BOT_API_AGENT_WS_URL must not contain quotes or whitespace")
 	}
-	if cfg.LatestAgentVersion != "" && !agentversion.Valid(cfg.LatestAgentVersion) {
+	// api-v1 v1.48: the release form the host's helper accepts (1 to 4 digits each).
+	if cfg.LatestAgentVersion != "" && !agentversion.ValidRelease(cfg.LatestAgentVersion) {
 		return Config{}, fmt.Errorf("BOT_API_LATEST_AGENT_VERSION must be X.Y.Z or empty")
 	}
 	if cfg.EdgeTLSIssuer != "" && cfg.EdgeTLSIssuer != EdgeIssuerInternal {

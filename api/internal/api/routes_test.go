@@ -163,6 +163,8 @@ func TestRouteTable(t *testing.T) {
 		"DELETE /v1/hosts/{id}/access/{project_id}",
 		"GET /v1/hosts/{id}/edge",
 		"PUT /v1/hosts/{id}/edge",
+		"POST /v1/hosts/{id}/agent-upgrade",
+		"GET /v1/hosts/{id}/agent-upgrades",
 		"GET /v1/hosts/{id}/shares",
 		"GET /v1/hosts/{id}/shares/{project_id}",
 		"PUT /v1/hosts/{id}/shares/{project_id}",

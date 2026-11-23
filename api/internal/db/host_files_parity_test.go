@@ -273,6 +273,10 @@ VALUES (gen_random_uuid(), 'host_file', 'kind-check', $1::uuid, 'heads_up', 't',
 	if objects() != 3 || !kindAllowed() {
 		t.Fatal("after up")
 	}
+	// 0032 sits on the 0029 kind check: take it down first.
+	if err := run("0032_agent_upgrades.down.sql"); err != nil {
+		t.Fatalf("0032 down: %v", err)
+	}
 	if err := run("0029_host_files.down.sql"); err != nil {
 		t.Fatalf("down: %v", err)
 	}

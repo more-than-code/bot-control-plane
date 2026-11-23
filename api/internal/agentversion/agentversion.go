@@ -3,9 +3,18 @@
 package agentversion
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// releaseRe is a bot-agent release version (agent-protocol v1.20 item 5):
+// each part 1 to 4 digits, the form the host's helper accepts.
+var releaseRe = regexp.MustCompile(`^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$`)
+
+// ValidRelease reports whether s is a release version the upgrade path
+// accepts (api-v1 v1.48). It is stricter than Valid.
+func ValidRelease(s string) bool { return releaseRe.MatchString(s) }
 
 // Parse reads "X.Y.Z" with each part one or more ASCII digits that fit an
 // int. Anything else, including a leading "v" or a suffix, is not ok.

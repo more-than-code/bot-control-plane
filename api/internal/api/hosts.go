@@ -232,7 +232,12 @@ func (s *Server) handleHostList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeList(w, s.hostViews(items), next)
+	views, err := s.hostViews(r.Context(), items)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeList(w, views, next)
 }
 
 // isOrgAdmin reports whether the user owns or administers the org.
@@ -286,7 +291,11 @@ func (s *Server) hostRead(r *http.Request, p principal, rel authz.Relation, host
 	if err != nil {
 		return hostView{}, err
 	}
-	return s.withUpdateHint(host), nil
+	views, err := s.hostViews(r.Context(), []store.Host{host})
+	if err != nil {
+		return hostView{}, err
+	}
+	return views[0], nil
 }
 
 // handleHostPatch renames a host (api-v1 v1.38 item 2): org owners and

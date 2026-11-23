@@ -471,7 +471,12 @@ func (s *Server) handleOrgHosts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeList(w, s.hostViews(items), next)
+	views, err := s.hostViews(r.Context(), items)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeList(w, views, next)
 }
 
 func (s *Server) handleOrgJoinCreate(w http.ResponseWriter, r *http.Request) {

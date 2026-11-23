@@ -89,7 +89,15 @@
 	<Tabs label="Host sections" current={data.tab} items={tabs} />
 
 	{#if data.tab === 'overview'}
-		<OverviewTab host={data.host} range={data.range} metrics={data.metrics} snapshot={form?.snapshot ?? null} />
+		<OverviewTab
+			host={data.host}
+			range={data.range}
+			metrics={data.metrics}
+			snapshot={form?.snapshot ?? null}
+			canUpgrade={data.org?.role === 'owner' || data.org?.role === 'admin'}
+			upgrades={data.upgrades ?? []}
+			upgradesMessage={data.upgradesMessage ?? null}
+		/>
 	{:else if data.tab === 'files'}
 		{#if data.files}
 			<ConfigFilesTab hostId={data.host.id} files={data.files} {form} />

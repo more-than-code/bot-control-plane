@@ -120,7 +120,7 @@
 			</td>
 			<td class="p-2 align-middle"><StatusBadge status={host.status} /></td>
 			<td class="p-2 align-middle"><LocalTime iso={host.last_seen_at} /></td>
-			<td class="p-2 align-middle"><AgentVersion {host} /></td>
+			<td class="p-2 align-middle"><AgentVersion {host} canUpgrade={canOrgAdmin} compact /></td>
 			{#if canAdmin || canOrgAdmin}
 				<td class="p-2 align-middle">
 					<div class="flex items-center gap-1">

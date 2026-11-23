@@ -131,6 +131,7 @@ func (e *Exchanger) RequireDelegated(publicOrigin string, next http.Handler) htt
 		ctx := WithDelegatedToken(r.Context(), delegated, func() {
 			e.cache.drop(key, delegated)
 		})
+		ctx = WithCallerKey(ctx, key)
 		downstream := r.Clone(ctx)
 		// The MCP SDK copies this header onto the tool request. Drop it so
 		// tool code cannot read the caller token.
