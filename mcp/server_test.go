@@ -2646,3 +2646,32 @@ func TestListProblems(t *testing.T) {
 		t.Fatal("a refused call reached the API")
 	}
 }
+
+// BOT_MCP_CONSOLE_ORIGIN is optional and, when set, an origin like the
+// public one (the privileged-steps console links).
+func TestConfigConsoleOrigin(t *testing.T) {
+	secretPath := filepath.Join(t.TempDir(), "client-secret")
+	if err := os.WriteFile(secretPath, []byte("0123456789abcdef0123456789abcdef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{
+		"BOT_MCP_LISTEN":             "127.0.0.1:8091",
+		"BOT_MCP_API_URL":            "https://api.example",
+		"BOT_MCP_PUBLIC_ORIGIN":      "https://mcp.example",
+		"BOT_MCP_CLIENT_SECRET_FILE": secretPath,
+	}
+	get := func(k string) string { return env[k] }
+	if cfg, err := configFrom(get); err != nil || cfg.ConsoleOrigin != "" {
+		t.Fatalf("%+v %v", cfg.ConsoleOrigin, err)
+	}
+	env["BOT_MCP_CONSOLE_ORIGIN"] = "https://console.example"
+	if cfg, err := configFrom(get); err != nil || cfg.ConsoleOrigin != "https://console.example" {
+		t.Fatalf("%+v %v", cfg.ConsoleOrigin, err)
+	}
+	for _, bad := range []string{"http://console.example", "https://console.example/x", "https://u@console.example", "console.example"} {
+		env["BOT_MCP_CONSOLE_ORIGIN"] = bad
+		if _, err := configFrom(get); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}

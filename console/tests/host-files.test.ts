@@ -159,7 +159,7 @@ function renderPage(data: Record<string, unknown>, form: unknown = null): string
 
 describe('host config files: helpers', () => {
 	test('the files tab parses and is listed', () => {
-		assert.deepEqual([...HOST_TABS], ['overview', 'processes', 'files']);
+		assert.deepEqual([...HOST_TABS], ['overview', 'processes', 'files', 'policy']);
 		assert.equal(parseHostTab('files'), 'files');
 		assert.equal(parseHostTab('nope'), 'overview');
 		assert.equal(hostQuery(new URL(`http://x/hosts/${HOST_ID}?tab=files&files.name=dd-policy`)).tab, 'files');

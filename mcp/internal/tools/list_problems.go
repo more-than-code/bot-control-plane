@@ -61,7 +61,7 @@ func registerListProblems(server *mcp.Server, api *apiclient.Client) {
 		if fail != nil {
 			return fail
 		}
-		return present(payload, summarizeProblems(payload))
+		return present(payload, summarizeProblems(payload)+problemLinks(api, payload))
 	})
 }
 
@@ -111,4 +111,32 @@ func summarizeProblems(payload json.RawMessage) string {
 		out += fmt.Sprintf(" %d resolved.", resolved)
 	}
 	return out
+}
+
+// problemLinks is a summary line with each open problem's console page
+// (its href on the console origin), or "".
+func problemLinks(api *apiclient.Client, payload json.RawMessage) string {
+	var body struct {
+		Items []struct {
+			Title      string     `json:"title"`
+			Href       string     `json:"href"`
+			ResolvedAt *time.Time `json:"resolved_at"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(payload, &body) != nil {
+		return ""
+	}
+	parts := []string{}
+	for _, p := range body.Items {
+		if p.ResolvedAt != nil || len(parts) == maxListItems {
+			continue
+		}
+		if link := api.ConsoleURL(p.Href); link != "" && !strings.ContainsAny(p.Href, " \t\r\n") {
+			parts = append(parts, summaryField(p.Title)+": "+link)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\nOpen in the console: " + strings.Join(parts, "; ")
 }
