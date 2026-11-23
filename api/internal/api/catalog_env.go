@@ -881,7 +881,8 @@ func fillPreviews(set store.EnvSet, sealed []store.EnvSecret) store.EnvSet {
 }
 
 func envKeyBody(key string, secret bool, plain string, generated bool) store.EnvKey {
-	item := store.EnvKey{Key: key, IsSecret: secret}
+	// v1.56: the answer says whether the value is generated (secrets only).
+	item := store.EnvKey{Key: key, IsSecret: secret, Generated: secret && generated}
 	if secret {
 		preview := secretPreview(plain, generated)
 		item.Preview = &preview

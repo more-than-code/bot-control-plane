@@ -749,6 +749,11 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 		if !values[idx].IsSecret {
 			return store.EnvKey{}, false, store.ErrSecretFixed
 		}
+		if !values[idx].Generated && !values[idx].NeedsValue {
+			// v1.56: a hand-entered value is never replaced by a random one.
+			// An empty placeholder has no value to lose.
+			return store.EnvKey{}, false, store.ErrNotGenerated
+		}
 		secret = true
 	} else if created {
 		if in.Secret != nil {

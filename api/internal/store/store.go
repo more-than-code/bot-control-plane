@@ -31,6 +31,10 @@ var (
 	// ErrKeyExists is a generated key PUT over a key that already exists
 	// (api-v1 v1.27 item 1, rev 3: there is no regenerate). Nothing is written.
 	ErrKeyExists = errors.New("key already has a value")
+	// ErrNotGenerated is a regenerate of a secret key whose value was
+	// entered by hand (api-v1 v1.56): only an API-generated value may be
+	// replaced by a new generated one. Nothing is written.
+	ErrNotGenerated = errors.New("value was entered by hand")
 	// ErrSecretEmpty is a key PUT of "" over an existing secret key (api-v1 v1.18).
 	ErrSecretEmpty = errors.New("a secret value cannot be empty; delete the key instead")
 	// ErrTooManyFiles is a new file name when the project already has MaxProjectFiles.
@@ -943,9 +947,10 @@ type Store interface {
 	// A Secret that differs from the stored flag is ErrSecretFixed.
 	// An empty Plain for an existing secret key is ErrSecretEmpty; nothing is written.
 	// The bool is true when the key was created. Only a created key rehashes.
-	// With Regenerate (and Generated) the key must already exist and be
-	// secret: a missing set or key is ErrNotFound and writes nothing, a plain
-	// key is ErrSecretFixed; ErrKeyExists does not apply.
+	// With Regenerate (and Generated) the key must already exist, be secret
+	// and hold a generated value: a missing set or key is ErrNotFound and
+	// writes nothing, a plain key is ErrSecretFixed, a hand-entered value is
+	// ErrNotGenerated (v1.56); ErrKeyExists does not apply.
 	PutEnvKey(ctx context.Context, projectID uuid.UUID, name string, in EnvKeyPut, actor uuid.UUID, at time.Time) (EnvKey, bool, error)
 	// MakeEnvKeysSecret marks plain keys secret in one transaction (api-v1 v1.17).
 	// It locks the set, then the named values, and calls seal with each plain

@@ -439,6 +439,8 @@ type envKeyNamesOnly struct {
 	IsSecret      bool   `json:"is_secret"`
 	RevealPending bool   `json:"reveal_pending"`
 	NeedsValue    bool   `json:"needs_value"`
+	// Generated (api-v1 v1.56): MCP offers the Regenerate link only for it.
+	Generated bool `json:"generated"`
 }
 
 type envSetNamesOnly struct {
@@ -454,7 +456,7 @@ type envSetNamesOnly struct {
 func namesOnly(set store.EnvSet) envSetNamesOnly {
 	out := envSetNamesOnly{Name: set.Name, Keys: make([]envKeyNamesOnly, 0, len(set.Keys)), UpdatedAt: set.UpdatedAt, UpdatedBy: set.UpdatedBy, Entry: set.Entry, UsedBy: set.UsedBy}
 	for _, k := range set.Keys {
-		out.Keys = append(out.Keys, envKeyNamesOnly{Key: k.Key, IsSecret: k.IsSecret, RevealPending: k.RevealPending, NeedsValue: k.NeedsValue})
+		out.Keys = append(out.Keys, envKeyNamesOnly{Key: k.Key, IsSecret: k.IsSecret, RevealPending: k.RevealPending, NeedsValue: k.NeedsValue, Generated: k.Generated})
 	}
 	return out
 }

@@ -818,12 +818,12 @@ SET updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
 `, projectID.String(), name, at, actor.String()); err != nil {
 		return store.EnvKey{}, false, mapErr(err)
 	}
-	var isSecret, needsValue bool
+	var isSecret, needsValue, wasGenerated bool
 	err = tx.QueryRow(ctx, `
-SELECT is_secret, needs_value FROM app.env_values
+SELECT is_secret, needs_value, generated FROM app.env_values
 WHERE project_id = $1::uuid AND set_name = $2 AND key = $3
 FOR UPDATE
-`, projectID.String(), name, in.Key).Scan(&isSecret, &needsValue)
+`, projectID.String(), name, in.Key).Scan(&isSecret, &needsValue, &wasGenerated)
 	created := false
 	if in.Regenerate {
 		// api-v1 v1.54: replace an existing secret value only.
@@ -834,6 +834,10 @@ FOR UPDATE
 			return store.EnvKey{}, false, mapErr(err)
 		case !isSecret:
 			return store.EnvKey{}, false, store.ErrSecretFixed
+		case !wasGenerated && !needsValue:
+			// v1.56: a hand-entered value is never replaced by a random one.
+			// An empty placeholder has no value to lose.
+			return store.EnvKey{}, false, store.ErrNotGenerated
 		}
 	} else if errors.Is(err, pgx.ErrNoRows) {
 		created = true

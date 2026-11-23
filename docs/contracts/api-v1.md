@@ -1391,3 +1391,20 @@ Principle (DD `DEF-20261123-design-principle-privileged-steps-are-do-exut`): no 
    - Failures before the frame is built (a running operation, a bad `${KEY}` reference) still use up the plan.
    - The idempotency key, owner and plan checks are unchanged; a changed entry still answers the v1.42 "Plan again" conflict. Console actions have no plan and get no such sentence. The stored reason and the audit row do not carry it.
 3. **MCP:** `confirm`'s description says a host-refused deploy or rollback keeps the plan. Messages pass through unchanged.
+
+## v1.56 regenerate only a generated value (2026-11-24, Defect Drainer DEF-20261123-regenerate-is-offered-on-hand-entered-se-c0hz and -1fw3, approved by Joe "Yes, file both in DD, then work here"; amends v1.54; additive field, no migration; implemented on bot-control-plane `dev`)
+
+1. **`generated` on env keys.** Every env key object carries `"generated": bool`: on `GET` env sets and the env set list (the delegated names-only reads MCP uses too), a key's `PUT` answer, `private_keys` on `GET /catalog/{name}`, and the regenerate answer. Only a secret can be generated; a plain key is always false. It is true while the stored value is one the API generated (v1.27). A typed write clears it (migration 0017). An older API sends no field, which a client reads as false.
+2. **Regenerate refuses a hand-entered value.** On both regenerate routes (v1.54 item 1), a secret key whose value was entered by hand (not generated, and not an empty `needs_value` placeholder, which Regenerate may still fill) answers `400 bad_request` with `<KEY> was entered by hand, so it cannot be regenerated; edit it to paste a new value`.
+   - Nothing is written and no `env_set.key_regenerate` is audited.
+   - A random value would destroy a provider-issued secret (an API key). Change such a value with the key PUT (Edit).
+   - Order of checks: a missing set or key is `not_found`; a plain key is the v1.54 "not secret" answer; a hand-entered one is this answer (`store.ErrNotGenerated`).
+3. **Console** (amends v1.54 item 6):
+   - **Where Regenerate shows:** only on a secret key with `generated` true. A hand-entered secret keeps Edit and Delete.
+   - **The confirm text** leads with the consequence: "Nothing changes in running services until you redeploy <used_by>.", then warns: "If this value was also set somewhere else (a database user, a first-start setting), change it there too, or the app will fail after the redeploy."
+   - **The line under the new value:** "Redeploy <used_by> now to use the new value; until then they keep the old one."
+4. **MCP** (amends v1.54 item 7):
+   - `list_env_sets` keys carry `generated`.
+   - The Regenerate `console_url` is given only for a generated value; a hand-entered secret gets no link.
+   - The tool description says nothing redeploys, and that a value also set elsewhere must be changed there too.
+

@@ -33,6 +33,7 @@ type regenerateAnswer struct {
 	IsSecret      bool     `json:"is_secret"`
 	Preview       *string  `json:"preview"`
 	RevealPending bool     `json:"reveal_pending"`
+	Generated     bool     `json:"generated"`
 	UsedBy        []string `json:"used_by"`
 }
 
@@ -121,6 +122,9 @@ func (s *Server) regenerateKey(w http.ResponseWriter, r *http.Request, p princip
 	case errors.Is(err, store.ErrSecretFixed):
 		writeCode(w, "bad_request", fmt.Sprintf("%s is not secret; edit it to change it", key))
 		return
+	case errors.Is(err, store.ErrNotGenerated):
+		writeCode(w, "bad_request", fmt.Sprintf("%s was entered by hand, so it cannot be regenerated; edit it to paste a new value", key))
+		return
 	case errors.Is(err, store.ErrNotFound):
 		writeCode(w, "not_found", "not found")
 		return
@@ -146,6 +150,7 @@ func (s *Server) regenerateKey(w http.ResponseWriter, r *http.Request, p princip
 		IsSecret:      true,
 		Preview:       item.Preview,
 		RevealPending: stored.RevealPending,
+		Generated:     stored.Generated,
 		UsedBy:        usedBy,
 	})
 }

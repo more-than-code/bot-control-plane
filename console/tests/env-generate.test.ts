@@ -47,7 +47,7 @@ function decode(value: string): string {
 const SET: EnvSet = {
 	name: 'app',
 	keys: [
-		{ key: 'DB_PASSWORD', is_secret: true, value: null, preview: 'Ab…', reveal_pending: true, needs_value: false },
+		{ key: 'DB_PASSWORD', is_secret: true, value: null, preview: 'Ab…', reveal_pending: true, needs_value: false, generated: true },
 		{ key: 'API_TOKEN', is_secret: true, value: null, preview: 'su…', reveal_pending: false, needs_value: false },
 		{ key: 'LOG_LEVEL', is_secret: false, value: 'debug', preview: null, reveal_pending: false, needs_value: false }
 	],
@@ -261,15 +261,19 @@ describe('reveal once (api-v1 v1.27 item 3)', () => {
 
 describe('env row actions', () => {
 	test('secret row actions are Edit, Reveal once (only while pending), Regenerate (api-v1 v1.54) and Delete', () => {
-		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: true }), { revealOnce: true, regenerate: true });
-		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false }), { revealOnce: false, regenerate: true });
+		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: true, generated: true }), { revealOnce: true, regenerate: true });
+		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false, generated: true }), { revealOnce: false, regenerate: true });
+		// v1.56: a hand-entered secret (or an older API without the flag) has no Regenerate.
+		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false, generated: false }), { revealOnce: false, regenerate: false });
+		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false }), { revealOnce: false, regenerate: false });
 		assert.deepEqual(envRowActions({ is_secret: true, reveal_pending: false, needs_value: true }), { revealOnce: false, regenerate: false });
 		assert.deepEqual(envRowActions({ is_secret: false, reveal_pending: true }), { revealOnce: false, regenerate: false });
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
 		const html = decode(render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS, regenerateAction: '?/regenerateEnvKey' } }).body);
 		const rowLabels = (key: string) => [...html.matchAll(new RegExp(`aria-label="([^"]*${key}[^"]*)"`, 'g'))].map((m) => m[1]);
 		assert.deepEqual(rowLabels('DB_PASSWORD'), ['Edit DB_PASSWORD', 'Reveal DB_PASSWORD once', 'Regenerate DB_PASSWORD', 'Delete DB_PASSWORD']);
-		assert.deepEqual(rowLabels('API_TOKEN'), ['Edit API_TOKEN', 'Regenerate API_TOKEN', 'Delete API_TOKEN']);
+		// v1.56: API_TOKEN was entered by hand, so it is changed with Edit, never regenerated.
+		assert.deepEqual(rowLabels('API_TOKEN'), ['Edit API_TOKEN', 'Delete API_TOKEN']);
 		assert.equal(rowLabels('LOG_LEVEL').includes('Regenerate LOG_LEVEL'), false);
 		// Without the action (an older caller) there is no Regenerate.
 		const without = decode(render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body);
@@ -304,7 +308,10 @@ describe('env row actions', () => {
 			items: [{ name: 'app', keys: [{ key: 'A', is_secret: true, value: null, preview: null, reveal_pending: true, needs_value: true }], updated_at: '2026-10-28T10:00:00Z', updated_by: USER.id }],
 			next_cursor: null
 		});
-		assert.deepEqual(list?.items[0]?.keys[0], { key: 'A', is_secret: true, value: null, preview: null, reveal_pending: true, needs_value: true });
+		assert.deepEqual(list?.items[0]?.keys[0], { key: 'A', is_secret: true, value: null, preview: null, reveal_pending: true, needs_value: true, generated: false });
+		// v1.56: generated is read when present; a non-boolean drops the set.
+		assert.equal(set([{ key: 'A', is_secret: true, value: null, preview: null, generated: true }])?.keys[0]?.generated, true);
+		assert.equal(set([{ key: 'A', is_secret: true, value: null, preview: null, generated: 'yes' }]), null);
 	});
 });
 

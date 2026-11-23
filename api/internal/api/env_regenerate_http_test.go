@@ -60,7 +60,7 @@ func TestEnvKeyRegenerate(t *testing.T) {
 	status, env, raw := mustCall(t, w, w.token(admin.ID), http.MethodPost, regeneratePath(project, "svc", "PW"), `{"generate":{"kind":"hex"}}`)
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	body := objectPayload(t, env)
-	if body["key"] != "PW" || body["is_secret"] != true || body["preview"] != bullets || body["reveal_pending"] != true {
+	if body["key"] != "PW" || body["is_secret"] != true || body["preview"] != bullets || body["reveal_pending"] != true || body["generated"] != true {
 		t.Fatalf("regenerate %s", raw)
 	}
 	used, _ := body["used_by"].([]any)
@@ -74,12 +74,37 @@ func TestEnvKeyRegenerate(t *testing.T) {
 	status, env, _ = mustCall(t, w, tok, http.MethodPost, revealPath(project, "svc", "PW"), "")
 	mustHTTP(t, status, env, http.StatusConflict, "conflict", revealConflictMsg("PW"))
 
-	// A typed secret can be rotated too.
+	// v1.56: a typed (hand-entered) secret is never regenerated: a random
+	// value would destroy a provider's key. It stays as it was.
 	status, env, _ = mustCall(t, w, tok, http.MethodPost, regeneratePath(project, "svc", "TYPED"), `{"generate":{"kind":"password","length":20}}`)
-	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	if v := reveal(t, w, tok, project, "svc", "TYPED"); len(v) != 20 {
-		t.Fatalf("typed rotate length %d", len(v))
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "TYPED was entered by hand, so it cannot be regenerated; edit it to paste a new value")
+	set, err := w.mem.GetEnvSet(t.Context(), sc.project.ID, "svc")
+	if err != nil {
+		t.Fatal(err)
 	}
+	for _, k := range set.Keys {
+		if k.Key == "TYPED" && (k.Generated || k.RevealPending || !k.IsSecret) {
+			t.Fatalf("typed key changed: %+v", k)
+		}
+		if k.Key == "PW" && !k.Generated {
+			t.Fatalf("generated key lost its flag: %+v", k)
+		}
+	}
+
+	// v1.56: the key PUT answer says whether the value is generated, and a
+	// typed edit of a generated key clears it, so it is no longer regenerable.
+	status, env, _ = mustCall(t, w, tok, http.MethodPut, envKeyPath(project, "svc", "GEN2"), `{"generate":{"kind":"hex"}}`)
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if objectPayload(t, env)["generated"] != true {
+		t.Fatalf("generate PUT answer %v", objectPayload(t, env))
+	}
+	status, env, _ = mustCall(t, w, tok, http.MethodPut, envKeyPath(project, "svc", "GEN2"), `{"value":"typed-over-generated-0123"}`)
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if objectPayload(t, env)["generated"] != false {
+		t.Fatalf("typed PUT answer %v", objectPayload(t, env))
+	}
+	status, env, _ = mustCall(t, w, tok, http.MethodPost, regeneratePath(project, "svc", "GEN2"), `{"generate":{"kind":"hex"}}`)
+	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "GEN2 was entered by hand, so it cannot be regenerated; edit it to paste a new value")
 
 	rows := 0
 	for _, a := range w.mem.AllAudits() {
@@ -95,7 +120,7 @@ func TestEnvKeyRegenerate(t *testing.T) {
 			t.Fatalf("audit detail %s", detail)
 		}
 	}
-	if rows != 2 {
+	if rows != 1 {
 		t.Fatalf("regenerate audits %d", rows)
 	}
 }

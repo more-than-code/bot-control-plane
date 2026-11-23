@@ -230,6 +230,9 @@ type privateKeyView struct {
 	IsSecret      bool   `json:"is_secret"`
 	NeedsValue    bool   `json:"needs_value"`
 	RevealPending bool   `json:"reveal_pending"`
+	// Generated (api-v1 v1.56): the value is one the API generated, so the
+	// console may offer Regenerate.
+	Generated bool `json:"generated"`
 }
 
 // privateKeys reads the entry's private set. A missing set is an empty list.
@@ -243,7 +246,7 @@ func (s *Server) privateKeys(ctx context.Context, projectID uuid.UUID, entry str
 		return nil, err
 	}
 	for _, k := range set.Keys {
-		out = append(out, privateKeyView{Key: k.Key, IsSecret: k.IsSecret, NeedsValue: k.NeedsValue, RevealPending: k.RevealPending})
+		out = append(out, privateKeyView{Key: k.Key, IsSecret: k.IsSecret, NeedsValue: k.NeedsValue, RevealPending: k.RevealPending, Generated: k.Generated})
 	}
 	return out, nil
 }

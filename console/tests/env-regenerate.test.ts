@@ -25,12 +25,13 @@ function source(path: string): string {
 
 describe('regenerate text', () => {
 	test('the confirm names the entries that keep the old value', () => {
-		assert.match(regenerateMessage('PW', ['web', 'api', 'worker']), /web, api and worker keep the old value until redeployed\.$/);
-		assert.match(regenerateMessage('PW', ['web']), /web keeps the old value until redeployed\.$/);
+		assert.match(regenerateMessage('PW', ['web', 'api', 'worker']), /Nothing changes in running services until you redeploy web, api and worker\. If this value was also set somewhere else/);
+		assert.match(regenerateMessage('PW', ['web']), /until you redeploy web\. /);
+		assert.match(regenerateMessage('PW', ['web']), /change it there too, or the app will fail after the redeploy\.$/);
 		assert.match(regenerateMessage('PW', []), /No catalog entry uses it\.$/);
-		assert.match(regenerateMessage('PW', undefined), /Entries that use it keep the old value until they are redeployed\.$/);
+		assert.match(regenerateMessage('PW', undefined), /Nothing changes in running services until you redeploy the entries that use it\. If this value/);
 		assert.match(regenerateMessage('PW', []), /^Make a new value for PW\? The current value is replaced now and cannot be shown again\./);
-		assert.equal(redeployNote(['web', 'api']), 'Redeploy web and api to use the new value.');
+		assert.equal(redeployNote(['web', 'api']), 'Redeploy web and api now to use the new value; until then they keep the old one.');
 		assert.equal(redeployNote([]), '');
 	});
 

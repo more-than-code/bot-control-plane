@@ -25,3 +25,14 @@ Store: `EnvKeyPut.Regenerate` makes `PutEnvKey` accept an existing secret key on
 ## MCP
 
 - No regenerate tool. `list_env_sets` gains `console_url` on each secret key with a value: the Reveal once link while `reveal_pending`, else the Regenerate link; a private set's key links to its entry (`?tab=catalog&catalog.q=<entry>`). Empty without `BOT_MCP_CONSOLE_ORIGIN`. The summary counts values not shown yet.
+
+## Amendment v1.56 (2026-11-24, Joe: "Yes, file both in DD, then work here")
+
+Rev 1 offered Regenerate on every secret key with a value, including a value the person typed (for example ANTHROPIC_API_KEY). For such a key a random value destroys the real secret: the old value cannot be shown again, and the integration breaks at the next deploy. From v1.56:
+- Regenerate works only on a value the API generated (`generated`, which is now sent on every env key).
+- The API refuses a hand-entered one (`bad_request`, nothing written).
+- The console and MCP offer it only for generated values.
+- The confirm text says nothing changes until the `used_by` entries are redeployed, and warns that a value also set elsewhere (a database user, a first-start setting such as a seed password or `POSTGRES_PASSWORD`) must be changed there too.
+- The contract is api-v1 v1.56 in `docs/contracts/api-v1.md`.
+- "Regenerate and redeploy" in one step is a later feature.
+

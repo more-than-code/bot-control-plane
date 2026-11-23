@@ -87,10 +87,14 @@ export function revealAnswer(result: { type: string; data?: unknown }, key: stri
 
 /**
  * Reveal once is offered on a secret key only while the API says its generated value is pending. Regenerate
- * (api-v1 v1.54) is offered on every secret key that has a value: a lost generated value, or a secret to rotate.
+ * (api-v1 v1.54) is offered only on a secret key whose value Deploybot generated (api-v1 v1.56): a value the person
+ * entered by hand, such as a provider's API key, is changed with Edit, since a random value would destroy it.
  */
-export function envRowActions(item: { is_secret: boolean; reveal_pending: boolean; needs_value?: boolean }): { revealOnce: boolean; regenerate: boolean } {
-	return { revealOnce: item.is_secret && item.reveal_pending, regenerate: item.is_secret && item.needs_value !== true };
+export function envRowActions(item: { is_secret: boolean; reveal_pending: boolean; needs_value?: boolean; generated?: boolean }): { revealOnce: boolean; regenerate: boolean } {
+	return {
+		revealOnce: item.is_secret && item.reveal_pending,
+		regenerate: item.is_secret && item.needs_value !== true && item.generated === true
+	};
 }
 
 /** A list of names as prose: "a", "a and b", "a, b and c". */
@@ -105,15 +109,16 @@ function names(list: readonly string[]): string {
  */
 export function regenerateMessage(key: string, usedBy: readonly string[] | undefined): string {
 	const head = `Make a new value for ${key}? The current value is replaced now and cannot be shown again.`;
-	if (usedBy === undefined) return `${head} Entries that use it keep the old value until they are redeployed.`;
+	// v1.56: a value also set somewhere else at first start (a database user, a seed) does not follow.
+	const elsewhere = 'If this value was also set somewhere else (a database user, a first-start setting), change it there too, or the app will fail after the redeploy.';
+	if (usedBy === undefined) return `${head} Nothing changes in running services until you redeploy the entries that use it. ${elsewhere}`;
 	if (usedBy.length === 0) return `${head} No catalog entry uses it.`;
-	const verb = usedBy.length === 1 ? 'keeps' : 'keep';
-	return `${head} ${names(usedBy)} ${verb} the old value until redeployed.`;
+	return `${head} Nothing changes in running services until you redeploy ${names(usedBy)}. ${elsewhere}`;
 }
 
-/** The line under a regenerated value: which entries to redeploy, or nothing when none use it. */
+/** The line under a regenerated value: which entries to redeploy now, or nothing when none use it. */
 export function redeployNote(usedBy: readonly string[]): string {
-	return usedBy.length === 0 ? '' : `Redeploy ${names(usedBy)} to use the new value.`;
+	return usedBy.length === 0 ? '' : `Redeploy ${names(usedBy)} now to use the new value; until then they keep the old one.`;
 }
 
 /** A regenerate whose answer was lost may have made a new value: the row shows Reveal once if so. */

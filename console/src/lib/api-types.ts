@@ -482,6 +482,8 @@ export type EnvSetKey = {
 	reveal_pending: boolean;
 	/** A placeholder with no value yet (api-v1 v1.27). Missing on an older API is false. */
 	needs_value: boolean;
+	/** The value is one Deploybot generated, so it can be regenerated (api-v1 v1.56). Missing on an older API is false. */
+	generated?: boolean;
 };
 
 export type EnvSet = {

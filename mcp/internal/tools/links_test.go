@@ -148,15 +148,17 @@ func TestPlaceholderStep(t *testing.T) {
 }
 
 // list_env_sets: a secret key with a value links to its console button,
-// Reveal once while pending, else Regenerate; a private key links to its
-// entry; plain keys and placeholders get none (api-v1 v1.54).
+// Reveal once while pending, else Regenerate for a generated value only
+// (v1.56); a private key links to its entry; plain keys, placeholders and
+// hand-entered secrets get none (api-v1 v1.54).
 func TestEnvKeyLinks(t *testing.T) {
 	sets := []envSetView{
 		{Name: "mos-dev-secrets", Keys: []envSetKeyView{
-			{Key: "MOS_SEED_PASSWORD", IsSecret: true},
-			{Key: "NEW_TOKEN", IsSecret: true, RevealPending: true},
+			{Key: "MOS_SEED_PASSWORD", IsSecret: true, Generated: true},
+			{Key: "NEW_TOKEN", IsSecret: true, RevealPending: true, Generated: true},
 			{Key: "HOST", IsSecret: false},
 			{Key: "LATER", IsSecret: true, NeedsValue: true},
+			{Key: "ANTHROPIC_API_KEY", IsSecret: true},
 		}},
 		{Name: "@web", Entry: "web", Keys: []envSetKeyView{{Key: "KEY", IsSecret: true}}},
 	}
@@ -169,8 +171,8 @@ func TestEnvKeyLinks(t *testing.T) {
 	if keys[1].ConsoleURL != base+"env.do=reveal&env.key=NEW_TOKEN&env.set=mos-dev-secrets&tab=settings#env-sets" {
 		t.Fatalf("reveal %q", keys[1].ConsoleURL)
 	}
-	if keys[2].ConsoleURL != "" || keys[3].ConsoleURL != "" {
-		t.Fatalf("plain or placeholder got a link: %+v", keys)
+	if keys[2].ConsoleURL != "" || keys[3].ConsoleURL != "" || keys[4].ConsoleURL != "" {
+		t.Fatalf("plain, placeholder or hand-entered secret got a link: %+v", keys)
 	}
 	if sets[1].Keys[0].ConsoleURL != base+"tab=catalog&catalog.q=web" {
 		t.Fatalf("private %q", sets[1].Keys[0].ConsoleURL)
