@@ -365,7 +365,7 @@ func (d *DB) ReopenConfirmation(ctx context.Context, hash []byte, userID uuid.UU
 	err := d.pool.QueryRow(ctx, `
 UPDATE app.catalog_confirmations
 SET used_at = NULL, expires_at = GREATEST(expires_at, $4)
-WHERE token_hash = $1 AND user_id = $2::uuid AND used_at IS NOT NULL AND expires_at > $3
+WHERE token_hash = $1 AND user_id = $2::uuid AND used_at IS NOT NULL AND used_at <= $3
 RETURNING expires_at
 `, hash, userID.String(), at, until).Scan(&expires)
 	if err != nil {

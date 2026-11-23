@@ -36,12 +36,12 @@ const (
 	// unsupported_agent) for network "host" on a host without
 	// programs.host_network.
 	reasonNoHostNetwork = "this host does not allow host networking (runner.toml host_network_projects)"
-	// msgMayStillFinish is the 503 for a deploy or rollback whose frame
-	// reached the host before the connection dropped (api-v1 v1.50 item 8).
 	// msgPlanKept is added to a deploy or rollback refusal when its
 	// confirmation was reopened (api-v1 v1.55 item 2). It takes the
 	// plan's expiry as HH:MM UTC.
-	msgPlanKept        = ". Nothing ran on the host, so this plan is kept: after fixing the cause, confirm it again with the same confirmation_id and idempotency_key until %s UTC. A change to the entry needs a new plan"
+	msgPlanKept = ". Nothing ran on the host, so this plan is kept: after fixing the cause outside the entry (for example upgrade_agent, the host's runner.toml or an env set), confirm it again with the same confirmation_id and idempotency_key until %s UTC. A change to the entry itself needs a new plan"
+	// msgMayStillFinish is the 503 for a deploy or rollback whose frame
+	// reached the host before the connection dropped (api-v1 v1.50 item 8).
 	msgMayStillFinish  = "host unavailable; the host may still finish this deploy. It shows as running until its ends_by time; check the deploy history"
 	invalidAgentResult = "invalid agent result"
 	settleTimeout      = 5 * time.Second
@@ -595,7 +595,9 @@ func (s *Server) performImage(w http.ResponseWriter, r *http.Request, p principa
 				if err == nil {
 					ackStored()
 				}
-				if plan != nil {
+				// Only a written refused row frees the entry for a retry;
+				// otherwise it stays in flight until the sweep.
+				if plan != nil && err == nil {
 					if kept := s.reopenPlan(plan, p.User.ID); kept != "" {
 						got.msg = strings.TrimRight(got.msg, ".") + kept
 					}

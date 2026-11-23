@@ -362,7 +362,7 @@ func (m *Mem) ReopenConfirmation(_ context.Context, hash []byte, userID uuid.UUI
 	defer m.mu.Unlock()
 	key := hashKey(hash)
 	rec, ok := m.confirmations[key]
-	if !ok || !secret.Equal(hash, rec.hash) || rec.row.UserID != userID || rec.row.UsedAt == nil || !rec.row.ExpiresAt.After(at) {
+	if !ok || !secret.Equal(hash, rec.hash) || rec.row.UserID != userID || rec.row.UsedAt == nil || rec.row.UsedAt.After(at) {
 		return time.Time{}, store.ErrNotFound
 	}
 	rec.row.UsedAt = nil

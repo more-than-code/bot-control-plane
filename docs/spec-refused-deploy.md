@@ -38,7 +38,12 @@ on both on 2026-11-23.
    when the frame may have reached the host), the confirmation's `used_at`
    is cleared and its `expires_at` becomes at least now + 5 minutes
    (`ConfirmationTTL`). The answer adds
-   `. Nothing ran on the host, so this plan is kept: after fixing the cause, confirm it again with the same confirmation_id and idempotency_key until HH:MM UTC. A change to the entry needs a new plan`.
+   `. Nothing ran on the host, so this plan is kept: after fixing the cause outside the entry (for example upgrade_agent, the host's runner.toml or an env set), confirm it again with the same confirmation_id and idempotency_key until HH:MM UTC. A change to the entry itself needs a new plan`.
+   This holds even when the plan's own 5 minutes ran out while the host was
+   asked. It happens only when the refused row was written; if that write
+   failed, the row stays in flight for the sweep and the plan stays used.
+   Failures before the frame is built (a running operation, a bad `${KEY}`
+   reference) still use up the plan, as before.
    The idempotency key, owner and plan checks are unchanged; a changed entry
    still answers the v1.42 "Plan again" conflict. Console actions have no
    plan and get no such sentence. The stored reason and the audit row do not
