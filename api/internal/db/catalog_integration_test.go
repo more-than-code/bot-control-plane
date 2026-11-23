@@ -161,6 +161,16 @@ func assertCatalog(t *testing.T, d *DB, ctx context.Context, at time.Time) {
 	if err := d.MarkConfirmationUsed(ctx, tokenHash, owner.ID, at.Add(2*time.Minute)); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("second use %v", err)
 	}
+	// api-v1 v1.55 item 2: a refused deploy reopens the plan and extends it.
+	if _, err := d.ReopenConfirmation(ctx, tokenHash, uuid.New(), at.Add(2*time.Minute), at.Add(time.Hour)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("reopen by another user %v", err)
+	}
+	if exp, err := d.ReopenConfirmation(ctx, tokenHash, owner.ID, at.Add(2*time.Minute), at.Add(time.Hour)); err != nil || exp.Sub(at.Add(time.Hour)).Abs() > time.Millisecond {
+		t.Fatalf("reopen %v %v", exp, err)
+	}
+	if err := d.MarkConfirmationUsed(ctx, tokenHash, owner.ID, at.Add(3*time.Minute)); err != nil {
+		t.Fatalf("use after reopen %v", err)
+	}
 	expiredHash := bytes32(3)
 	conf.ExpiresAt = at
 	conf.IdempotencyKey = "cat-expired"

@@ -357,6 +357,22 @@ func (m *Mem) MarkConfirmationUsed(_ context.Context, hash []byte, userID uuid.U
 	return nil
 }
 
+func (m *Mem) ReopenConfirmation(_ context.Context, hash []byte, userID uuid.UUID, at, until time.Time) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := hashKey(hash)
+	rec, ok := m.confirmations[key]
+	if !ok || !secret.Equal(hash, rec.hash) || rec.row.UserID != userID || rec.row.UsedAt == nil || !rec.row.ExpiresAt.After(at) {
+		return time.Time{}, store.ErrNotFound
+	}
+	rec.row.UsedAt = nil
+	if until.After(rec.row.ExpiresAt) {
+		rec.row.ExpiresAt = until
+	}
+	m.confirmations[key] = rec
+	return rec.row.ExpiresAt, nil
+}
+
 func (m *Mem) GetIdempotency(_ context.Context, userID uuid.UUID, key string, at time.Time) (store.IdempotencyRecord, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

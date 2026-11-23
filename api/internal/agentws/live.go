@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/coder/websocket"
@@ -30,6 +31,9 @@ type CallError struct {
 	// (failed or timed_out), which a v1.21 agent keeps until
 	// task_result_ack (api-v1 v1.50 item 9).
 	FromResult bool
+	// Field is the key a task_reject bad_spec names (agent-protocol
+	// v1.23), checked by RejectField; "" when the agent sent none.
+	Field string
 }
 
 func (e *CallError) Error() string {
@@ -368,11 +372,26 @@ func (h *Hub) onTaskReject(ac *agentConn, f frame) {
 	agent := jsonString(f.ErrorCode)
 	code, msg := rejectCode(agent)
 	ce := &CallError{Code: code, Msg: msg, Agent: agent}
+	if agent == "bad_spec" {
+		ce.Field = RejectField(jsonString(f.Field))
+	}
 	if len(f.Payload) > 0 {
 		// Only the edge reads it (its refusal detail).
 		ce.Payload = taskPayload(f.Payload)
 	}
 	h.deliver(id, taskOut{err: ce}, ac)
+}
+
+// rejectFieldRe is the agent-protocol v1.23 task_reject field shape: up to
+// three dot-separated key names, never a value.
+var rejectFieldRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}(\.[a-z][a-z0-9_]{0,31}){0,2}$`)
+
+// RejectField returns s when it is a valid task_reject field, else "".
+func RejectField(s string) string {
+	if len(s) > 64 || !rejectFieldRe.MatchString(s) {
+		return ""
+	}
+	return s
 }
 
 func rejectCode(code string) (string, string) {

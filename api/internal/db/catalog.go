@@ -360,6 +360,20 @@ WHERE token_hash = $1 AND user_id = $2::uuid AND used_at IS NULL AND expires_at 
 	return nil
 }
 
+func (d *DB) ReopenConfirmation(ctx context.Context, hash []byte, userID uuid.UUID, at, until time.Time) (time.Time, error) {
+	var expires time.Time
+	err := d.pool.QueryRow(ctx, `
+UPDATE app.catalog_confirmations
+SET used_at = NULL, expires_at = GREATEST(expires_at, $4)
+WHERE token_hash = $1 AND user_id = $2::uuid AND used_at IS NOT NULL AND expires_at > $3
+RETURNING expires_at
+`, hash, userID.String(), at, until).Scan(&expires)
+	if err != nil {
+		return time.Time{}, mapErr(err)
+	}
+	return expires, nil
+}
+
 func (d *DB) GetIdempotency(ctx context.Context, userID uuid.UUID, key string, at time.Time) (store.IdempotencyRecord, error) {
 	rec, err := scanIdempotency(d.pool.QueryRow(ctx, `
 SELECT request_hash, status_code, response, created_at
