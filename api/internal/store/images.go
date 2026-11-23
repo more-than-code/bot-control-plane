@@ -143,6 +143,9 @@ type EnvKey struct {
 // Nonce and Ciphertext seal Plain when the stored flag is secret.
 // Generated marks an API-generated value: a secret key is stored with
 // reveal_pending and generated true. Any other write stores both false.
+// Regenerate (api-v1 v1.52) replaces the value of an existing secret key
+// with a generated one: the key must exist (else ErrNotFound) and be
+// secret (else ErrSecretFixed); it never creates the set or the key.
 type EnvKeyPut struct {
 	Key        string
 	Plain      string
@@ -151,6 +154,7 @@ type EnvKeyPut struct {
 	Ciphertext []byte
 	KeyVersion int
 	Generated  bool
+	Regenerate bool
 }
 
 // EnvSet is one project env set.

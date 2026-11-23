@@ -310,6 +310,7 @@ WHERE id = $1::uuid
 	assertEnvMakeSecret(t, d, ctx, at)
 	assertProgramSecrets(t, d, ctx, at)
 	assertEnvGenerate(t, d, ctx, at)
+	assertEnvRegenerate(t, d, ctx, at)
 }
 
 func enrollHostDB(t *testing.T, d *DB, ctx context.Context, projectID, ownerID uuid.UUID, name string, at time.Time) store.Host {

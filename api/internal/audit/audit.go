@@ -76,9 +76,12 @@ const (
 	ActionEnvSetKeyDelete          = "env_set.key_delete"
 	ActionEnvSetKeySecret          = "env_set.key_secret"
 	ActionEnvSetKeyReveal          = "env_set.key_reveal"
-	ActionEnvSetCreate             = "env_set.create"
-	ActionEnvSetWriteConfirmation  = "env_set.write_confirmation_issued"
-	ActionEnvSetDelete             = "env_set.delete"
+	// ActionEnvSetKeyRegenerate replaces a secret value with a generated
+	// one (api-v1 v1.52); detail set, key, kind and used_by, never a value.
+	ActionEnvSetKeyRegenerate     = "env_set.key_regenerate"
+	ActionEnvSetCreate            = "env_set.create"
+	ActionEnvSetWriteConfirmation = "env_set.write_confirmation_issued"
+	ActionEnvSetDelete            = "env_set.delete"
 	// ActionEnvSetUpdate is a confirmed update_env_set plan (api-v1 v1.33
 	// item 1). Detail names keys per action, never a value.
 	ActionEnvSetUpdate = "env_set.update"

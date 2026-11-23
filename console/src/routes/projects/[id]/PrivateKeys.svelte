@@ -2,9 +2,12 @@
 	import { page } from '$app/state';
 	import { actionUrlFrom } from '$lib/url';
 	import Eye from '@lucide/svelte/icons/eye';
+	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import { tick } from 'svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import { afterPrivateReveal, privateKeyNotes, privateKeysFolded, type PrivateKey } from '$lib/private-keys';
+	import { envRowActions } from '$lib/env-generate';
+	import EnvRegenerateDialog from './EnvRegenerateDialog.svelte';
 	import EnvRevealDialog from './EnvRevealDialog.svelte';
 	import FieldsPost from './FieldsPost.svelte';
 
@@ -17,6 +20,15 @@
 
 	const action = $derived(actionUrlFrom(page.url, 'catalogPrivateKeys'));
 	const revealAction = $derived(actionUrlFrom(page.url, 'revealPrivateKey'));
+	const regenerateAction = $derived(actionUrlFrom(page.url, 'regeneratePrivateKey'));
+	// Regenerate (api-v1 v1.52): a private key belongs to this entry only, so only this entry needs a redeploy.
+	let regenKey = $state<string | null>(null);
+	async function afterRegenerate(key: string, changed: boolean) {
+		regenKey = null;
+		if (changed) post?.send({ entry });
+		await tick();
+		document.getElementById(`${sectionId}-row-${key}`)?.focus();
+	}
 	const canAdmin = $derived(page.data.canAdmin === true);
 	// Show once (api-v1 v1.33): the value lives only in the dialog while it is open, as for an env-set key.
 	let revealKey = $state<string | null>(null);
@@ -86,6 +98,9 @@
 				{#if row.reveal_pending && row.is_secret && canAdmin}
 					<RowAction label="Reveal {row.key} once" icon={Eye} onclick={() => showOnce(row.key)} />
 				{/if}
+				{#if envRowActions(row).regenerate && canAdmin}
+					<RowAction label="Regenerate {row.key}" icon={RotateCcw} onclick={() => (regenKey = row.key)} />
+				{/if}
 			</li>
 		{/each}
 	</ul>
@@ -93,4 +108,5 @@
 
 {#if canAdmin}
 	<EnvRevealDialog setName="@{entry}" {revealKey} action={revealAction} onClose={afterReveal} />
+	<EnvRegenerateDialog setName="@{entry}" {regenKey} usedBy={[entry]} action={regenerateAction} onClose={afterRegenerate} />
 {/if}

@@ -180,7 +180,7 @@ const listEnvSetsSchema = `{
 func registerListEnvSets(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "list_env_sets",
-		Description: "List a project's env sets as key names and flags: is_secret, needs_value (a placeholder the user must still fill in the console; a deploy that uses it is refused), and reveal_pending (a generated value the user has not viewed yet). Each set has used_by, the catalog entries that name it in env_sets or secret_env. A set named @<entry> with an entry field is that entry's private set: secrets only it uses, named in its secret_env as @<entry>.KEY; change them through the entry (update_catalog_entry, request_env_value with entry). Never returns a value or a preview, even for plain keys. Needs project owner or admin. Reads stored API data. Does not contact any host.",
+		Description: "List a project's env sets as key names and flags: is_secret, needs_value (a placeholder the user must still fill in the console; a deploy that uses it is refused), and reveal_pending (a generated value the user has not viewed yet). Each set has used_by, the catalog entries that name it in env_sets or secret_env. A set named @<entry> with an entry field is that entry's private set: secrets only it uses, named in its secret_env as @<entry>.KEY; change them through the entry (update_catalog_entry, request_env_value with entry). Never returns a value or a preview, even for plain keys. Each secret key with a value has console_url: the console button that shows a pending generated value once, or, when the person lost a value, the Regenerate button that makes a new one (running copies keep the old value until redeployed). Revealing and regenerating are the person's steps; there is no tool for them. " + linkRule + " Needs project owner or admin. Reads stored API data. Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(listEnvSetsSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -206,8 +206,10 @@ func registerListEnvSets(server *mcp.Server, api *apiclient.Client) {
 			if err != nil {
 				return toolError("error", errEnvSetShape.Error())
 			}
-			out, _ := json.Marshal(map[string]any{"items": []envSetView{set}})
-			return present(out, summarizeEnvSets([]envSetView{set}))
+			sets := []envSetView{set}
+			withEnvLinks(api, in.ProjectID, sets)
+			out, _ := json.Marshal(map[string]any{"items": sets})
+			return present(out, summarizeEnvSets(sets))
 		}
 		// api-v1 v1.33 item 6: entry-private sets are listed too, with entry.
 		q := url.Values{}
@@ -230,6 +232,7 @@ func registerListEnvSets(server *mcp.Server, api *apiclient.Client) {
 			}
 			sets = append(sets, set)
 		}
+		withEnvLinks(api, in.ProjectID, sets)
 		out, _ := json.Marshal(map[string]any{"items": sets})
 		return present(out, summarizeEnvSets(sets))
 	})
@@ -261,6 +264,28 @@ type envSetKeyView struct {
 	IsSecret      bool   `json:"is_secret"`
 	NeedsValue    bool   `json:"needs_value"`
 	RevealPending bool   `json:"reveal_pending"`
+	// ConsoleURL (api-v1 v1.52) is set on a secret key that has a value:
+	// the console row's Reveal once button while reveal_pending, else its
+	// Regenerate button. The agent never reveals or regenerates.
+	ConsoleURL string `json:"console_url,omitempty"`
+}
+
+// withEnvLinks sets console_url on each secret key with a value. A private
+// set's key links to its entry, where the private keys are.
+func withEnvLinks(api *apiclient.Client, projectID string, sets []envSetView) {
+	for i := range sets {
+		for j := range sets[i].Keys {
+			k := &sets[i].Keys[j]
+			if !k.IsSecret || k.NeedsValue {
+				continue
+			}
+			if sets[i].Entry != "" {
+				k.ConsoleURL = entryURL(api, projectID, sets[i].Entry)
+				continue
+			}
+			k.ConsoleURL = envKeyURL(api, projectID, sets[i].Name, k.Key, k.RevealPending)
+		}
+	}
 }
 
 func projectEnvSet(raw json.RawMessage) (envSetView, error) {
@@ -300,11 +325,14 @@ func summarizeEnvSets(sets []envSetView) string {
 	if len(sets) == 0 {
 		return "0 env sets."
 	}
-	needs := 0
+	needs, pending := 0, 0
 	for _, s := range sets {
 		for _, k := range s.Keys {
 			if k.NeedsValue {
 				needs++
+			}
+			if k.RevealPending {
+				pending++
 			}
 		}
 	}
@@ -325,6 +353,12 @@ func summarizeEnvSets(sets []envSetView) string {
 		text += " 1 key still needs a value in the console."
 	case needs > 1:
 		text += fmt.Sprintf(" %d keys still need a value in the console.", needs)
+	}
+	switch {
+	case pending == 1:
+		text += " 1 generated value has not been shown yet; its console_url opens Reveal once."
+	case pending > 1:
+		text += fmt.Sprintf(" %d generated values have not been shown yet; each key's console_url opens Reveal once.", pending)
 	}
 	return text
 }
