@@ -205,7 +205,7 @@ func envSetUpdated(payload json.RawMessage) *mcp.CallToolResult {
 		return toolError("error", errEnvSetShape.Error())
 	}
 	out, _ := json.Marshal(set)
-	return present(out, fmt.Sprintf("updated env set %s; it has %s. Generated values are revealed once, only by the person: list_env_sets gives the link to send them. Fill placeholders with request_env_value.", set.Name, countKeys(len(set.Keys))))
+	return present(out, fmt.Sprintf("updated env set %s; it has %s. Generated values are revealed once, only by the person: list_env_sets gives each key's link to send them. Fill placeholders with request_env_value.", set.Name, countKeys(len(set.Keys))))
 }
 
 // envSetDeletedPayload reports whether a 200 confirm body is a deleted env

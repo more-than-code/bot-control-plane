@@ -231,12 +231,15 @@ func contractRoutes() []route {
 		{"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}", false, (*Server).handleEnvKeyDelete, delegatedDeny},
 		{"POST /v1/projects/{id}/env-sets/{set}/secret", false, (*Server).handleEnvKeysSecret, delegatedDeny},
 		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal", false, (*Server).handleEnvKeyReveal, delegatedDeny},
+		// api-v1 v1.54: a new generated value for an existing secret key, console only.
+		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/regenerate", false, (*Server).handleEnvKeyRegenerate, delegatedDeny},
 		// api-v1 v1.28 value requests: create decides in its handler; the fill page, fill and decline are console only.
 		{"POST /v1/projects/{id}/env-sets/{set}/value-requests", false, (*Server).handleValueRequestCreate, delegatedHandler},
 		// api-v1 v1.33 item 6: a value request for a key of the entry's private set.
 		{"POST /v1/projects/{id}/catalog/{name}/value-requests", false, (*Server).handleEntryValueRequestCreate, delegatedHandler},
 		// api-v1 v1.33 item 6 (review A): show-once reveal of a generated private key, console only.
 		{"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/reveal", false, (*Server).handlePrivateKeyReveal, delegatedDeny},
+		{"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/regenerate", false, (*Server).handlePrivateKeyRegenerate, delegatedDeny},
 		{"GET /v1/value-requests/{request_id}", false, (*Server).handleValueRequestGet, delegatedAllow},
 		{"GET /v1/value-requests/{request_id}/fill", false, (*Server).handleValueRequestFillPage, delegatedDenyRead},
 		{"POST /v1/value-requests/{request_id}/fill", false, (*Server).handleValueRequestFill, delegatedDeny},

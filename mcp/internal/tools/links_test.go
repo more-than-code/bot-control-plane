@@ -135,21 +135,6 @@ func TestNextStepPersonLinks(t *testing.T) {
 	}
 }
 
-func TestEnvSetRevealLinks(t *testing.T) {
-	api := linkClient(t, "https://console.example")
-	sets := withEnvSetLinks(api, lnProject, []envSetView{
-		{Name: "app", Keys: []envSetKeyView{{Key: "SECRET", IsSecret: true, RevealPending: true}, {Key: "TOKEN", NeedsValue: true}}},
-		{Name: "@web", Entry: "web", Keys: []envSetKeyView{{Key: "K", RevealPending: true}}},
-	})
-	text := summarizeEnvSets(sets)
-	if !strings.Contains(text, "app has 1 key generated and not yet revealed; only the person can reveal it, once: send them this link: https://console.example/projects/"+lnProject+"?tab=settings#env-sets") {
-		t.Fatalf("%s", text)
-	}
-	if !strings.Contains(text, "https://console.example/projects/"+lnProject+"?tab=catalog&catalog.q=web") || !strings.Contains(text, "call request_env_value") {
-		t.Fatalf("%s", text)
-	}
-}
-
 func TestPlaceholderStep(t *testing.T) {
 	if s := placeholderStep("env TOKEN in set app has no value yet; set it in the console"); !strings.Contains(s, "set app and key TOKEN") {
 		t.Fatalf("%s", s)
@@ -159,5 +144,46 @@ func TestPlaceholderStep(t *testing.T) {
 	}
 	if placeholderStep("something else") != "" {
 		t.Fatal("other text got a step")
+	}
+}
+
+// list_env_sets: a secret key with a value links to its console button,
+// Reveal once while pending, else Regenerate; a private key links to its
+// entry; plain keys and placeholders get none (api-v1 v1.54).
+func TestEnvKeyLinks(t *testing.T) {
+	sets := []envSetView{
+		{Name: "mos-dev-secrets", Keys: []envSetKeyView{
+			{Key: "MOS_SEED_PASSWORD", IsSecret: true},
+			{Key: "NEW_TOKEN", IsSecret: true, RevealPending: true},
+			{Key: "HOST", IsSecret: false},
+			{Key: "LATER", IsSecret: true, NeedsValue: true},
+		}},
+		{Name: "@web", Entry: "web", Keys: []envSetKeyView{{Key: "KEY", IsSecret: true}}},
+	}
+	withEnvLinks(linkClient(t, "https://console.example"), lnProject, sets)
+	base := "https://console.example/projects/" + lnProject + "?"
+	keys := sets[0].Keys
+	if keys[0].ConsoleURL != base+"env.do=regenerate&env.key=MOS_SEED_PASSWORD&env.set=mos-dev-secrets&tab=settings#env-sets" {
+		t.Fatalf("regenerate %q", keys[0].ConsoleURL)
+	}
+	if keys[1].ConsoleURL != base+"env.do=reveal&env.key=NEW_TOKEN&env.set=mos-dev-secrets&tab=settings#env-sets" {
+		t.Fatalf("reveal %q", keys[1].ConsoleURL)
+	}
+	if keys[2].ConsoleURL != "" || keys[3].ConsoleURL != "" {
+		t.Fatalf("plain or placeholder got a link: %+v", keys)
+	}
+	if sets[1].Keys[0].ConsoleURL != base+"tab=catalog&catalog.q=web" {
+		t.Fatalf("private %q", sets[1].Keys[0].ConsoleURL)
+	}
+	text := summarizeEnvSets(sets)
+	if !strings.Contains(text, "1 generated value has not been shown yet") {
+		t.Fatalf("%s", text)
+	}
+	// No origin, no links, and console_url is left out of the JSON.
+	plain := []envSetView{{Name: "s", Keys: []envSetKeyView{{Key: "K", IsSecret: true}}}}
+	withEnvLinks(linkClient(t, ""), lnProject, plain)
+	out, _ := json.Marshal(plain)
+	if strings.Contains(string(out), "console_url") {
+		t.Fatalf("%s", out)
 	}
 }

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
-	import { tick } from 'svelte';
+	import { page } from '$app/state';
+	import { tick, untrack } from 'svelte';
 	import Eye from '@lucide/svelte/icons/eye';
+	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Lock from '@lucide/svelte/icons/lock';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -12,12 +14,13 @@
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { EnvSet, EnvSetKey } from '$lib/api-types';
 	import { COPY_FAILED_NOTE } from '$lib/copy-text';
-	import { envRowActions } from '$lib/env-generate';
+	import { envKeyLink, envRowActions } from '$lib/env-generate';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Table from '$lib/components/ui/table';
 	import EnvAddVariablesDialog from './EnvAddVariablesDialog.svelte';
+	import EnvRegenerateDialog from './EnvRegenerateDialog.svelte';
 	import EnvRevealDialog from './EnvRevealDialog.svelte';
 	import EnvValueEditor from './EnvValueEditor.svelte';
 	import {
@@ -48,6 +51,7 @@
 		makeSecretAction,
 		mergeAction,
 		revealAction,
+		regenerateAction = '',
 		mergeError = null,
 		onAction = () => {}
 	}: {
@@ -59,6 +63,8 @@
 		mergeAction: string;
 		/** revealEnvKey (api-v1 v1.27 item 3): the show-once dialog posts it. */
 		revealAction: string;
+		/** regenerateEnvKey (api-v1 v1.54): the Regenerate dialog posts it. Empty hides Regenerate. */
+		regenerateAction?: string;
 		/** An Add variables (paste) failure for this set, shown on that dialog's Paste several tab. */
 		mergeError?: string | null;
 		/** Another env action ran here (save, add, make secret, delete): the card clears "Saved env set …". */
@@ -99,8 +105,41 @@
 		target?.focus();
 	}
 
+	// The key the Regenerate dialog is for, or null (api-v1 v1.54). The new value stays in that dialog.
+	let regenKey = $state<string | null>(null);
+
+	async function afterRegenerate(key: string, changed: boolean) {
+		regenKey = null;
+		if (changed) {
+			onAction();
+			await invalidateAll();
+		}
+		await tick();
+		const target = document.getElementById(domId('regenerate', key)) ?? document.getElementById(domId('status'));
+		target?.focus();
+	}
+
 	// Collapse hides the table. It does not clear an edit in progress.
 	let panel = $state(initialEnvSetPanel());
+
+	// An agent's deep link (api-v1 v1.54: env.set, env.key, env.do) opens this set and focuses that row's Reveal once
+	// or Regenerate button. It never presses it: the person does. Read once, when the table mounts.
+	let linkFollowed = false;
+	$effect(() => {
+		if (linkFollowed) return;
+		linkFollowed = true;
+		// Untracked: a reload after a save (new `set` object, same URL) must not pull focus back to the row.
+		const link = untrack(() => envKeyLink(page.url.searchParams));
+		if (!link || link.set !== untrack(() => set.name)) return;
+		untrack(() => {
+			panel = { ...panel, open: true };
+		});
+		void tick().then(() => {
+			const button = document.getElementById(domId(link.action, link.key)) ?? document.getElementById(domId('edit', link.key));
+			button?.scrollIntoView({ block: 'center' });
+			button?.focus();
+		});
+	});
 	// One row at a time is in edit state; Edit on another row replaces it.
 	let edit = $state<RowEdit>(null);
 	let plainDraft = $state('');
@@ -333,6 +372,9 @@
 								{#if rowActions.revealOnce}
 									<RowAction id={domId('reveal', item.key)} label="Reveal {item.key} once" icon={Eye} onclick={() => showOnce(item.key)} />
 								{/if}
+								{#if rowActions.regenerate && regenerateAction}
+									<RowAction id={domId('regenerate', item.key)} label="Regenerate {item.key}" icon={RotateCcw} onclick={() => (regenKey = item.key)} />
+								{/if}
 								{#if !item.is_secret}
 									<CopyButton value={item.value ?? ''} label="Copy {item.key}" tip="Copy {item.key}" iconOnly onResult={copyResult} />
 								{/if}
@@ -380,4 +422,5 @@
 		</Table.Root>
 	</div>
 	<EnvRevealDialog setName={set.name} {revealKey} action={revealAction} onClose={afterReveal} />
+	<EnvRegenerateDialog setName={set.name} {regenKey} usedBy={set.used_by} action={regenerateAction} onClose={afterRegenerate} />
 </div>
