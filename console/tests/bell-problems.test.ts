@@ -74,7 +74,7 @@ describe('bell problem rows', () => {
 		assert.match(html, /lucide-key-round/);
 		assert.match(html, /lucide-rotate-ccw/);
 		assert.match(html, /lucide-sparkles/);
-		assert.match(html, /No report for 25 min\. <span aria-hidden="true">·<\/span>/);
+		assert.match(html, /<span class="truncate"[^>]*>No report for 25 min\.<\/span> <span aria-hidden="true">·<\/span>/);
 		assert.match(html, />open \d+ (min|h|d)<\/time>/);
 		assert.match(html, />resolved \d+ (min|h|d) ago<\/time>/);
 		assert.match(html, /data-state="resolved"[^>]*class="[^"]*text-muted-foreground/);

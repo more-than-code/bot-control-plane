@@ -3,6 +3,7 @@
  * The browser calls only the console route `/notifications`, never the API.
  */
 import type { Notification, NotificationList, ProblemKind } from './api-types';
+import { formatAgo } from './format';
 
 /** The console route the bell reads (GET) and marks read through (POST). */
 export const NOTIFICATIONS_ROUTE = '/notifications';
@@ -63,6 +64,29 @@ export function problemAge(item: Notification, now: number = Date.now()): string
 	if (!Number.isFinite(at) || !Number.isFinite(now)) return null;
 	const ms = Math.max(0, now - at);
 	return item.state === 'resolved' ? `resolved ${span(ms)} ago` : `open ${span(ms)}`;
+}
+
+/** A release's day, as its CHANGELOG states it: "24 Nov". UTC, so the day never shifts in the viewer's zone. */
+export const RELEASE_DAY = new Intl.DateTimeFormat('en-NZ', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const RELEASE_DATE = new Intl.DateTimeFormat('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+/** The tooltip of a release row's time: the CHANGELOG date only, with no invented clock time. */
+export function releaseDateTitle(item: Notification): string | undefined {
+	const at = Date.parse(item.at);
+	return Number.isFinite(at) ? `Released ${RELEASE_DATE.format(at)}` : undefined;
+}
+
+/**
+ * The time a bell row shows. A release's `at` is only its CHANGELOG date (midnight UTC), so it shows that date
+ * ("24 Nov") rather than an age counted from midnight. A problem shows "open 25 min" or "resolved 3 h ago"; anything
+ * else its age ("2 h ago").
+ */
+export function rowTime(item: Notification, now: number = Date.now()): string {
+	if (item.kind === 'release') {
+		const at = Date.parse(item.at);
+		return Number.isFinite(at) ? RELEASE_DAY.format(at) : 'n/a';
+	}
+	return problemAge(item, now) ?? formatAgo(item.at, now);
 }
 
 /** The list the console route answers, or null for anything else (the bell then shows its error line). */
