@@ -17,9 +17,12 @@ import (
 
 const problemsMigration = "0027_problems.sql"
 
+const retentionProblemMigration = "0039_problem_metrics_retention.sql"
+
 // dropProblemsSchema takes app.problems down on conn (already
 // deploybot_owner) and forgets every migration that built it, so Migrate
-// rebuilds it as the newest migration defines it: first 0033 (it widens
+// rebuilds it as the newest migration defines it: first 0039 (it widens
+// the kind check for metrics_retention), then 0033 (it widens
 // the kind check again and adds the host alert settings), then 0032 (it
 // widens the check and adds the agent upgrade table), then 0029 (it widens
 // the check and adds the host file objects), then 0027. 0031 (deploy
@@ -38,6 +41,7 @@ func dropProblemsSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 		return
 	}
 	for _, m := range []struct{ down, up string }{
+		{"0039_problem_metrics_retention.down.sql", retentionProblemMigration},
 		{"0033_host_alerts.down.sql", hostAlertsMigration},
 		{"0032_agent_upgrades.down.sql", agentUpgradesMigration},
 		{"0029_host_files.down.sql", hostFilesMigration},
@@ -58,7 +62,7 @@ func dropProblemsSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 
 // assertNewestProblemsSchema fails when the live problems kind check is not
 // the one the newest migration defines (it must allow agent_upgrade, 0032,
-// and host_resource, 0033).
+// host_resource, 0033, and metrics_retention, 0039).
 func assertNewestProblemsSchema(t *testing.T, ctx context.Context, d *DB) {
 	t.Helper()
 	var def string
@@ -66,7 +70,8 @@ func assertNewestProblemsSchema(t *testing.T, ctx context.Context, d *DB) {
 		t.Errorf("problems_kind_chk: %v", err)
 		return
 	}
-	if !strings.Contains(def, "'host_file'") || !strings.Contains(def, "'agent_upgrade'") || !strings.Contains(def, "'host_resource'") {
+	if !strings.Contains(def, "'host_file'") || !strings.Contains(def, "'agent_upgrade'") || !strings.Contains(def, "'host_resource'") ||
+		!strings.Contains(def, "'metrics_retention'") {
 		t.Errorf("problems_kind_chk is not the newest definition: %s", def)
 	}
 }

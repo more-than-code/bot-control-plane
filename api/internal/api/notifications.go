@@ -90,12 +90,8 @@ func (s *Server) dateReleasesByFirstServed(ctx context.Context, items []notifica
 	}
 	served, err := s.Store.ReleasesServed(ctx, versions)
 	if err != nil {
-		// The cause (a missing table or grant) helps the operator; a URL never goes to the log (as logErr).
-		msg := err.Error()
-		if strings.Contains(msg, "://") {
-			msg = "redacted"
-		}
-		s.logger().Warn("release first-served times unavailable; dating releases by CHANGELOG", "err", msg)
+		// The SQLSTATE (a missing table or grant) helps the operator without naming hosts or users.
+		s.logger().Warn("release first-served times unavailable; dating releases by CHANGELOG", "sqlstate", dbErrCode(err))
 		served = nil
 	}
 	for i := range items {

@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	changelog "github.com/more-than-code/bot-control-plane"
 	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
 	"github.com/more-than-code/bot-control-plane/api/internal/api"
@@ -140,6 +142,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		LatestAgentVersion: cfg.LatestAgentVersion,
 		EdgeTLSIssuer:      cfg.EdgeTLSIssuer,
 		ProblemsOff:        cfg.ProblemsOff,
+		ServerHostID:       cfg.ServerHost,
 		GitHubRefreshOff:   cfg.GitHubRefreshOff,
 	}
 	if gh != nil {
@@ -176,6 +179,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	go srv.RunImageOpSweep(ctx)
 	go srv.RunDomainChecks(ctx)
 	startBackground(ctx, cfg, log, func() { hub.SetDeployHook(srv.DeployHook) }, srv.RunProblems, srv.RunGitHubRefresh)
+	if cfg.ServerHost == uuid.Nil && !cfg.ProblemsOff {
+		log.Info("metrics retention check is off: BOT_API_SERVER_HOST is not set")
+	}
 	// Last before serving, so a start that fails earlier stamps no time.
 	recordReleaseServed(ctx, pool, changelog.Version(), now(), log)
 	return d.serve(cfg.Listen, root, hub.CloseAll)

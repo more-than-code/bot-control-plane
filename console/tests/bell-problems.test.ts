@@ -281,3 +281,32 @@ describe('proxy: problem items (api-v1 v1.41 item 3)', () => {
 		assert.equal(list?.unread, 26);
 	});
 });
+
+describe('bell: metrics retention problems (api-v1 v1.58)', () => {
+	const RETENTION: Notification = {
+		...HOST_OPEN,
+		key: 'problem:00000000-0000-4000-8000-0000000000f9',
+		title: "Metrics retention isn't running on this server",
+		detail: 'host_cpu: never succeeded, 2720 failures. Old metrics are not being deleted.',
+		href: '/orgs/00000000-0000-4000-8000-000000000201?tab=settings#metrics-retention',
+		level: 'heads_up'
+	};
+
+	test('kind from the link, with its icon', () => {
+		assert.equal(problemKindOf(RETENTION), 'metrics_retention');
+		const html = render(NotificationsList, { props: { items: [RETENTION] } }).body;
+		assert.match(html, /lucide-database-zap/);
+		assert.match(html, /href="\/orgs\/[^"]+\?tab=settings#metrics-retention"/);
+	});
+
+	test('the org Settings tab has the anchor the problem links to', () => {
+		const source = readFileSync(new URL('../src/routes/orgs/[id]/OrgSettingsSection.svelte', import.meta.url), 'utf8');
+		assert.match(source, /id="metrics-retention"/);
+		assert.match(source, /<Card.Title>Metrics retention<\/Card.Title>/);
+	});
+
+	test('a host link or the registries section is not read as metrics_retention', () => {
+		assert.equal(problemKindOf({ ...RETENTION, href: `/hosts/${HOST}` }), 'host_offline');
+		assert.equal(problemKindOf({ ...RETENTION, href: `/projects/${PROJECT}?tab=settings#registries` }), 'registry_login');
+	});
+});

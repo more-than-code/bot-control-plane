@@ -32,8 +32,8 @@ export function needActionCount(list: NotificationList | null): number {
 /**
  * A problem item's kind, from its link (bell items carry no problem kind, api-v1 v1.41 item 3): a host page is
  * `host_offline`, a host's Config files tab `host_file` (api-v1 v1.44), a host link ending `#agent-upgrade`
- * `agent_upgrade` (api-v1 v1.48), a host page over a range `host_resource` (api-v1 v1.49), the registries section
- * `registry_login`,
+ * `agent_upgrade` (api-v1 v1.48), a host page over a range `host_resource` (api-v1 v1.49), a link ending
+ * `#metrics-retention` `metrics_retention` (api-v1 v1.58), the registries section `registry_login`,
  * anything else (a catalog entry) `deploy`.
  */
 export function problemKindOf(item: Notification): ProblemKind | null {
@@ -42,6 +42,7 @@ export function problemKindOf(item: Notification): ProblemKind | null {
 	if (item.href.startsWith('/hosts/') && item.href.endsWith('#agent-upgrade')) return 'agent_upgrade';
 	if (item.href.startsWith('/hosts/') && /[?&]range=/.test(item.href)) return 'host_resource';
 	if (item.href.startsWith('/hosts/')) return 'host_offline';
+	if (item.href.endsWith('#metrics-retention')) return 'metrics_retention';
 	if (item.href.endsWith('#registries')) return 'registry_login';
 	return 'deploy';
 }

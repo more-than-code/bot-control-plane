@@ -78,7 +78,8 @@ describe('bell row time', () => {
 
 	test('a row without a detail shows the time alone', () => {
 		const html = render(NotificationsList, { props: { items: [{ ...UPDATE, detail: '' }] } }).body;
-		assert.match(html, /<time datetime="2026-11-24T00:29:00Z"[^>]*class="shrink-0">2 h ago<\/time>/);
+		// The component ages from the real clock, so only the shape is fixed here (rowTime pins the text with a fixed now).
+		assert.match(html, /<time datetime="2026-11-24T00:29:00Z"[^>]*class="shrink-0">\d+ (min|h|d) ago<\/time>/);
 		assert.doesNotMatch(html, /aria-hidden="true">·</);
 		// The only truncated text left is the title.
 		assert.equal((html.match(/class="truncate[ "]/g) ?? []).length, 1);

@@ -37,3 +37,13 @@ func TestSummarizeHostFileProblem(t *testing.T) {
 		t.Fatalf("summary %q", text)
 	}
 }
+
+// api-v1 v1.58: a metrics_retention problem points at the database host.
+func TestSummarizeMetricsRetentionProblem(t *testing.T) {
+	payload, _ := json.Marshal(map[string]any{"items": []any{
+		map[string]any{"kind": "metrics_retention", "level": "heads_up", "title": "Metrics retention isn't running on this server", "opened_at": "2026-11-24T05:00:00Z", "resolved_at": nil},
+	}})
+	if text := summarizeProblems(payload); !strings.Contains(text, "Metrics retention isn't running on this server since 2026-11-24 05:00 UTC (heads_up) — the database host's TimescaleDB retention jobs fail or do not run") {
+		t.Fatalf("summary %q", text)
+	}
+}

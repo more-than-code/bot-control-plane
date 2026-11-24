@@ -72,6 +72,10 @@ type Server struct {
 	// ProblemsOff is BOT_API_PROBLEMS=off (api-v1 v1.41 item 6): no
 	// detector runs and the problem routes answer empty lists.
 	ProblemsOff bool
+	// ServerHostID is BOT_API_SERVER_HOST (api-v1 v1.58): the host that
+	// serves this Deploybot. The owners and admins of its org get the
+	// metrics_retention problem. uuid.Nil turns that check off.
+	ServerHostID uuid.UUID
 	// sweep is the problems sweep clock (start grace, hourly work).
 	sweep problemSweep
 	// GitHubRefreshOff is BOT_API_GITHUB_REFRESH=off (api-v1 v1.43 item 4):

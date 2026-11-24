@@ -1,6 +1,7 @@
 <script lang="ts">
 	import CircleArrowUp from '@lucide/svelte/icons/circle-arrow-up';
 	import Cpu from '@lucide/svelte/icons/cpu';
+	import DatabaseZap from '@lucide/svelte/icons/database-zap';
 	import FileWarning from '@lucide/svelte/icons/file-warning';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -40,7 +41,8 @@
 		deploy: RotateCcw,
 		host_file: FileWarning,
 		agent_upgrade: CircleArrowUp,
-		host_resource: Cpu
+		host_resource: Cpu,
+		metrics_retention: DatabaseZap
 	};
 
 	function iconOf(item: Notification) {

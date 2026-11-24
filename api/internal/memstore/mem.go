@@ -102,6 +102,9 @@ type Mem struct {
 	hostUpdateNotices map[uuid.UUID]map[string]time.Time
 	// releaseServed is version → first served (migration 0038).
 	releaseServed map[string]time.Time
+	// retentionJobs and retentionErr are what RetentionJobs answers (set by tests).
+	retentionJobs []store.RetentionJob
+	retentionErr  error
 	// problems is id → problem (api-v1 v1.41); see problems.go.
 	problems map[uuid.UUID]store.Problem
 	// hostFiles is host config file versions, applies and status (api-v1

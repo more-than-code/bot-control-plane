@@ -204,3 +204,23 @@ func copyTime(t *time.Time) *time.Time {
 	c := *t
 	return &c
 }
+
+// SetRetentionJobs sets what RetentionJobs answers (a test fake: memstore
+// has no TimescaleDB).
+func (m *Mem) SetRetentionJobs(jobs []store.RetentionJob, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retentionJobs = append([]store.RetentionJob(nil), jobs...)
+	m.retentionErr = err
+}
+
+func (m *Mem) RetentionJobs(_ context.Context) ([]store.RetentionJob, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.retentionErr != nil {
+		return nil, m.retentionErr
+	}
+	out := append([]store.RetentionJob(nil), m.retentionJobs...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Hypertable < out[j].Hypertable })
+	return out, nil
+}

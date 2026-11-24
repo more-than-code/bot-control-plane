@@ -768,8 +768,8 @@ export type NotificationKind = 'release' | 'host_update' | 'problem';
 /** A problem's level (api-v1 v1.41 item 1). */
 export type ProblemLevel = 'needs_action' | 'heads_up';
 
-/** A problem's kind (api-v1 v1.41 item 1; `host_file` since v1.44 item 8; `agent_upgrade` since v1.48 item 6; `host_resource` since v1.49 item 1). */
-export type ProblemKind = 'host_offline' | 'registry_login' | 'deploy' | 'host_file' | 'agent_upgrade' | 'host_resource';
+/** A problem's kind (api-v1 v1.41 item 1; `host_file` since v1.44 item 8; `agent_upgrade` since v1.48 item 6; `host_resource` since v1.49 item 1; `metrics_retention` since v1.58). */
+export type ProblemKind = 'host_offline' | 'registry_login' | 'deploy' | 'host_file' | 'agent_upgrade' | 'host_resource' | 'metrics_retention';
 
 export type Notification = {
 	key: string;

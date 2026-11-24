@@ -196,6 +196,7 @@ func (s *Server) hourlyProblems(ctx context.Context, now time.Time) {
 	ctx, cancel := context.WithTimeout(ctx, problemsHourlyDeadline)
 	defer cancel()
 	s.checkRegistries(ctx)
+	s.sweepMetricsRetention(ctx, now)
 	if _, err := s.Store.PruneProblems(ctx, now.Add(-store.ProblemRetention)); err != nil {
 		s.logger().Error("problem prune failed")
 	}
@@ -632,11 +633,12 @@ func (r *problemReader) list(ctx context.Context, since *time.Time) ([]store.Pro
 	return out, nil
 }
 
-// sees: host_offline, host_file and host_resource for org owners and admins; registry_login for project
+// sees: host_offline, host_file, host_resource and metrics_retention for org owners and admins; registry_login for project
 // owners and admins (org owners and admins are project admins); deploy for
 // those plus anyone holding the entry's deploy action.
 func (r *problemReader) sees(ctx context.Context, p store.Problem) (bool, error) {
-	if p.Kind == store.ProblemHostOffline || p.Kind == store.ProblemHostFile || p.Kind == store.ProblemAgentUpgrade || p.Kind == store.ProblemHostResource {
+	if p.Kind == store.ProblemHostOffline || p.Kind == store.ProblemHostFile || p.Kind == store.ProblemAgentUpgrade || p.Kind == store.ProblemHostResource ||
+		p.Kind == store.ProblemMetricsRetention {
 		return r.adminOrgs[p.OrgID], nil
 	}
 	if p.ProjectID == nil {
@@ -669,6 +671,9 @@ func (r *problemReader) sees(ctx context.Context, p store.Problem) (bool, error)
 // href is the console page that fixes the problem.
 func (r *problemReader) href(ctx context.Context, p store.Problem) string {
 	switch {
+	case p.Kind == store.ProblemMetricsRetention:
+		// The org Settings anchor explains it; the fragment tells the console the kind.
+		return "/orgs/" + p.OrgID.String() + "?tab=settings#metrics-retention"
 	case p.Kind == store.ProblemHostFile && p.HostID != nil:
 		_, name, _ := strings.Cut(p.Subject, ":")
 		return hostFileHref(*p.HostID, name)

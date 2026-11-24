@@ -31,7 +31,7 @@ internal/tools/       one file per tool; schemas and handlers
 | `list_projects` | — | GET `/v1/me` (projects with `org_id`, `via`) |
 | `list_hosts` | `project_id` or `org_id` (exactly one) | GET `/v1/projects/{id}/hosts` or GET `/v1/orgs/{id}/hosts`; removed (archived) hosts are not listed (api-v1 v1.40) |
 | `upgrade_agent` | `host_id`, `idempotency_key` | GET `/v1/hosts/{id}`, then a plan kept by this server; `confirm` posts POST `/v1/hosts/{id}/agent-upgrade` (api-v1 v1.48) |
-| `list_problems` | `project_id` or `org_id` (exactly one) | GET `/v1/projects/{id}/problems` or GET `/v1/orgs/{id}/problems` (api-v1 v1.41): open problems; the summary names each problem's usual fix (`host_resource`, v1.49: free memory or disk, or raise the threshold with `set_alert_settings`) |
+| `list_problems` | `project_id` or `org_id` (exactly one) | GET `/v1/projects/{id}/problems` or GET `/v1/orgs/{id}/problems` (api-v1 v1.41): open problems; the summary names each problem's usual fix (`host_resource`, v1.49: free memory or disk, or raise the threshold with `set_alert_settings`); `metrics_retention` (v1.58) names the database host as the place to fix it. |
 | `list_services` | `host_id` | GET `/v1/hosts/{id}/services` |
 | `query_metrics` | `host_id`, `metric`, `from?`, `to?`, `step?`, `path?` (disk only, api-v1 v1.49) | GET `/v1/hosts/{id}/metrics`; `mem` includes `available` |
 | `get_alert_settings` | `host_id` | GET `/v1/hosts/{id}/alert-settings` (api-v1 v1.49): alerts on or off and the three thresholds (null is the default; a set memory percent has no MiB floor). The summary lists the thresholds, also when alerts are off ("thresholds kept: …") |

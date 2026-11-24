@@ -1417,3 +1417,27 @@ Principle (DD `DEF-20261123-design-principle-privileged-steps-are-do-exut`): no 
 4. **Storage:** migration `0038_release_first_served.sql` creates `app.release_first_served (version text PRIMARY KEY, first_served_at timestamptz NOT NULL)` with a check on the `X.Y.Z` shape, and grants `deploybot_api` SELECT and INSERT only. `0038_release_first_served.down.sql` drops the table (hand-run).
 5. **Console:** a release row with `date_only` false shows its age ("1 h ago") and the full local time on hover; with `date_only` true it shows its date ("24 Nov", in UTC) and "Released 24 Nov 2026" on hover.
 6. MCP and `whats_new` are unchanged: they keep CHANGELOG dates.
+
+## v1.58 Deploybot checks its own metrics retention (2026-11-24, approved spec `docs/spec-retention-self-check.md` rev 2 (umbrella), Joe "Yes, update the spec and approve both"; new problem kind and config value; migration 0039; implemented on bot-control-plane `dev`)
+
+1. **Problem kind `metrics_retention`** (amends v1.41 item 1): one problem for the whole server, subject `metrics_retention:<org id>`, `host_id` the server host.
+   - **Audience:** owners and admins of the org that owns the host named by `BOT_API_SERVER_HOST`, read at each sweep.
+   - **`href`:** `/orgs/<org id>?tab=settings#metrics-retention`.
+   - **Title:** "Metrics retention isn't running on this server". When resolved: "Metrics retention is running again".
+2. **Rules** (the hourly problem sweep), over the retention policies on hypertables in schema `metrics`, from `timescaledb_information.jobs` and `job_stats`. A job is unhealthy when it is:
+   - **failing:** it has run, but has no success for more than 48 h;
+   - **not running:** `next_start` is null or more than 1 h past.
+   
+   Level is `heads_up`, then `needs_action` once a last success is 7 or more days old, or the problem has been open 7 days.
+   - **Detail:** up to two table names, then "(+N)"; the first unhealthy job's reason ("never succeeded, N failures", "last success 3 d ago, N failures", "not scheduled", "overdue 2 h"); then "Old metrics are not being deleted."
+   - No retention policies at all also opens it ("No retention policies found: old metrics are never deleted.").
+   - Error texts of `job_errors` are never shown.
+   - An unreadable view neither opens nor resolves; the log carries only its SQLSTATE.
+   - A job with no `job_stats` row yet (never started) reads as "not scheduled"; on a fresh install the scheduler starts new policies within the 5-minute sweep grace.
+   - A problem filed under another org (the host's org changed) is resolved with "No longer checked here: …", and one opens for the current org.
+3. **Config `BOT_API_SERVER_HOST`:** a host UUID; a malformed value is a start error.
+   - **Unset:** the check is off, and the API logs one line at start.
+   - **Unknown or revoked host:** the check is off with one warning per sweep, and any open `metrics_retention` problem is resolved. The API never guesses the host.
+4. **Storage:** migration `0039_problem_metrics_retention.sql` widens `problems_kind_chk`. `0039…down.sql` deletes those rows and restores the 0033 list. No grant is needed: `deploybot_api` reads the `timescaledb_information` views.
+5. **Console:** `problemKindOf` reads `#metrics-retention`, with the icon `DatabaseZap`. The org Settings tab has a "Metrics retention" card with `id="metrics-retention"` explaining the fix.
+6. **MCP:** the `list_problems` description and its fix hint name the kind.

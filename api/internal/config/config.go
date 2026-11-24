@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/more-than-code/bot-control-plane/api/internal/agentversion"
 )
 
@@ -49,6 +51,10 @@ type Config struct {
 	// hooks) do not run and the problem routes answer empty lists (api-v1
 	// v1.41 item 6). Empty or on runs them.
 	ProblemsOff bool
+	// ServerHost is BOT_API_SERVER_HOST: the id of the host that serves
+	// this Deploybot; the owners and admins of its org get the
+	// metrics_retention problem (api-v1 v1.58). Nil leaves that check off.
+	ServerHost uuid.UUID
 	// GitHubRefreshOff is BOT_API_GITHUB_REFRESH=off: Connect GitHub tokens
 	// are not refreshed, on use or hourly; stored material is kept (api-v1
 	// v1.43 item 4). Empty or on refreshes.
@@ -149,6 +155,13 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	// api-v1 v1.48: the release form the host's helper accepts (1 to 4 digits each).
 	if cfg.LatestAgentVersion != "" && !agentversion.ValidRelease(cfg.LatestAgentVersion) {
 		return Config{}, fmt.Errorf("BOT_API_LATEST_AGENT_VERSION must be X.Y.Z or empty")
+	}
+	if v := strings.TrimSpace(getenv("BOT_API_SERVER_HOST")); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil || id == uuid.Nil {
+			return Config{}, fmt.Errorf("BOT_API_SERVER_HOST must be a host id (UUID) or empty")
+		}
+		cfg.ServerHost = id
 	}
 	if cfg.EdgeTLSIssuer != "" && cfg.EdgeTLSIssuer != EdgeIssuerInternal {
 		return Config{}, fmt.Errorf("BOT_API_EDGE_TLS_ISSUER must be empty or internal")

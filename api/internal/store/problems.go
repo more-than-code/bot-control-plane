@@ -23,6 +23,9 @@ const (
 	// ProblemHostResource is a host short of memory or disk, or overloaded
 	// (api-v1 v1.49 item 1).
 	ProblemHostResource = "host_resource"
+	// ProblemMetricsRetention is a TimescaleDB retention job of the metrics
+	// hypertables that fails or does not run (api-v1 v1.58).
+	ProblemMetricsRetention = "metrics_retention"
 )
 
 // Problem levels.
@@ -103,7 +106,7 @@ type RegistryLogin struct {
 // title of 1 to 300 and a detail of at most 300.
 func ValidProblemOpen(in ProblemOpen) bool {
 	switch in.Kind {
-	case ProblemHostOffline, ProblemRegistryLogin, ProblemDeploy, ProblemHostFile, ProblemAgentUpgrade, ProblemHostResource:
+	case ProblemHostOffline, ProblemRegistryLogin, ProblemDeploy, ProblemHostFile, ProblemAgentUpgrade, ProblemHostResource, ProblemMetricsRetention:
 	default:
 		return false
 	}
@@ -116,6 +119,19 @@ func ValidProblemOpen(in ProblemOpen) bool {
 	s, t, d := utf8.RuneCountInString(in.Subject), utf8.RuneCountInString(in.Title), utf8.RuneCountInString(in.Detail)
 	return s >= 1 && s <= MaxProblemText && t >= 1 && t <= MaxProblemText && d <= MaxProblemText &&
 		utf8.ValidString(in.Subject) && utf8.ValidString(in.Title) && utf8.ValidString(in.Detail)
+}
+
+// RetentionJob is one TimescaleDB retention policy on a metrics hypertable,
+// with its job stats (api-v1 v1.58). LastSuccess is nil when the job never
+// succeeded; NextStart is nil when the scheduler has not set one.
+type RetentionJob struct {
+	JobID         int64
+	Hypertable    string
+	LastStatus    string
+	LastSuccess   *time.Time
+	TotalRuns     int64
+	TotalFailures int64
+	NextStart     *time.Time
 }
 
 // ProblemStore keeps problems (api-v1 v1.41 items 1 and 6).
@@ -143,4 +159,7 @@ type ProblemStore interface {
 	// ListRegistryLogins returns every stored registry login of a project
 	// that is not deleted, by project then host.
 	ListRegistryLogins(ctx context.Context) ([]RegistryLogin, error)
+	// RetentionJobs returns the retention policies on hypertables in schema
+	// metrics with their job stats, by hypertable name (api-v1 v1.58).
+	RetentionJobs(ctx context.Context) ([]RetentionJob, error)
 }

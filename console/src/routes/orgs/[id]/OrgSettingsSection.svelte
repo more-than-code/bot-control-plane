@@ -35,6 +35,24 @@
 		</form>
 	</Card.Content>
 </Card.Root>
+<!-- api-v1 v1.58: the metrics_retention problem links here (#metrics-retention). -->
+<Card.Root id="metrics-retention" class="mb-4 scroll-mt-4">
+	<Card.Header>
+		<Card.Title>Metrics retention</Card.Title>
+		<Card.Description>
+			Only relevant if this organization owns the host that runs this Deploybot server. Deploybot then checks every hour that its database deletes
+			metrics older than 7 days, and tells this organization's owners and admins in the bell if it doesn't.
+		</Card.Description>
+	</Card.Header>
+	<Card.Content class="text-sm">
+		<p>
+			The problem's detail names the affected tables. Old metrics that are not deleted can fill the database host's disk. The fix is on that host:
+			check TimescaleDB's retention jobs (<code class="bg-muted rounded px-1 py-0.5 font-mono break-all">timescaledb_information.job_stats</code>),
+			its worker limit (<code class="bg-muted rounded px-1 py-0.5 font-mono break-all">timescaledb.max_background_workers</code>), and that the job
+			owner can connect. The problem clears itself within an hour of the jobs succeeding again.
+		</p>
+	</Card.Content>
+</Card.Root>
 {#if canOwner}
 	<Card.Root>
 		<Card.Header>
