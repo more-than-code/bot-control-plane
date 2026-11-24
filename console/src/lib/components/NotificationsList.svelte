@@ -8,8 +8,7 @@
 	import ServerOff from '@lucide/svelte/icons/server-off';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import type { Notification } from '$lib/api-types';
-	import { formatWhen } from '$lib/format';
-	import { needsAction, NOTIFICATIONS_ERROR, problemKindOf, releaseDateTitle, rowTime } from '$lib/notifications';
+	import { needsAction, NOTIFICATIONS_ERROR, problemKindOf, rowTime, rowTitle } from '$lib/notifications';
 	import { timeZoneSource } from '$lib/time-zone';
 	import { cn } from '$lib/utils';
 
@@ -17,7 +16,8 @@
 	 * The bell popover's rows (spec-header-org-project-bell §3.2) in the API's order: open problems first, then the
 	 * rest newest first. A problem row (api-v1 v1.41) has an icon by what broke (host from its href, registry login,
 	 * deploy, a host config file since v1.44), its age ("open 25 min", "resolved 3 h ago"), and is muted once resolved.
-	 * A release row shows its day ("24 Nov"); the time sits after the truncated detail, so it is never cut off.
+	 * A release row shows its age when the API dated it by first-served (api-v1 v1.57), else its day ("24 Nov"); the time
+	 * sits after the truncated detail, so it is never cut off.
 	 */
 	let {
 		items,
@@ -94,7 +94,7 @@
 								<span class="truncate" title={item.detail}>{item.detail}</span>
 								<span aria-hidden="true">·</span>
 							{/if}
-							<time datetime={item.at} title={item.kind === 'release' ? releaseDateTitle(item) : formatWhen(item.at, zones?.current)} class="shrink-0">{rowTime(item)}</time>
+							<time datetime={item.at} title={rowTitle(item, zones?.current)} class="shrink-0">{rowTime(item)}</time>
 						</span>
 					</span>
 				</a>

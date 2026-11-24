@@ -785,6 +785,11 @@ export type Notification = {
 	level?: ProblemLevel;
 	/** Problem items only: `open` or `resolved`. A resolved problem is always read. */
 	state?: 'open' | 'resolved';
+	/**
+	 * Release items only (api-v1 v1.57): true when `at` is only the CHANGELOG date at 00:00 UTC, false when it is when
+	 * the server first served the release. The parser makes a missing or non-boolean value true.
+	 */
+	date_only?: boolean;
 };
 
 /** `GET /v1/orgs/{id}/problems` and `GET /v1/projects/{id}/problems` item (api-v1 v1.41 item 1). */

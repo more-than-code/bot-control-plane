@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { render } from 'svelte/server';
 import type { Notification } from '../src/lib/api-types.ts';
-import { RELEASE_DAY, releaseDateTitle, rowTime } from '../src/lib/notifications.ts';
+import { formatWhen } from '../src/lib/format.ts';
+import { RELEASE_DAY, releaseDateOnly, releaseDateTitle, rowTime, rowTitle } from '../src/lib/notifications.ts';
+import { parseNotification } from '../src/lib/server/notifications.ts';
 import NotificationsList from '../src/lib/components/NotificationsList.svelte';
 
 // DEF-20261124-bell-release-rows-sink-below-today-s-ite-0kny: a release's `at` is only its CHANGELOG date (midnight
@@ -80,5 +82,39 @@ describe('bell row time', () => {
 		assert.doesNotMatch(html, /aria-hidden="true">·</);
 		// The only truncated text left is the title.
 		assert.equal((html.match(/class="truncate[ "]/g) ?? []).length, 1);
+	});
+});
+
+// api-v1 v1.57 (spec-release-first-served): a release the server has served carries its real time with date_only
+// false, and its row shows an age like any other; date_only true, or an API that does not send it, keeps the date.
+describe('bell release row with a first-served time', () => {
+	test('date_only false shows the age and the full local time on hover', () => {
+		const served = { ...RELEASE, at: '2026-11-24T01:24:00Z', date_only: false };
+		assert.equal(rowTime(served, NOW), '1 h ago');
+		assert.equal(rowTitle(served, 'UTC'), formatWhen(served.at, 'UTC'));
+		const html = render(NotificationsList, { props: { items: [served] } }).body;
+		const tip = html.match(/<time datetime="2026-11-24T01:24:00Z" title="([^"]*)"/)?.[1];
+		assert.ok(tip && tip.includes('2026') && !tip.startsWith('Released'), String(tip));
+		assert.match(html, /class="shrink-0">\d+ (min|h|d) ago<\/time>/);
+		// A clock ahead of the server's shows "just now", not a negative age.
+		assert.equal(rowTime({ ...served, at: '2026-11-24T02:35:00Z' }, NOW), 'just now');
+	});
+
+	test('date_only true or missing keeps the date', () => {
+		assert.equal(rowTime({ ...RELEASE, date_only: true }, NOW), '24 Nov');
+		assert.equal(rowTime(RELEASE, NOW), '24 Nov');
+	});
+
+	test('the parser stores date_only false only when the API sends false', () => {
+		const wire = { key: 'release:0.2.48', kind: 'release', title: 'Deploybot v0.2.48 is out', detail: 'x', href: '/whats-new#v0.2.48', at: '2026-11-25T03:00:00Z', read: false };
+		assert.equal(parseNotification({ ...wire, date_only: false })?.date_only, false);
+		assert.equal(parseNotification({ ...wire, date_only: true })?.date_only, true);
+		assert.equal(parseNotification(wire)?.date_only, true);
+		for (const odd of ['no', null, 0]) assert.equal(parseNotification({ ...wire, date_only: odd })?.date_only, true);
+		// Other kinds never carry it.
+		const update = parseNotification({ ...wire, key: 'host_update:x:0.2.16', kind: 'host_update', href: '/hosts/x', date_only: false });
+		assert.equal(update != null && 'date_only' in update, false);
+		// Only a release is ever date-only.
+		assert.equal(releaseDateOnly({ ...UPDATE, date_only: true }), false);
 	});
 });

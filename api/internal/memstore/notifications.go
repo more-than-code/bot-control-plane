@@ -97,3 +97,28 @@ func (m *Mem) NoticeHostUpdates(_ context.Context, hostIDs []uuid.UUID, version 
 	}
 	return out, nil
 }
+
+func (m *Mem) RecordReleaseServed(_ context.Context, version string, at time.Time) error {
+	if !store.ValidReleaseVersion(version) {
+		return store.ErrInvalid
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.releaseServed[version]; !ok {
+		// As Postgres stores it: microseconds, UTC.
+		m.releaseServed[version] = at.UTC().Truncate(time.Microsecond)
+	}
+	return nil
+}
+
+func (m *Mem) ReleasesServed(_ context.Context, versions []string) (map[string]time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[string]time.Time{}
+	for _, v := range versions {
+		if t, ok := m.releaseServed[v]; ok {
+			out[v] = t
+		}
+	}
+	return out, nil
+}

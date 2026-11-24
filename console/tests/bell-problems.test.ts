@@ -50,7 +50,9 @@ const RELEASE: Notification = {
 	detail: 'Problems in the bell.',
 	href: '/whats-new#v0.2.42',
 	at: '2026-11-21T00:00:00Z',
-	read: false
+	read: false,
+	// What the parser makes of a release with no date_only (an API before v1.57).
+	date_only: true
 };
 
 describe('bell problem rows', () => {

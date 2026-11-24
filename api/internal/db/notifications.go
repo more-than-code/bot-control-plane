@@ -142,3 +142,42 @@ WHERE host_id = ANY($1::uuid[]) AND version = $2
 	}
 	return out, mapErr(tx.Commit(ctx))
 }
+
+// Release first-served times (migration 0038, api-v1 v1.57).
+
+func (d *DB) RecordReleaseServed(ctx context.Context, version string, at time.Time) error {
+	if !store.ValidReleaseVersion(version) {
+		return store.ErrInvalid
+	}
+	_, err := d.pool.Exec(ctx, `
+INSERT INTO app.release_first_served (version, first_served_at) VALUES ($1, $2)
+ON CONFLICT (version) DO NOTHING
+`, version, at)
+	return mapErr(err)
+}
+
+func (d *DB) ReleasesServed(ctx context.Context, versions []string) (map[string]time.Time, error) {
+	out := map[string]time.Time{}
+	if len(versions) == 0 {
+		return out, nil
+	}
+	rows, err := d.pool.Query(ctx, `
+SELECT version, first_served_at FROM app.release_first_served WHERE version = ANY($1::text[])
+`, versions)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v string
+		var t time.Time
+		if err := rows.Scan(&v, &t); err != nil {
+			return nil, mapErr(err)
+		}
+		out[v] = t.UTC()
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err)
+	}
+	return out, nil
+}

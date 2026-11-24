@@ -3,7 +3,7 @@
  * The browser calls only the console route `/notifications`, never the API.
  */
 import type { Notification, NotificationList, ProblemKind } from './api-types';
-import { formatAgo } from './format';
+import { formatAgo, formatWhen } from './format';
 
 /** The console route the bell reads (GET) and marks read through (POST). */
 export const NOTIFICATIONS_ROUTE = '/notifications';
@@ -76,17 +76,27 @@ export function releaseDateTitle(item: Notification): string | undefined {
 	return Number.isFinite(at) ? `Released ${RELEASE_DATE.format(at)}` : undefined;
 }
 
+/** A release row whose `at` is only its CHANGELOG date (api-v1 v1.57 `date_only`; missing means a date). */
+export function releaseDateOnly(item: Notification): boolean {
+	return item.kind === 'release' && item.date_only !== false;
+}
+
 /**
- * The time a bell row shows. A release's `at` is only its CHANGELOG date (midnight UTC), so it shows that date
- * ("24 Nov") rather than an age counted from midnight. A problem shows "open 25 min" or "resolved 3 h ago"; anything
- * else its age ("2 h ago").
+ * The time a bell row shows. A release the server dated by when it first served it (api-v1 v1.57) shows its age like
+ * any row; one dated only by its CHANGELOG date (midnight UTC) shows that date ("24 Nov") rather than an age counted
+ * from midnight. A problem shows "open 25 min" or "resolved 3 h ago"; anything else its age ("2 h ago").
  */
 export function rowTime(item: Notification, now: number = Date.now()): string {
-	if (item.kind === 'release') {
+	if (releaseDateOnly(item)) {
 		const at = Date.parse(item.at);
 		return Number.isFinite(at) ? RELEASE_DAY.format(at) : 'n/a';
 	}
 	return problemAge(item, now) ?? formatAgo(item.at, now);
+}
+
+/** The hover text of a bell row's time: the release date for a date-only release, else the full time in `timeZone`. */
+export function rowTitle(item: Notification, timeZone?: string): string | undefined {
+	return releaseDateOnly(item) ? releaseDateTitle(item) : formatWhen(item.at, timeZone);
 }
 
 /** The list the console route answers, or null for anything else (the bell then shows its error line). */

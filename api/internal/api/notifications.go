@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,10 @@ type notification struct {
 	// Level and State are on problem items only (api-v1 v1.41 item 3).
 	Level string `json:"level,omitempty"`
 	State string `json:"state,omitempty"`
+	// DateOnly is on release items only (api-v1 v1.57): true when At is the
+	// CHANGELOG date at 00:00 UTC, false when it is when this server first
+	// served the release.
+	DateOnly *bool `json:"date_only,omitempty"`
 }
 
 // releaseEntries is the server's own CHANGELOG.md, newest first, unless a
@@ -72,6 +77,35 @@ func (s *Server) releaseNotices(now time.Time) []notification {
 		})
 	}
 	return out
+}
+
+// dateReleasesByFirstServed sets each release's at to when this server
+// first served it (migration 0038, api-v1 v1.57) and date_only to false;
+// a release with no record keeps its CHANGELOG date with date_only true.
+// A failed read keeps every date, so the bell still answers.
+func (s *Server) dateReleasesByFirstServed(ctx context.Context, items []notification) {
+	versions := make([]string, len(items))
+	for i, it := range items {
+		versions[i] = strings.TrimPrefix(it.Key, "release:")
+	}
+	served, err := s.Store.ReleasesServed(ctx, versions)
+	if err != nil {
+		// The cause (a missing table or grant) helps the operator; a URL never goes to the log (as logErr).
+		msg := err.Error()
+		if strings.Contains(msg, "://") {
+			msg = "redacted"
+		}
+		s.logger().Warn("release first-served times unavailable; dating releases by CHANGELOG", "err", msg)
+		served = nil
+	}
+	for i := range items {
+		dateOnly := true
+		if at, ok := served[versions[i]]; ok {
+			items[i].At = at.UTC()
+			dateOnly = false
+		}
+		items[i].DateOnly = &dateOnly
+	}
 }
 
 // hostUpdateNotices are the hosts with update_available (v1.34, v1.36) in
@@ -142,7 +176,9 @@ func (s *Server) notifications(ctx context.Context, userID uuid.UUID) ([]notific
 	if err != nil {
 		return nil, err
 	}
-	rest := append(s.releaseNotices(s.now()), hosts...)
+	releases := s.releaseNotices(s.now())
+	s.dateReleasesByFirstServed(ctx, releases)
+	rest := append(releases, hosts...)
 	rest = append(rest, resolved...)
 	// Stable on equal at: releases dated the same day keep the CHANGELOG
 	// order (newest first; key order would put 0.2.37 above 0.2.38), then

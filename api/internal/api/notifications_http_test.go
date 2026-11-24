@@ -24,6 +24,8 @@ type notificationsWire struct {
 		Href   string    `json:"href"`
 		At     time.Time `json:"at"`
 		Read   bool      `json:"read"`
+		// DateOnly is on release items only (api-v1 v1.57).
+		DateOnly *bool `json:"date_only"`
 	} `json:"items"`
 	Unread int `json:"unread"`
 }

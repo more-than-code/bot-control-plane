@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	changelog "github.com/more-than-code/bot-control-plane"
 	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
 	"github.com/more-than-code/bot-control-plane/api/internal/api"
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
@@ -20,6 +21,7 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/registry"
 	"github.com/more-than-code/bot-control-plane/api/internal/seal"
+	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
 type deps struct {
@@ -174,6 +176,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	go srv.RunImageOpSweep(ctx)
 	go srv.RunDomainChecks(ctx)
 	startBackground(ctx, cfg, log, func() { hub.SetDeployHook(srv.DeployHook) }, srv.RunProblems, srv.RunGitHubRefresh)
+	// Last before serving, so a start that fails earlier stamps no time.
+	recordReleaseServed(ctx, pool, changelog.Version(), now(), log)
 	return d.serve(cfg.Listen, root, hub.CloseAll)
 }
 
@@ -279,4 +283,20 @@ func safeErr(err error) string {
 		return "redacted"
 	}
 	return msg
+}
+
+// recordReleaseServed records that this server now serves version (the
+// newest embedded CHANGELOG entry), so the bell can date the release by
+// when it went live here (api-v1 v1.57). An existing record keeps its
+// time. It never stops the start: a failure (an older schema, a missing
+// grant) logs one line and the bell dates releases by CHANGELOG instead.
+func recordReleaseServed(ctx context.Context, st interface {
+	RecordReleaseServed(context.Context, string, time.Time) error
+}, version string, at time.Time, log *slog.Logger) {
+	if !store.ValidReleaseVersion(version) {
+		return
+	}
+	if err := st.RecordReleaseServed(ctx, version, at); err != nil {
+		log.Warn("could not record when this release was first served; the bell dates it by CHANGELOG", "version", version, "err", safeErr(err))
+	}
 }

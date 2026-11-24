@@ -1408,3 +1408,12 @@ Principle (DD `DEF-20261123-design-principle-privileged-steps-are-do-exut`): no 
    - The Regenerate `console_url` is given only for a generated value; a hand-entered secret gets no link.
    - The tool description says nothing redeploys, and that a value also set elsewhere must be changed there too.
 
+
+## v1.57 release notices dated by when this server first served them (2026-11-24, approved spec `docs/spec-release-first-served.md` rev 1 (umbrella), Joe "Approve"; Defect Drainer DEF-20261124-bell-release-rows-sink-below-today-s-ite-0kny; amends v1.37 item 1; additive field; migration 0038; implemented on bot-control-plane `dev`)
+
+1. **Release `at`** on `GET /v1/me/notifications`: when this server first served the release, if it has a record; otherwise the release date at 00:00 UTC, as before. The 90-day window and the at-most-5 rule still use the CHANGELOG date. Sorting is unchanged (by `at`, newest first), so a recorded release sorts by its real time.
+2. **`date_only`** (release items only, `bool`): `true` when `at` is only the CHANGELOG date at 00:00 UTC, `false` when it is a recorded time. Other kinds carry no `date_only`. A client that receives no field (an older server) treats the release as dated.
+3. **Recording:** at startup the API records its own version (the newest entry of its embedded CHANGELOG) with the current time, unless the version already has a record; the first time is kept across restarts, redeploys and replicas. A version that is not `X.Y.Z` (1 to 4 digits each) is not recorded. A failed write logs one warning and the API starts anyway; a failed read dates every release by its CHANGELOG date.
+4. **Storage:** migration `0038_release_first_served.sql` creates `app.release_first_served (version text PRIMARY KEY, first_served_at timestamptz NOT NULL)` with a check on the `X.Y.Z` shape, and grants `deploybot_api` SELECT and INSERT only. `0038_release_first_served.down.sql` drops the table (hand-run).
+5. **Console:** a release row with `date_only` false shows its age ("1 h ago") and the full local time on hover; with `date_only` true it shows its date ("24 Nov", in UTC) and "Released 24 Nov 2026" on hover.
+6. MCP and `whats_new` are unchanged: they keep CHANGELOG dates.

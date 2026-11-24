@@ -100,6 +100,8 @@ type Mem struct {
 	notificationReads map[uuid.UUID]map[string]time.Time
 	// hostUpdateNotices is host id → latest version → noticed_at (migration 0035).
 	hostUpdateNotices map[uuid.UUID]map[string]time.Time
+	// releaseServed is version → first served (migration 0038).
+	releaseServed map[string]time.Time
 	// problems is id → problem (api-v1 v1.41); see problems.go.
 	problems map[uuid.UUID]store.Problem
 	// hostFiles is host config file versions, applies and status (api-v1
@@ -159,6 +161,7 @@ func New() *Mem {
 		users:                     map[uuid.UUID]store.User{},
 		notificationReads:         map[uuid.UUID]map[string]time.Time{},
 		hostUpdateNotices:         map[uuid.UUID]map[string]time.Time{},
+		releaseServed:             map[string]time.Time{},
 		problems:                  map[uuid.UUID]store.Problem{},
 		alertSettings:             map[uuid.UUID]store.HostAlertSettings{},
 		byEmail:                   map[string]uuid.UUID{},

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -337,5 +338,39 @@ func TestStartBackgroundUpkeep(t *testing.T) {
 			}
 		}
 		cancel()
+	}
+}
+
+type fakeReleaseStore struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeReleaseStore) RecordReleaseServed(_ context.Context, v string, _ time.Time) error {
+	f.calls = append(f.calls, v)
+	return f.err
+}
+
+// api-v1 v1.57: the API records its own version at startup; "unknown" (an
+// unparsable CHANGELOG) is not recorded, and a failure only logs one line.
+func TestRecordReleaseServed(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	f := &fakeReleaseStore{}
+	recordReleaseServed(context.Background(), f, "0.2.48", time.Now(), log)
+	recordReleaseServed(context.Background(), f, "unknown", time.Now(), log)
+	if len(f.calls) != 1 || f.calls[0] != "0.2.48" || buf.Len() != 0 {
+		t.Fatalf("calls %v log %q", f.calls, buf.String())
+	}
+	// The cause is logged so an operator can tell a missing grant from a
+	// missing table, but never a connection URL.
+	f.err = errors.New("permission denied for table release_first_served")
+	recordReleaseServed(context.Background(), f, "0.2.48", time.Now(), log)
+	f.err = errors.New("dial postgres://deploybot_api:secret@db/deploybot")
+	recordReleaseServed(context.Background(), f, "0.2.48", time.Now(), log)
+	out := buf.String()
+	if strings.Count(out, "\n") != 2 || strings.Count(out, "level=WARN") != 2 || !strings.Contains(out, "permission denied") ||
+		strings.Contains(out, "secret") || !strings.Contains(out, "err=redacted") {
+		t.Fatalf("log %q", out)
 	}
 }
