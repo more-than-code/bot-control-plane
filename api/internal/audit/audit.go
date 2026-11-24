@@ -113,6 +113,9 @@ const (
 	// state and reason when the row settles.
 	ActionHostAgentUpgrade       = "host.agent_upgrade"
 	ActionHostAgentUpgradeResult = "host.agent_upgrade_result"
+	// Docker usage (api-v1 v1.59 item 2). Detail: host; error_code is the
+	// refusal or failure code.
+	ActionHostDockerUsage = "host.docker_usage"
 	// Console host policy (api-v1 v1.51). Detail: host, the change
 	// (edge_from, edge_to, images_added, images_removed, projects_added,
 	// projects_removed), the refusal reason on a denied start; host and

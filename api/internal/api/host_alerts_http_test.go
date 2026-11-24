@@ -184,7 +184,7 @@ func TestHostDisksAndMetricsPath(t *testing.T) {
 	host := fx.sc.host
 	at := w.now.Add(-time.Minute)
 	samples := []store.Sample{
-		{M: "disk", T: at, Tags: map[string]string{"path": "/", "fstype": "ext4"}, Floats: map[string]float64{"used_percent": 50}},
+		{M: "disk", T: at, Tags: map[string]string{"path": "/", "fstype": "ext4"}, Ints: map[string]int64{"total": 2000, "used": 1000, "free": 1000}, Floats: map[string]float64{"used_percent": 50}},
 		{M: "disk", T: at, Tags: map[string]string{"path": "/data", "fstype": "xfs"}, Floats: map[string]float64{"used_percent": 70}},
 		{M: "disk", T: w.now.Add(-25 * time.Hour), Tags: map[string]string{"path": "/old", "fstype": "ext4"}, Floats: map[string]float64{"used_percent": 1}},
 		{M: "mem", T: at, Ints: map[string]int64{"total": 1000, "available": 400, "used": 600}, Floats: map[string]float64{"used_percent": 60}},
@@ -195,7 +195,9 @@ func TestHostDisksAndMetricsPath(t *testing.T) {
 	code, env := fx.do(actMetricsViewer, http.MethodGet, fx.hostPath("/disks"), "")
 	mustHTTP(t, code, env, http.StatusOK, "ok", "ok")
 	raw, _ := json.Marshal(env.Payload)
-	if string(raw) != `{"items":[{"fstype":"ext4","path":"/"},{"fstype":"xfs","path":"/data"}]}` {
+	// api-v1 v1.59 item 1: sizes and time of the newest row; /data sent no sizes.
+	if string(raw) != `{"items":[{"at":"2026-10-13T11:59:00Z","fstype":"ext4","path":"/","total":2000,"used":1000,"used_percent":50},`+
+		`{"at":"2026-10-13T11:59:00Z","fstype":"xfs","path":"/data","total":null,"used":null,"used_percent":70}]}` {
 		t.Fatalf("disks %s", raw)
 	}
 	code, _ = fx.do(actNone, http.MethodGet, fx.hostPath("/disks"), "")

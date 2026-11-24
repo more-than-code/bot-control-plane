@@ -180,7 +180,7 @@ func TestTools(t *testing.T) {
 		"get_alert_settings": true,
 	}
 	live := map[string]bool{
-		"host_snapshot": true, "probe_service": true,
+		"host_snapshot": true, "probe_service": true, "host_disk_usage": true,
 		"entry_logs": true, "entry_status": true, "confirm": true,
 	}
 	pending := map[string]bool{
@@ -395,7 +395,7 @@ func TestTools(t *testing.T) {
 		"check_readiness", "image_access", "host_policy_snippet",
 		"update_env_set", "delete_env_set", "shared_network_snippet", "whats_new",
 		"set_routes", "list_routes", "list_problems", "upgrade_agent",
-		"get_alert_settings", "set_alert_settings",
+		"get_alert_settings", "set_alert_settings", "host_disk_usage",
 	} {
 		if !seen[name] {
 			t.Errorf("missing tool %s", name)
@@ -404,8 +404,9 @@ func TestTools(t *testing.T) {
 	// 37 before api-v1 v1.34 and v1.35, plus whats_new, set_routes and
 	// list_routes, plus list_problems (v1.41), plus get_catalog_entry and
 	// set_entry_image, plus list_image_tags (v1.46), plus deploy_history (v1.47),
-	// plus upgrade_agent (v1.48), plus get_alert_settings and set_alert_settings (v1.49).
-	if len(seen) != 48 {
+	// plus upgrade_agent (v1.48), plus get_alert_settings and set_alert_settings (v1.49),
+	// plus host_disk_usage (v1.59).
+	if len(seen) != 49 {
 		t.Fatalf("tool count %d", len(seen))
 	}
 

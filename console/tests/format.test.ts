@@ -77,6 +77,9 @@ test('formatBytes uses 1024-based units and one decimal under 100', () => {
 	assert.equal(formatBytes(10.06 * 1024 ** 2), '10.1 MB');
 	assert.equal(formatBytes(100 * 1024 ** 3), '100 GB');
 	assert.equal(formatBytes(1024 ** 4), '1 TB');
+	// Rounding to 1024 moves up a unit: never "1024 KB".
+	assert.equal(formatBytes(1024 * 1024 - 1), '1 MB');
+	assert.equal(formatBytes(1023 * 1024), '1023 KB');
 });
 
 test('formatBytes rejects null, zero-like invalid, and non-finite values', () => {

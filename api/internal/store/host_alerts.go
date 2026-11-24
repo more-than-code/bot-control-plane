@@ -88,10 +88,15 @@ type ResourceStat struct {
 // MaxHostDisks caps ListHostDisks.
 const MaxHostDisks = 200
 
-// HostDisk is one mount a host reported.
+// HostDisk is one mount a host reported, with the sizes of its newest
+// sample (api-v1 v1.59 item 1). A size the sample lacked is nil.
 type HostDisk struct {
-	Path   string
-	Fstype string
+	Path        string
+	Fstype      string
+	Total       *int64
+	Used        *int64
+	UsedPercent *float64
+	At          time.Time
 }
 
 // HostAlertStore keeps the alert settings and reads the sweep's windows.
@@ -113,7 +118,7 @@ type HostAlertStore interface {
 	// ErrUnknownMeasurement.
 	HostResourceStats(ctx context.Context, measurement string, hostIDs []uuid.UUID, now time.Time) ([]ResourceStat, error)
 	// ListHostDisks returns the mounts the host reported at or after
-	// since, sorted by path, at most MaxHostDisks. A mount reported with
-	// several fstypes keeps the newest one.
+	// since, sorted by path, at most MaxHostDisks. Each mount carries its
+	// newest sample's fstype, sizes and time.
 	ListHostDisks(ctx context.Context, hostID uuid.UUID, since time.Time) ([]HostDisk, error)
 }

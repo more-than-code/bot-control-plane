@@ -3,12 +3,14 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import CommandText from '$lib/components/CommandText.svelte';
+	import DiskUsageCard from './DiskUsageCard.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
 	import LineChart from '$lib/components/LineChart.svelte';
 	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { AgentUpgrade, Host, HostDisk, SnapshotView } from '$lib/api-types';
+	import type { DockerUsage } from '$lib/disk-usage';
 	import { upgradeLine } from '$lib/agent-upgrade';
 	import { formatBytes, formatCapacity, formatLoad, formatPercent, formatRate, formatTemp, formatUptime } from '$lib/format';
 	import { alignSeries, hostPolicyLine, hostSharedNetworks, METRIC_SPECS, overviewHref, type MetricChart, type MetricFormat } from '$lib/host-view';
@@ -27,7 +29,9 @@
 		upgrades = [],
 		upgradesMessage = null,
 		disks = [],
-		diskPath = '/'
+		diskPath = '/',
+		dockerUsage = null,
+		dockerUsageMessage = null
 	}: {
 		host: Host;
 		range: RangeKey;
@@ -41,6 +45,9 @@
 		/** The host's mounts (api-v1 v1.49 item 4); the picker shows with more than one. */
 		disks?: HostDisk[];
 		diskPath?: string;
+		/** The Check Docker usage answer or its error (api-v1 v1.59); the button shows when canUpgrade. */
+		dockerUsage?: DockerUsage | null;
+		dockerUsageMessage?: string | null;
 	} = $props();
 
 	const formatters: Record<MetricFormat, (value: number) => string> = {
@@ -220,6 +227,15 @@
 		</Card.Content>
 	</Card.Root>
 {/if}
+
+<DiskUsageCard
+	{disks}
+	canCheck={canUpgrade}
+	hostStatus={host.status}
+	revoked={host.revoked_at != null}
+	usage={dockerUsage}
+	message={dockerUsageMessage}
+/>
 
 <p class="text-muted-foreground mb-3 text-sm">Charts refresh every 30 seconds while this tab is visible.</p>
 

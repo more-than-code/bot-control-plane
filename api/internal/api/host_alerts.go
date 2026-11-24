@@ -162,7 +162,7 @@ func alertSettingsChanges(from, to store.HostAlertSettings) map[string]any {
 }
 
 // handleHostDisks is GET /v1/hosts/{id}/disks: the mounts the host
-// reported in the last 24 hours.
+// reported in the last 24 hours, each with its newest sizes (v1.59).
 func (s *Server) handleHostDisks(w http.ResponseWriter, r *http.Request) {
 	p, host, ok := s.fetchHost(w, r)
 	if !ok {
@@ -176,13 +176,22 @@ func (s *Server) handleHostDisks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// api-v1 v1.59 item 1: the newest row's sizes and time; a size the
+	// row lacked is null.
 	type diskView struct {
-		Path   string `json:"path"`
-		Fstype string `json:"fstype"`
+		Path        string   `json:"path"`
+		Fstype      string   `json:"fstype"`
+		Total       *int64   `json:"total"`
+		Used        *int64   `json:"used"`
+		UsedPercent *float64 `json:"used_percent"`
+		At          string   `json:"at"`
 	}
 	items := make([]diskView, 0, len(disks))
 	for _, d := range disks {
-		items = append(items, diskView{Path: d.Path, Fstype: d.Fstype})
+		items = append(items, diskView{
+			Path: d.Path, Fstype: d.Fstype, Total: d.Total, Used: d.Used, UsedPercent: d.UsedPercent,
+			At: d.At.UTC().Format(time.RFC3339),
+		})
 	}
 	writeOK(w, http.StatusOK, map[string]any{"items": items})
 }

@@ -109,10 +109,33 @@ function formatScaled(amount: number): string {
 	return text.endsWith('.0') ? text.slice(0, -2) : text;
 }
 
+/**
+ * Decimal bytes, as `docker system df` and `df -H` print them: "12.4 GB" is 12.4 x 1000^3 (Joe 2026-11-24, disk usage).
+ * Missing or negative is `n/a`.
+ */
+export function formatDecimalBytes(value: number | null | undefined): string {
+	if (value == null || !Number.isFinite(value) || value < 0) return 'n/a';
+	return scaledBytes(value, 1000, ['B', 'kB', 'MB', 'GB', 'TB', 'PB']);
+}
+
+/** The largest unit not above value, moved up one when rounding reaches base (999,999 B is "1 MB", not "1000 kB"). */
+function scaledBytes(value: number, base: number, units: readonly string[]): string {
+	let scale = 1;
+	let index = 0;
+	while (value >= scale * base && index < units.length - 1) {
+		scale *= base;
+		index += 1;
+	}
+	if (Number(formatScaled(value / scale)) >= base && index < units.length - 1) {
+		scale *= base;
+		index += 1;
+	}
+	return `${formatScaled(value / scale)} ${units[index]}`;
+}
+
 export function formatBytes(value: number | null | undefined): string {
 	if (value == null || !Number.isFinite(value) || value < 0) return 'n/a';
-	const { scale, label } = byteUnit(value);
-	return `${formatScaled(value / scale)} ${label}`;
+	return scaledBytes(value, 1024, BYTE_UNITS);
 }
 
 /**

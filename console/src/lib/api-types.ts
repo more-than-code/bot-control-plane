@@ -278,8 +278,18 @@ export type HostAlertSettings = {
 	cpu_max_busy_percent: number | null;
 };
 
-/** One mount of `GET /v1/hosts/{id}/disks` (api-v1 v1.49 item 4). */
-export type HostDisk = { path: string; fstype: string };
+/**
+ * One mount of `GET /v1/hosts/{id}/disks` (api-v1 v1.49 item 4). Since v1.59 item 1 it carries its newest
+ * sample's sizes (bytes) and time; null when the API did not send them.
+ */
+export type HostDisk = {
+	path: string;
+	fstype: string;
+	total?: number | null;
+	used?: number | null;
+	used_percent?: number | null;
+	at?: string | null;
+};
 
 export type HostEdge = {
 	/** The host's hello reports `edge.enabled` (its root allowed the edge in runner.toml). */

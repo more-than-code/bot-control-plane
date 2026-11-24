@@ -188,22 +188,30 @@ func (m *Mem) HostResourceStats(_ context.Context, measurement string, hostIDs [
 func (m *Mem) ListHostDisks(_ context.Context, hostID uuid.UUID, since time.Time) ([]store.HostDisk, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	newest := map[string]time.Time{}
-	fstype := map[string]string{}
+	newest := map[string]store.HostDisk{}
 	for _, s := range m.samples {
 		if s.HostID != hostID || s.M != "disk" || s.T.Before(since) {
 			continue
 		}
 		path := s.Tags["path"]
-		if at, ok := newest[path]; ok && !s.T.After(at) {
+		if d, ok := newest[path]; ok && !s.T.After(d.At) {
 			continue
 		}
-		newest[path] = s.T
-		fstype[path] = s.Tags["fstype"]
+		d := store.HostDisk{Path: path, Fstype: s.Tags["fstype"], At: s.T}
+		if v, ok := s.Ints["total"]; ok {
+			d.Total = &v
+		}
+		if v, ok := s.Ints["used"]; ok {
+			d.Used = &v
+		}
+		if v, ok := s.Floats["used_percent"]; ok {
+			d.UsedPercent = &v
+		}
+		newest[path] = d
 	}
 	out := []store.HostDisk{}
-	for path := range newest {
-		out = append(out, store.HostDisk{Path: path, Fstype: fstype[path]})
+	for _, d := range newest {
+		out = append(out, d)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	if len(out) > store.MaxHostDisks {

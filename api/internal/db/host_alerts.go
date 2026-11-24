@@ -160,7 +160,7 @@ func (d *DB) HostResourceStats(ctx context.Context, measurement string, hostIDs 
 
 func (d *DB) ListHostDisks(ctx context.Context, hostID uuid.UUID, since time.Time) ([]store.HostDisk, error) {
 	rows, err := d.pool.Query(ctx, `
-SELECT DISTINCT ON (path) path, fstype
+SELECT DISTINCT ON (path) path, fstype, total, used, used_percent, time
 FROM metrics.host_disk
 WHERE host_id = $1::uuid AND time >= $2
 ORDER BY path, time DESC
@@ -173,7 +173,7 @@ LIMIT $3
 	out := []store.HostDisk{}
 	for rows.Next() {
 		var disk store.HostDisk
-		if err := rows.Scan(&disk.Path, &disk.Fstype); err != nil {
+		if err := rows.Scan(&disk.Path, &disk.Fstype, &disk.Total, &disk.Used, &disk.UsedPercent, &disk.At); err != nil {
 			return nil, mapErr(err)
 		}
 		out = append(out, disk)

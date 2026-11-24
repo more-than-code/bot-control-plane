@@ -73,9 +73,10 @@ describe('alert settings form and parsers', () => {
 		});
 		assert.equal(parseAlertSettings({ alerts_enabled: 'yes' }), null);
 		assert.equal(parseAlertSettings({ alerts_enabled: true, disk_max_used_percent: 100 }), null);
+		const none = { total: null, used: null, used_percent: null, at: null };
 		assert.deepEqual(parseHostDisks({ items: [{ path: '/', fstype: 'ext4' }, { path: 'bad\u0007', fstype: 'x' }, { path: '/data', fstype: 'xfs' }], next_cursor: null }), [
-			{ path: '/', fstype: 'ext4' },
-			{ path: '/data', fstype: 'xfs' }
+			{ path: '/', fstype: 'ext4', ...none },
+			{ path: '/data', fstype: 'xfs', ...none }
 		]);
 	});
 

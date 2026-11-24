@@ -43,6 +43,7 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerListProcesses(server, api)
 	registerServiceHealthHistory(server, api)
 	registerHostSnapshot(server, api)
+	registerHostDiskUsage(server, api)
 	registerProbeService(server, api)
 	registerGetHealthChecks(server, api)
 	registerListCatalog(server, api)

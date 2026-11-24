@@ -187,6 +187,7 @@ func TestRouteTable(t *testing.T) {
 		"GET /v1/hosts/{id}/processes",
 		"GET /v1/services/{id}/health",
 		"POST /v1/hosts/{id}/snapshot",
+		"POST /v1/hosts/{id}/docker-usage",
 		"POST /v1/services/{id}/probe",
 		"POST /v1/confirmations/{confirmation_id}",
 		"GET /v1/projects/{id}/audit",

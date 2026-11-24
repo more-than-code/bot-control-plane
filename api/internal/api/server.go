@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -92,6 +93,12 @@ type Server struct {
 	// agentUpgradeWaitTest, when non-zero, replaces the 130 s agent upgrade
 	// task wait. Tests only.
 	agentUpgradeWaitTest time.Duration
+	// dockerUsageWaitTest, when non-zero, replaces the 50 s Docker usage
+	// wait (tests).
+	dockerUsageWaitTest time.Duration
+	// dockerUsageRuns holds the host ids with a Docker usage check in
+	// flight (api-v1 v1.59: one per host at a time).
+	dockerUsageRuns sync.Map
 	// hostPolicies is the console policy applies waiting for a hello
 	// (api-v1 v1.51), by host.
 	hostPolicies hostPolicyRuns
@@ -316,6 +323,8 @@ func contractRoutes() []route {
 		{"GET /v1/hosts/{id}/processes", false, (*Server).handleProcesses, delegatedAllow},
 		{"GET /v1/services/{id}/health", false, (*Server).handleHealthHistory, delegatedAllow},
 		{"POST /v1/hosts/{id}/snapshot", false, (*Server).handleSnapshot, delegatedAllow},
+		// api-v1 v1.59 item 2: Docker usage, org owners and admins.
+		{"POST /v1/hosts/{id}/docker-usage", false, (*Server).handleDockerUsage, delegatedAllow},
 		{"POST /v1/services/{id}/probe", false, (*Server).handleProbe, delegatedAllow},
 		{"POST /v1/confirmations/{confirmation_id}", false, (*Server).handleConfirmation, delegatedAllow},
 		{"GET /v1/projects/{id}/audit", false, (*Server).handleAudit, delegatedAllow},

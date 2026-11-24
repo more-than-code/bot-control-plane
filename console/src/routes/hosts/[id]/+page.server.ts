@@ -3,6 +3,7 @@ import type { Host, HostAccess, HostEdge, ProcessSample, Project } from '$lib/ap
 import type { HostPage, MetricChart, ProcessSort, ServiceLink } from '$lib/host-view';
 import { hostQuery, MEM_API_SERIES, METRIC_SPECS, withAvailablePercent } from '$lib/host-view';
 import { loadAlertSettings, loadHostDisks, saveAlerts } from '$lib/server/host-alerts';
+import { checkDockerUsage } from '$lib/server/disk-usage';
 import { rangeWindow, type RangeKey } from '$lib/ranges';
 import { processServiceHref, serviceLabel } from '$lib/service-label';
 import { removeAccessAction, setAccessAction } from '$lib/server/access-actions';
@@ -312,6 +313,7 @@ export const actions: Actions = {
 	removeAccess: removeAccessAction('access'),
 	setEdge,
 	saveAlerts,
+	dockerUsage: checkDockerUsage,
 	saveFile: saveHostFile,
 	saveSecretFile: saveSecretHostFile,
 	applyFile: applyHostFile,

@@ -11,7 +11,8 @@ import { backTo } from '$lib/url';
 /** Host resource alerts (api-v1 v1.49): settings, mounts and the save action. Allowlist parsers. */
 
 const CONTROL = /[\u0000-\u001F\u007F]/;
-const DISK_CAP = 50;
+/** The API's own cap (store.MaxHostDisks), so the console never drops a mount the API sent. */
+const DISK_CAP = 200;
 
 export function parseAlertSettings(value: unknown): HostAlertSettings | null {
 	if (!isRecord(value) || typeof value.alerts_enabled !== 'boolean') return null;
@@ -24,7 +25,14 @@ export function parseAlertSettings(value: unknown): HostAlertSettings | null {
 	return out;
 }
 
-/** `GET /v1/hosts/{id}/disks`: mounts that parse, at most 50, sorted by the API. Null when not a list. */
+function bytesOrNull(value: unknown): number | null {
+	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+/**
+ * `GET /v1/hosts/{id}/disks`: mounts that parse, at most 200 (the API's cap), sorted by the API. Null when not a list. Each keeps
+ * its newest sizes and time (api-v1 v1.59 item 1); a missing or unusable one is null.
+ */
 export function parseHostDisks(payload: unknown): HostDisk[] | null {
 	const page = parseListPayload(payload);
 	if (!page) return null;
@@ -32,7 +40,15 @@ export function parseHostDisks(payload: unknown): HostDisk[] | null {
 	for (const item of page.raw.slice(0, DISK_CAP)) {
 		if (!isRecord(item) || typeof item.path !== 'string' || typeof item.fstype !== 'string') continue;
 		if (item.path === '' || item.path.length > 1024 || CONTROL.test(item.path) || item.fstype.length > 64 || CONTROL.test(item.fstype)) continue;
-		out.push({ path: item.path, fstype: item.fstype });
+		const pct = item.used_percent;
+		out.push({
+			path: item.path,
+			fstype: item.fstype,
+			total: bytesOrNull(item.total),
+			used: bytesOrNull(item.used),
+			used_percent: typeof pct === 'number' && Number.isFinite(pct) && pct >= 0 && pct <= 100 ? pct : null,
+			at: typeof item.at === 'string' && !Number.isNaN(Date.parse(item.at)) ? item.at : null
+		});
 	}
 	return out;
 }

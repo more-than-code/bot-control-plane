@@ -103,6 +103,8 @@
 			upgradesMessage={data.upgradesMessage ?? null}
 			disks={data.disks ?? []}
 			diskPath={data.diskPath ?? '/'}
+			dockerUsage={form?.dockerUsage ?? null}
+			dockerUsageMessage={typeof form?.dockerUsageMessage === 'string' ? form.dockerUsageMessage : null}
 		/>
 	{:else if data.tab === 'files'}
 		{#if data.files}

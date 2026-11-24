@@ -156,8 +156,12 @@ func TestParityHostResourceStats(t *testing.T) {
 			t.Fatalf("no hosts %+v %v", got, err)
 		}
 		disks, err := p.st.ListHostDisks(p.ctx, h1.ID, now.Add(-24*time.Hour))
-		if err != nil || len(disks) != 2 || disks[0] != (store.HostDisk{Path: "/", Fstype: "ext4"}) || disks[1] != (store.HostDisk{Path: "/data", Fstype: "xfs"}) {
+		if err != nil || len(disks) != 2 || disks[0].Path != "/" || disks[0].Fstype != "ext4" || disks[1].Path != "/data" || disks[1].Fstype != "xfs" {
 			t.Fatalf("disks %+v %v", disks, err)
+		}
+		// The newest sample's percent and time; no sizes were sent.
+		if d := disks[0]; d.UsedPercent == nil || !near(*d.UsedPercent, 90) || !d.At.Equal(now) || d.Total != nil || d.Used != nil {
+			t.Fatalf("disk / newest %+v", d)
 		}
 		// The disk chart of one mount; an unknown mount is an empty series.
 		series, err := p.st.QueryChart(p.ctx, h1.ID, "disk", "/data", now.Add(-10*time.Minute), now.Add(time.Second), 600)
@@ -336,6 +340,42 @@ VALUES ($1::uuid, 'host_resource', $2, $3::uuid, $4::uuid, 'needs_action', 'x is
 	if err := insertProblem(); err != nil {
 		t.Fatalf("host_resource refused after up again: %v", err)
 	}
+}
+
+// TestParityHostDisksSizes (api-v1 v1.59 item 1): each mount carries its
+// newest row's total, used, used_percent and time, not an older row's.
+func TestParityHostDisksSizes(t *testing.T) {
+	runParity(t, func(p parity) {
+		t := p.t
+		owner := p.user("ds")
+		host := p.enroll(p.org(owner.ID), nil, owner.ID, "ds")
+		old, newest := p.at.Add(-time.Minute), p.at
+		disk := func(at time.Time, path string, total, used int64, pct float64) store.Sample {
+			return store.Sample{M: "disk", T: at, Tags: map[string]string{"path": path, "fstype": "ext4"},
+				Ints: map[string]int64{"total": total, "used": used, "free": total - used}, Floats: map[string]float64{"used_percent": pct}}
+		}
+		samples := []store.Sample{
+			disk(old, "/", 1000, 100, 10),
+			disk(newest, "/", 1000, 590, 59),
+			disk(old, "/data", 4000, 1000, 25),
+			disk(p.at.Add(-25*time.Hour), "/gone", 1, 1, 100),
+		}
+		if _, err := p.st.InsertBatch(p.ctx, host.ID, uuid.New(), samples, p.at); err != nil {
+			t.Fatal(err)
+		}
+		disks, err := p.st.ListHostDisks(p.ctx, host.ID, p.at.Add(-24*time.Hour))
+		if err != nil || len(disks) != 2 {
+			t.Fatalf("disks %+v %v", disks, err)
+		}
+		root, data := disks[0], disks[1]
+		if root.Path != "/" || root.Total == nil || *root.Total != 1000 || root.Used == nil || *root.Used != 590 ||
+			root.UsedPercent == nil || !near(*root.UsedPercent, 59) || !root.At.Equal(newest) {
+			t.Fatalf("root %+v", root)
+		}
+		if data.Path != "/data" || data.Used == nil || *data.Used != 1000 || !data.At.Equal(old) {
+			t.Fatalf("data %+v", data)
+		}
+	})
 }
 
 // TestParityHostDisksCap (review item 2): at most store.MaxHostDisks mounts,
