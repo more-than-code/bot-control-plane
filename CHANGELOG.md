@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.48 — 2026-11-24
+- See what fills a host's disk: the host page lists each mount's used and total size, and org owners and admins can check what Docker uses there and what can be reclaimed, as `docker system df` shows it. The Docker check needs bot-agent 0.2.17; MCP has a new `host_disk_usage` tool.
+- Deploybot watches its own metrics retention: if the database stops deleting metrics older than 7 days, the owners and admins of the organization that owns the server's host get a problem in the bell.
+- A release in the bell shows how long ago this server started running it, so two releases on the same day are told apart and sort by when they went live.
+- Every notification's time stays visible, even when its text is long.
+
 ## v0.2.47 — 2026-11-24
 - A deploy the host refuses as invalid names the spec field that failed (needs bot-agent 0.2.16), and a deploy the host refused keeps its plan, so you can confirm it again after fixing the cause.
 - Regenerate is offered only for values Deploybot generated. A secret you entered yourself, such as a provider's API key, is changed with Edit, so it can no longer be replaced by a random value by mistake.

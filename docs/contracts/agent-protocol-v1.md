@@ -718,7 +718,7 @@ A value-only env change used to be reported `unchanged` (rule 11 compares digest
    - **Health in host mode:** `ports[].host` probes reach whatever listens on that loopback port; use a Docker healthcheck in the image (the Deploybot images have one) so another process on the port cannot mask a broken deploy.
    - **At rest:** stored results may hold up to the deploy's log tail (already redacted) for up to 7 days, 0600 under the agent's state directory.
 
-## v1.22 host policy from the console (2026-11-23, spec `docs/spec-console-host-policy.md` rev 2 §2.2 in bot-control-plane, as implemented; additive, gated by `runner.toml`; with api-v1 v1.51; implemented on bot-agent `dev` e2f7049, merged 20895c3; in bot-agent v0.2.15)
+## v1.22 host policy from the console (2026-11-23, spec `docs/spec-console-host-policy.md` rev 2 §2.2 in bot-control-plane, as implemented; additive, gated by `runner.toml`; with api-v1 v1.51; implemented on bot-agent `dev` e2f7049, merged 20895c3; in bot-agent v0.2.16)
 1. **`runner.toml` key `console_policy = true|false`** (missing = false). The host's root opts in once by hand; an older agent refuses the key as `unknown_key`. `bot-agent policy check` prints `console_policy=<bool>` as its last line.
    - Only three keys are console-editable: `edge`, `images` and `projects`. Never `enabled`, `run_as`, `dirs`, `exec_allow`, `allow_shell`, `max_programs`, `max_containers`, `allow_public_ports`, shared networks, `host_files`, `agent_upgrade`, its proxy, or `console_policy` itself.
 2. **Hello:** `programs.console_policy` (bool) and `programs.image_patterns` (the runner.toml `images`, sent only when `console_policy` is true; at most 64). The existing `programs.policy_hash`, `edge` and `projects` carry the rest. There is no result frame: the server reads the outcome from the next hello's `policy_hash`.
@@ -732,7 +732,7 @@ A value-only env change used to be reported `unchanged` (rule 11 compares digest
    - stage the new file under `/var/lib/bot-agent-runner/policy/`, start the transient unit `bot-agent-policy` (`bot-agent-runner policy-run <base_hash> <new_hash>`) and answer `accepted` with `new_hash`. The helper's sandbox cannot write `/etc`; the unit does.
 5. **`bot-agent-runner policy-run`** (the transient unit, `RuntimeMaxSec` 300): wait 3 s so the agent can send the task result; check runner.toml still has `base_hash` and the staged file `new_hash`; keep `/etc/bot-agent/runner.toml.prev` (0600); write atomically; restart bot-agent and wait up to 90 s for `/var/lib/bot-agent/last_hello` newer than the restart. On failure it puts the previous file back and restarts again (`rolled_back`, `not_reconnected`). It writes `result.json` for the root and the journal.
 
-## v1.23 bad_spec names the field (2026-11-23, DD DEF-20261123-agent-bad-spec-refusals-don-t-name-the-f-yars; additive, no gate; with api-v1 v1.55; spec `docs/spec-refused-deploy.md` in bot-control-plane)
+## v1.23 bad_spec names the field (2026-11-23, DD DEF-20261123-agent-bad-spec-refusals-don-t-name-the-f-yars; additive, no gate; with api-v1 v1.55; spec `docs/spec-refused-deploy.md` in bot-control-plane; in bot-agent v0.2.16)
 
 1. **`task_reject` gains an optional `"field": string`**, sent only with `error_code` `bad_spec` on an image task (`image_*`). It is the key that failed, never a value:
    - a key of the task spec: `project`, `entry`, `spec`, `env`, `registry_auth`, `spec_hash`, `digest`, `files`, `secret_keys`, `env_hash`, `lines`; or `service` when the task frame's `service` is not null;
@@ -742,3 +742,40 @@ A value-only env change used to be reported `unchanged` (rule 11 compares digest
    - The agent log line becomes `task_reject code=bad_spec field=<field>`.
 2. **No gate.** Every API reads `task_reject` by field and ignores an unknown key, so an older API keeps today's answer. API v1.55 and later show the field (api-v1 v1.55 item 1).
 3. A helper `bad_spec` (a `task_result`) is unchanged: v1.19 `reason` already explains it.
+
+## v1.24 containers on kernels without cgroup namespaces (2026-11-24, approved spec `docs/spec-agent-0216-cgroupns.md` rev 1 in the umbrella; additive, gated by `runner.toml`; no API change; in bot-agent v0.2.16)
+
+1. **`runner.toml` key `container_cgroupns = "private"|"host"`** (missing = `private`). Only the host's root sets it; the v1.22 console rewrite never changes it. Any other value, or a duplicate key, is `parse`. An older agent refuses the key as `unknown_key`.
+   - The helper sends `HostConfig.CgroupnsMode` from it for every container `container_deploy` creates (service and job, including an `image_rollback` that pulls) and for the edge container. `container_rollback` (the swap to the kept container) creates nothing. It was always `"private"` before; with the key absent nothing changes.
+   - `bot-agent policy check` prints `container_cgroupns=<value>` as its last line (after `console_policy=`).
+2. **A container start the runtime refuses has its own helper code `container_start_failed`.** It covers Docker answering `POST /containers/{id}/start` with 500: a runtime refusal (for example `cgroup namespaces aren't enabled in the kernel`) or any other daemon error during start. It applies to every catalog verb that starts a container: `container_deploy`, `container_start`, `container_restart` and `container_rollback`. It was `docker_unavailable` before; a failed ping, a transport error and other Engine answers stay `docker_unavailable`.
+   - On `container_deploy` the helper removes the container it just created (no force; it was never started), on its own short context so a cancelled caller still cleans up. It logs the runtime's message in the helper journal (`bot-agent-runner@*`), scrubbed as today. The message never leaves the host.
+   - The agent words it in the v1.19 deploy-result `reason`: "the container runtime on the host could not start the container (see the bot-agent-runner log on the host)". A rollback whose restart of the previous container is refused also reports `container_start_failed`.
+   - The edge verbs keep `docker_unavailable` for a start failure: they have their own codes.
+3. **No wire change:** there is no new frame or hello field. An API that does not know the code shows it as the agent sent it; API v1.47 and later store the reason text.
+
+## v1.25 Docker disk usage (2026-11-24, approved spec `docs/spec-disk-usage-breakdown.md` rev 1 §10 in the umbrella; additive; with api-v1 v1.59; in bot-agent v0.2.17)
+
+1. **Task kind `docker_usage`**, spec exactly `{}` (any other spec, or a non-null `service`, is `task_reject` `bad_spec`), `timeout_sec` 45 from the API (unset is 45 s, at most 60 s). Nothing is stored. An agent before 0.2.17 rejects the kind `forbidden`, as for any kind it does not know; the API checks the hello `agent_version` first.
+   - Success: state `succeeded`, payload `{"outcome":"ok","summary":{…}}` (item 3).
+   - Failure: state `failed`, `error_code` and payload `{"outcome":"failed","reason":code}` with the same code: `docker_usage_disabled` (neither `images` nor `edge` is on; the agent checks its own policy first, so a host without the helper gets it too), `docker_unavailable` (Docker did not answer or answered badly; also any other helper refusal, a transport error or a reply that fails the agent's strict check), `timeout` (the helper's Engine deadline, or this task's own deadline; a session that ends first is `docker_unavailable`).
+2. **Helper verb `docker_df`** (read-only, not mutating, so it runs during an agent upgrade). Request exactly `{}` (else `bad_spec`). The gate is `container_list`'s: `images` enabled OR `edge` enabled in `runner.toml`, re-read per call; otherwise `{"error":"docker_usage_disabled"}` before any Engine call.
+   - The Engine call is `GET /system/df` at the negotiated version, with its own 30 s deadline and a 32 MiB body limit for this call only (every other call keeps 4 MiB). A deadline overrun is `{"error":"timeout"}`; unreachable, a non-200 answer, a body over the limit or one that does not parse is `{"error":"docker_unavailable"}`. The Engine's message goes only to the helper journal, scrubbed as today (v1.17 item 4).
+   - Success is `{"summary":{…}}`. The agent decodes it strictly (no other key, lists ≤ 10, strings ≤ 200 characters, no negative number).
+3. **Summary** (bytes as integers):
+   ```json
+   {"totals":{"images":{"count":N,"active":N,"size":B,"reclaimable":B},
+              "containers":{…},"volumes":{…},"build_cache":{…}},
+    "images":[{"ref":"ghcr.io/o/app:1.2","id":"0123456789ab","size":B,"containers":N}],
+    "volumes":[{"name":"pgdata","size":B,"in_use":true}],
+    "containers":[{"name":"deploybot-api","state":"running","size":B}]}
+   ```
+   - A size Docker reports as -1 counts as 0 in the totals and is `null` in a list; it sorts below every known size.
+   - **images:** `ref` is the first RepoTag, or `<none>` when there is none or it is `<none>:<none>`; `id` the first 12 hex digits after `sha256:` (`""` if the id has another shape); `containers` is Docker's `Containers` with -1 as 0. `active` counts images with `containers` > 0. The totals follow `docker system df`, checked against Docker 29.9's raw answer on a dev host (2026-11-24): `size` is Docker's `LayersSize` (a shared layer counted once; the sum of the sizes when the daemon sends none), and `reclaimable` is the sum of `Size` - `SharedSize` over the images with `containers` 0 (the whole `Size` when `SharedSize` is -1 or larger than `Size`; an image whose `Size` is -1 adds nothing), at most `size`.
+   - **containers:** `size` is `SizeRw` (missing is 0); `name` the first name without its leading `/`; `active` counts `running`; `reclaimable` sums the rest.
+   - **volumes:** `size` is `UsageData.Size`; `in_use` is `UsageData.RefCount` > 0; `active` counts those in use; `reclaimable` sums the rest. A volume whose `UsageData` is null or missing has an unknown size (null in the list, 0 in the totals) and is not in use.
+   - **build_cache:** `count` counts every record and `active` those `InUse`. As in `docker system df`, a record with `Shared` true (its data is also held by another record) is left out of `size` and `reclaimable`: `size` sums `Size` of the others, `reclaimable` those of them not in use. There is no build-cache list.
+   - Each list holds the 10 largest, by size descending, then `name` or `ref` ascending (images then by `id`). Totals cover everything. Empty lists are `[]`.
+   - Every string is capped at 200 characters (invalid UTF-8 replaced). Nothing else is read from the Engine answer: no labels, env, mounts, host paths, commands, or digests other than the short image id.
+4. **No new `runner.toml` key and no hello field.**
+
