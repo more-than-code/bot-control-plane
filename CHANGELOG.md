@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.47 — 2026-11-24
+- A deploy the host refuses as invalid names the spec field that failed (needs bot-agent 0.2.16), and a deploy the host refused keeps its plan, so you can confirm it again after fixing the cause.
+- Regenerate is offered only for values Deploybot generated. A secret you entered yourself, such as a provider's API key, is changed with Edit, so it can no longer be replaced by a random value by mistake.
+- The Regenerate dialog says nothing changes until you redeploy the entries that use the key, and warns that a value also set somewhere else (a database user, a first-start setting) must be changed there too.
+- The notification bell loads again (it failed on v0.2.46).
+
 ## v0.2.46 — 2026-11-24
 - Host resource alerts: Deploybot opens a problem when an always-on host runs low on memory or disk, or stays busy on CPU or load, and resolves it after recovery. Org owners and admins can set per-host thresholds on the host page, and the memory chart shows available memory.
 - Deploybot can run its own server in containers: image entries can use the host's network when the host's owner allows it, secrets can come from root-only files on the host, and a deploy started before the server goes away is still recorded when the host reports back. This needs bot-agent 0.2.15.
