@@ -95,7 +95,7 @@ Absolute timestamps, including Last seen and chart axis labels, render in the vi
 - `hooks.server.ts`: cookie → `/v1/me` → locals; a missing or expired session redirects or returns 401.
 - The callback route: state mismatch is rejected; the token never reaches the browser body.
 - Join-token page: the token renders once; reloading does not show it again.
-- `pnpm check`, `pnpm test`, and `pnpm build` with Node 24 on `PATH` (see AGENTS.md).
+- `pnpm check`, `pnpm test`, and `pnpm build` with Node 22 or newer on `PATH` (see AGENTS.md).
 
 ### Program secrets and the host's projects allowlist (api-v1 v1.22 and v1.23, 2026-11-13)
 
