@@ -1,6 +1,6 @@
 # A refused deploy keeps its plan under the API role (migration 0040)
 
-Status: rev 1, proposed (2026-11-25). Migration 0040. No api-v1 or
+Status: rev 1, approved by Joe on 2026-11-25 ("ok"). Migration 0040. No api-v1 or
 agent-protocol change: this makes api-v1 v1.55 item 2 (spec-refused-deploy.md)
 work as already specified. Covers DD items
 DEF-20261123-refused-deploy-never-keeps-its-plan-miss-3vy7 and, through it,
