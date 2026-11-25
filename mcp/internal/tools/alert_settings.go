@@ -5,21 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/more-than-code/bot-control-plane/mcp/internal/apiclient"
-	"github.com/more-than-code/bot-control-plane/mcp/internal/auth"
 )
 
-// Host alert settings (api-v1 v1.49 items 3 and 6). The API accepts the
-// delegated PUT directly, so the confirmation lives here: set_alert_settings
-// checks the host is visible and keeps the values in pendingAlertSettings
-// (local_plans.go); confirm with that id and key sends the PUT with the
-// caller's own token.
+// Host alert settings (api-v1 v1.49 items 3 and 6). Since v1.60 changing
+// them is the person's step: the API refuses a delegated PUT, and
+// set_alert_settings returns a console link that stages the change on the
+// host's Alerts card.
 
 const getAlertSettingsSchema = `{
   "type": "object",
@@ -33,7 +30,7 @@ const getAlertSettingsSchema = `{
 const setAlertSettingsSchema = `{
   "type": "object",
   "additionalProperties": false,
-  "required": ["host_id", "alerts_enabled", "idempotency_key"],
+  "required": ["host_id", "alerts_enabled"],
   "properties": {
     "host_id": {"type": "string", "format": "uuid"},
     "alerts_enabled": {"type": "boolean"},
@@ -79,8 +76,8 @@ func registerAlertSettings(server *mcp.Server, api *apiclient.Client) {
 	})
 	addTool(server, &mcp.Tool{
 		Name:        "set_alert_settings",
-		Description: "Plan new resource alert settings for a host (organization owners and admins only; the API checks the role at confirm). Send alerts_enabled, and mem_min_available_percent (5–50), disk_max_used_percent (50–99) and cpu_max_busy_percent (50–100), each null or left out for the default. With a threshold set, a problem resolves only when the value is 5 points kinder, and for memory the percent alone decides (the default also keeps a 96 MiB open and 128 MiB resolve floor). Nothing changes until confirm after the user agrees: show the plan, then call confirm with the returned confirmation_id and the same idempotency_key within 10 minutes. Read the current settings first with get_alert_settings. Does not contact the host.",
-		Annotations: mutatingAnnotations(false),
+		Description: "Propose new resource alert settings for a host. Only the person can change them, in the console, as an organization owner or admin there; this tool changes nothing. Send alerts_enabled, and mem_min_available_percent (5–50), disk_max_used_percent (50–99) and cpu_max_busy_percent (50–100), each null or left out for the default. With a threshold set, a problem resolves only when the value is 5 points kinder, and for memory the percent alone decides (the default also keeps a 96 MiB open and 128 MiB resolve floor). Returns current, proposed and changes, and console_url: the host's Alerts card with the change filled in, for the person to review and Save. " + linkRule + " There is no confirm step for alert settings. Read the current settings first with get_alert_settings. Does not contact the host.",
+		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(setAlertSettingsSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
 		var in struct {
@@ -89,7 +86,9 @@ func registerAlertSettings(server *mcp.Server, api *apiclient.Client) {
 			MemMinAvailablePercent *int   `json:"mem_min_available_percent"`
 			DiskMaxUsedPercent     *int   `json:"disk_max_used_percent"`
 			CPUMaxBusyPercent      *int   `json:"cpu_max_busy_percent"`
-			IdempotencyKey         string `json:"idempotency_key"`
+			// Accepted and ignored for one release (api-v1 v1.60), so an
+			// agent that still sends it is not refused.
+			IdempotencyKey string `json:"idempotency_key"`
 		}
 		if err := decodeArgs(raw, &in); err != nil {
 			return badRequest(err)
@@ -98,20 +97,13 @@ func registerAlertSettings(server *mcp.Server, api *apiclient.Client) {
 			// A missing value would silently turn alerts off.
 			return badRequest(errors.New("alerts_enabled is required"))
 		}
-		settings := alertSettings{AlertsEnabled: *in.AlertsEnabled, MemMinAvailablePercent: in.MemMinAvailablePercent,
+		proposed := alertSettings{AlertsEnabled: *in.AlertsEnabled, MemMinAvailablePercent: in.MemMinAvailablePercent,
 			DiskMaxUsedPercent: in.DiskMaxUsedPercent, CPUMaxBusyPercent: in.CPUMaxBusyPercent}
 		if err := requireUUID("host_id", in.HostID); err != nil {
 			return badRequest(err)
 		}
-		if err := requireIdempotencyKey(in.IdempotencyKey); err != nil {
+		if err := validateAlertSettings(proposed); err != nil {
 			return badRequest(err)
-		}
-		if err := validateAlertSettings(settings); err != nil {
-			return badRequest(err)
-		}
-		caller, ok := auth.CallerKeyFromContext(ctx)
-		if !ok {
-			return toolError("unauthorized", "missing caller")
 		}
 		payload, fail := get(ctx, api, idPath("v1", "hosts", in.HostID), nil)
 		if fail != nil {
@@ -123,61 +115,87 @@ func registerAlertSettings(server *mcp.Server, api *apiclient.Client) {
 		if json.Unmarshal(payload, &host) != nil || host.Name == "" {
 			return toolError("error", "host response was not usable")
 		}
-		// Whether the caller is an org owner or admin is decided by the API at confirm.
-		id, expires, err := pendingAlertSettings.add(caller, in.IdempotencyKey, alertSettingsPlan{hostID: in.HostID, host: host.Name, settings: settings})
-		if err != nil {
-			return toolError("unavailable", err.Error())
+		payload, fail = get(ctx, api, idPath("v1", "hosts", in.HostID, "alert-settings"), nil)
+		if fail != nil {
+			return fail
 		}
-		out, _ := json.Marshal(map[string]any{
-			"confirmation_id": id,
-			"plan":            alertPlanText(summaryField(host.Name), settings) + ". Ask the user, then call confirm with this confirmation_id and the same idempotency_key.",
-			"expires_at":      expires.UTC().Format(time.RFC3339),
-		})
-		return finishConfirmation(out, nil)
+		var current alertSettings
+		if !alertSettingsPayload(payload) || json.Unmarshal(payload, &current) != nil {
+			return toolError("error", errAlertSettingsShape.Error())
+		}
+		name := summaryField(host.Name)
+		changes := alertChanges(current, proposed)
+		result := map[string]any{"host": host.Name, "current": current, "proposed": proposed, "changes": changes}
+		if len(changes) == 0 {
+			result["plan"] = "Nothing to change on " + name + ": the alert settings are already " + thresholdsSummary(current) + "."
+			out, _ := json.Marshal(result)
+			return present(out, result["plan"].(string))
+		}
+		link := hostAlertsURL(api, in.HostID, current, proposed)
+		plan := "Proposed for " + name + ": " + strings.Join(changes, "; ") + ". Nothing has changed: "
+		if link != "" {
+			plan += "post console_url for the person to review and Save."
+		} else {
+			plan += "ask the person to open this host's Alerts card in the console and make the change there."
+		}
+		result["console_url"] = link
+		result["plan"] = plan
+		out, _ := json.Marshal(result)
+		return present(out, plan)
 	})
 }
 
-// alertSettingsPlan is one pending set_alert_settings call.
-type alertSettingsPlan struct {
-	hostID   string
-	host     string
-	settings alertSettings
+// alertField is one threshold: its JSON and link name, its words and its
+// default.
+type alertField struct {
+	link  string
+	label string
+	def   int
+	get   func(alertSettings) *int
 }
 
-// pendingAlertSettings holds set_alert_settings plans for 10 minutes, 10 per caller.
-var pendingAlertSettings = newLocalPlans[alertSettingsPlan](10*time.Minute, "alert settings ")
-
-// alertPlanText is the plan sentence, for example "Set alerts on pi1: on,
-// memory available under 10 %, disk at 90 % (default), CPU at 90 % (default)".
-func alertPlanText(host string, s alertSettings) string {
-	if !s.AlertsEnabled {
-		return "Turn resource alerts off on " + host + "; thresholds kept: " + thresholdsText(s)
-	}
-	return "Set resource alerts on " + host + ": " + thresholdsText(s)
+var alertFields = []alertField{
+	{"alerts.mem", "memory available under", 15, func(s alertSettings) *int { return s.MemMinAvailablePercent }},
+	{"alerts.disk", "disk at", 90, func(s alertSettings) *int { return s.DiskMaxUsedPercent }},
+	{"alerts.cpu", "CPU at", 90, func(s alertSettings) *int { return s.CPUMaxBusyPercent }},
 }
 
-// confirmAlertSettings performs a pending set_alert_settings plan. handled
-// is false when id is not one of this server's plans, so confirm asks the API.
-func confirmAlertSettings(ctx context.Context, api *apiclient.Client, id, key string) (res *mcp.CallToolResult, handled bool) {
-	caller, ok := auth.CallerKeyFromContext(ctx)
-	if !ok {
-		return nil, false
+func sameThreshold(a, b *int) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
+}
+
+func thresholdText(v *int, def int) string {
+	if v == nil {
+		return strconv.Itoa(def) + " % (default)"
 	}
-	plan, found, fail := pendingAlertSettings.take(caller, id, key)
-	if !found {
-		return nil, false
+	return strconv.Itoa(*v) + " %"
+}
+
+// alertChanges lists what differs, for example "alerts on → off" or
+// "disk at 90 % (default) → 95 %".
+func alertChanges(from, to alertSettings) []string {
+	changes := []string{}
+	if from.AlertsEnabled != to.AlertsEnabled {
+		changes = append(changes, "alerts "+onOff(from.AlertsEnabled)+" → "+onOff(to.AlertsEnabled))
 	}
-	if fail != nil {
-		return fail, true
+	for _, f := range alertFields {
+		if a, b := f.get(from), f.get(to); !sameThreshold(a, b) {
+			changes = append(changes, f.label+" "+thresholdText(a, f.def)+" → "+thresholdText(b, f.def))
+		}
 	}
-	status, payload, fail := putStatus(ctx, api, idPath("v1", "hosts", plan.hostID, "alert-settings"), plan.settings)
-	if fail != nil {
-		return fail, true
+	return changes
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
 	}
-	if status != http.StatusOK {
-		return toolError("error", errAlertSettingsShape.Error()), true
-	}
-	return alertSettingsResult(payload), true
+	return "off"
+}
+
+// thresholdsSummary is "on: memory available under 15 % (default), …".
+func thresholdsSummary(s alertSettings) string {
+	return onOff(s.AlertsEnabled) + ", " + thresholdsText(s)
 }
 
 func validateAlertSettings(s alertSettings) error {
@@ -197,7 +215,7 @@ func validateAlertSettings(s alertSettings) error {
 }
 
 // alertSettingsPayload reports whether payload is exactly an alert
-// settings object (a confirmed set_alert_settings plan).
+// settings object.
 func alertSettingsPayload(payload json.RawMessage) bool {
 	var keys map[string]json.RawMessage
 	if json.Unmarshal(payload, &keys) != nil || len(keys) != 4 {
