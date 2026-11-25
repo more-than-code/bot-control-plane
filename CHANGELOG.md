@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.49 — 2026-11-25
+- Changing a host's alert settings needs your confirm in the console. MCP `set_alert_settings` no longer changes anything: it shows the proposed change and a console link that opens the host's Alerts card with the change filled in, and nothing is saved until you tap Save.
+- A deploy the host refused keeps its plan again, so you can confirm it once more after fixing the cause (the database grant it needed was missing).
+- Applying host settings from the Policy tab works again with two or more images or projects.
+
 ## v0.2.48 — 2026-11-24
 - See what fills a host's disk: the host page lists each mount's used and total size, and org owners and admins can check what Docker uses there and what can be reclaimed, as `docker system df` shows it. The Docker check needs bot-agent 0.2.17; MCP has a new `host_disk_usage` tool.
 - Deploybot watches its own metrics retention: if the database stops deleting metrics older than 7 days, the owners and admins of the organization that owns the server's host get a problem in the bell.
