@@ -12,8 +12,10 @@
 #   build    scripts/release-bundle.sh twice and the two images twice, each
 #            compared byte for byte
 #   publish  creates tag vX.Y.Z on the commit, pushes the images to ghcr.io
-#            by tag, and publishes the GitHub release with the bundle and the
-#            pushed image digests. Deploying stays Joe's step.
+#            by tag, and publishes the GitHub release with the bundle; the
+#            release text is RELEASE.md plus the pushed image digests, and
+#            the RELEASE.md asset stays as hashed into SHA256SUMS.
+#            Deploying stays Joe's step.
 # No approval tap (spec D3): the merge into main is the approval. A tag pushed
 # with GITHUB_TOKEN starts no workflow, so tagging happens in this run.
 name: release
@@ -206,18 +208,21 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' "$GH_TOKEN" | skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          # The release text is RELEASE.md plus the pushed digests. RELEASE.md
+          # itself stays as hashed into SHA256SUMS.
+          cp dist/RELEASE.md "$RUNNER_TEMP/notes.md"
           {
             echo
             echo "## Images"
             echo
-            echo "Deploy by digest (docs/containers.md); the tags are for people."
+            echo "Deploy by digest (docs/containers.md); the tags are for people. These digests are in the release text only, not in the RELEASE.md asset."
             echo
-          } >> dist/RELEASE.md
+          } >> "$RUNNER_TEMP/notes.md"
           for img in server console; do
             ref=$IMAGE_SERVER; [ "$img" = console ] && ref=$IMAGE_CONSOLE
             skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/$img.digest" \
               "oci-archive:images/$img.tar" "docker://$ref:v$VERSION"
-            echo "- \`$ref@$(cat "$RUNNER_TEMP/$img.digest")\` (linux/amd64, linux/arm64)" >> dist/RELEASE.md
+            echo "- \`$ref@$(cat "$RUNNER_TEMP/$img.digest")\` (linux/amd64, linux/arm64)" >> "$RUNNER_TEMP/notes.md"
           done
           skopeo logout ghcr.io
       - name: Tag and release
@@ -227,6 +232,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="v$VERSION"
+          (cd dist && sha256sum -c --strict SHA256SUMS)
           assets=(dist/deploybot-server-"$tag"-linux-amd64 dist/deploybot-server-"$tag"-linux-arm64 \
             "dist/bot-console-$tag.tar.gz" dist/RELEASE.md dist/SHA256SUMS)
           if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
@@ -234,10 +240,10 @@ jobs:
           fi
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
-            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file dist/RELEASE.md
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
           else
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-              --title "Deploybot $tag" --notes-file dist/RELEASE.md "${assets[@]}"
+              --title "Deploybot $tag" --notes-file "$RUNNER_TEMP/notes.md" "${assets[@]}"
           fi
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
           echo "Published $tag." >> "$GITHUB_STEP_SUMMARY"
