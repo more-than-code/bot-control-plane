@@ -265,7 +265,7 @@ WHERE conname = 'catalog_entries_kind_chk'
 	if err := d.pool.QueryRow(ctx, `SELECT to_regclass('app.catalog_host_approvals') IS NULL`).Scan(&approvalsGone); err != nil || !approvalsGone {
 		t.Fatalf("catalog_host_approvals still exists after 0016 %v", err)
 	}
-	assertTablePrivs(t, d, ctx, "catalog_confirmations", true, true, false, true, []string{"used_at"})
+	assertTablePrivs(t, d, ctx, "catalog_confirmations", true, true, false, true, []string{"used_at", "expires_at"}) // expires_at since 0040 (reopen after a host refusal)
 	assertTablePrivs(t, d, ctx, "idempotency_keys", true, true, false, true, []string{"status_code", "response"})
 	var statusNull, responseNull string
 	if err := d.pool.QueryRow(ctx, `
