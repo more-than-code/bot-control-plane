@@ -60,7 +60,7 @@ Targets: `linux/amd64` for us1; `linux/arm64` builds the same way for the Pis.
 
 ## Publish and deploy
 
-Pushing is an ops step on Joe's yes (release runbook), never part of a build. Push by tag, then record the pushed digest (`podman push --digestfile`) in the release notes; catalog entries reference `ghcr.io/more-than-code/deploybot-server@sha256:…`, never a tag. The images are public, so hosts need no registry login.
+The release workflow (`.github/workflows/release.yml`) builds both images for `linux/amd64` and `linux/arm64` twice from the release commit, compares them, pushes them by tag and writes the pushed digests into the release notes. A manual push (the build above, then `podman push --digestfile`) is only a fallback, on Joe's yes. Catalog entries reference `ghcr.io/more-than-code/deploybot-server@sha256:…`, never a tag. The images are public, so hosts need no registry login.
 
 ## Smoke checks
 

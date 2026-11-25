@@ -57,11 +57,13 @@ cd console && pnpm dev
 
 ## Release
 
-One tag (`vX.Y.Z`) covers the whole repo and produces one bundle:
+One tag (`vX.Y.Z`) covers the whole repo and produces one GitHub release:
 
-- `deploybot-server-<tag>-linux-amd64`, the server binary for both the API and MCP;
+- `deploybot-server-<tag>-linux-amd64` and `-linux-arm64`, the server binary for both the API and MCP;
 - `bot-console-<tag>.tar.gz`, the console build;
-- `SHA256SUMS` and `RELEASE.md`.
+- `SHA256SUMS` and `RELEASE.md` (the tag's `CHANGELOG.md` section). The release text adds the pushed image digests.
+
+Nobody tags by hand. When a release PR (the version commit: a new `CHANGELOG.md` heading and the same `console/package.json` version) merges into `main`, `.github/workflows/release.yml` runs the release gates, builds the bundle with `scripts/release-bundle.sh` and both images twice each and compares them, pushes the images to `ghcr.io`, tags the commit and publishes the release. A push to `main` without a new version does nothing. Deploying stays a separate step. Design: bot-agent `docs/spec-release-workflow.md`.
 
 The `deploybot` CLI is not part of the server bundle. bot-agent is released from its own repo.
 
