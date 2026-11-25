@@ -59,7 +59,7 @@ spec.
 ### 3.1 Envelope
 
 - **KMS key:** symmetric, `SYMMETRIC_DEFAULT`, Encrypt and decrypt, single
-  region, alias `deploybot-secrets-key`. Automatic yearly rotation on (KMS
+  region **`ap-southeast-2` (Sydney)**, Joe's choice (2026-11-25), alias `deploybot-secrets-key`. Automatic yearly rotation on (KMS
   keeps old versions; old wrapped blobs still decrypt). Deletion waiting
   period 30 days, the maximum.
 - **Wrapped key:** `kms:Encrypt` of the existing 32 bytes with encryption
@@ -192,7 +192,7 @@ password, one access key. Its only policy:
   "Statement": [{
     "Effect": "Allow",
     "Action": "kms:Decrypt",
-    "Resource": "arn:aws:kms:REGION:ACCOUNT_ID:key/KEY_ID",
+    "Resource": "arn:aws:kms:ap-southeast-2:ACCOUNT_ID:key/KEY_ID",
     "Condition": {
       "StringEquals": {
         "kms:EncryptionContext:app": "deploybot",
@@ -318,7 +318,7 @@ never goes into CI. A cloud session never runs it with real credentials.
 
 ## 7. AWS console steps for Joe, from a phone browser
 
-Use the same region as the bot-agent signing key.
+Region: **Asia Pacific (Sydney), `ap-southeast-2`** (Joe, 2026-11-25: next to his GCP VMs, Vercel and Supabase, for latency). Switch the console to it before step 1; use the same region for the bot-agent signing key.
 
 1. **KMS → Customer managed keys → Create key:** Symmetric, Encrypt and
    decrypt, single region. Alias `deploybot-secrets-key`. Key administrators:
@@ -326,7 +326,7 @@ Use the same region as the bot-agent signing key.
    policy). After creation: Key rotation → automatic, yearly. Copy the key
    ARN.
 2. **IAM → Users → Create user** `deploybot-server-<host>`, no console access.
-   Add the inline policy from §4 (replace `REGION`, `ACCOUNT_ID`, `KEY_ID`,
+   Add the inline policy from §4 (replace `ACCOUNT_ID`, `KEY_ID`,
    and `HOST_PUBLIC_IP` or delete the `IpAddress` block).
 3. **For the migration only**, add a second inline policy
    `deploybot-wrap-once`:
@@ -337,7 +337,7 @@ Use the same region as the bot-agent signing key.
      "Statement": [{
        "Effect": "Allow",
        "Action": "kms:Encrypt",
-       "Resource": "arn:aws:kms:REGION:ACCOUNT_ID:key/KEY_ID",
+       "Resource": "arn:aws:kms:ap-southeast-2:ACCOUNT_ID:key/KEY_ID",
        "Condition": {"StringEquals": {
          "kms:EncryptionContext:app": "deploybot",
          "kms:EncryptionContext:purpose": "secrets-key"
