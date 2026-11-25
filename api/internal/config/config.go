@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/more-than-code/bot-control-plane/api/internal/agentversion"
 )
 
@@ -49,10 +51,22 @@ type Config struct {
 	// hooks) do not run and the problem routes answer empty lists (api-v1
 	// v1.41 item 6). Empty or on runs them.
 	ProblemsOff bool
+	// ServerHost is BOT_API_SERVER_HOST: the id of the host that serves
+	// this Deploybot; the owners and admins of its org get the
+	// metrics_retention problem (api-v1 v1.58). Nil leaves that check off.
+	ServerHost uuid.UUID
 	// GitHubRefreshOff is BOT_API_GITHUB_REFRESH=off: Connect GitHub tokens
 	// are not refreshed, on use or hourly; stored material is kept (api-v1
 	// v1.43 item 4). Empty or on refreshes.
 	GitHubRefreshOff bool
+	// SecretsKey, MCPClientSecret and GitHubClientSecret are the env-value
+	// forms BOT_SECRETS_KEY, BOT_API_MCP_CLIENT_SECRET and
+	// BOT_API_GITHUB_CLIENT_SECRET of the three *_FILE settings (api-v1
+	// v1.50 item 2, for containers). At most one form of each is set. They
+	// are checked like the files by the Load* readers and never logged.
+	SecretsKey         string
+	MCPClientSecret    string
+	GitHubClientSecret string
 }
 
 const defaultIssuer = "https://accounts.google.com"
@@ -84,6 +98,19 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 		GitHubClientSecretFile: strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET_FILE")),
 		LatestAgentVersion:     strings.TrimSpace(getenv("BOT_API_LATEST_AGENT_VERSION")),
 		EdgeTLSIssuer:          strings.TrimSpace(getenv("BOT_API_EDGE_TLS_ISSUER")),
+		SecretsKey:             strings.TrimSpace(getenv("BOT_SECRETS_KEY")),
+		MCPClientSecret:        strings.TrimSpace(getenv("BOT_API_MCP_CLIENT_SECRET")),
+		GitHubClientSecret:     strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET")),
+	}
+	// api-v1 v1.50 item 2: a secret is an env value or a file, never both.
+	for _, pair := range []struct{ name, value, file string }{
+		{"BOT_SECRETS_KEY", cfg.SecretsKey, cfg.SecretsKeyFile},
+		{"BOT_API_MCP_CLIENT_SECRET", cfg.MCPClientSecret, cfg.MCPClientSecretFile},
+		{"BOT_API_GITHUB_CLIENT_SECRET", cfg.GitHubClientSecret, cfg.GitHubClientSecretFile},
+	} {
+		if pair.value != "" && pair.file != "" {
+			return Config{}, fmt.Errorf("%s and %s_FILE are both set; set only one", pair.name, pair.name)
+		}
 	}
 	problems := strings.TrimSpace(getenv("BOT_API_PROBLEMS"))
 	cfg.ProblemsOff = problems == "off"
@@ -129,6 +156,13 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	if cfg.LatestAgentVersion != "" && !agentversion.ValidRelease(cfg.LatestAgentVersion) {
 		return Config{}, fmt.Errorf("BOT_API_LATEST_AGENT_VERSION must be X.Y.Z or empty")
 	}
+	if v := strings.TrimSpace(getenv("BOT_API_SERVER_HOST")); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil || id == uuid.Nil {
+			return Config{}, fmt.Errorf("BOT_API_SERVER_HOST must be a host id (UUID) or empty")
+		}
+		cfg.ServerHost = id
+	}
 	if cfg.EdgeTLSIssuer != "" && cfg.EdgeTLSIssuer != EdgeIssuerInternal {
 		return Config{}, fmt.Errorf("BOT_API_EDGE_TLS_ISSUER must be empty or internal")
 	}
@@ -143,7 +177,7 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 
 // GitHubConfigured reports whether both Connect GitHub settings are set.
 func (c Config) GitHubConfigured() bool {
-	return c.GitHubClientID != "" && c.GitHubClientSecretFile != ""
+	return c.GitHubClientID != "" && (c.GitHubClientSecretFile != "" || c.GitHubClientSecret != "")
 }
 
 // RedirectAllowed reports whether uri is on the OAuth allowlist.

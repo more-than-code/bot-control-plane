@@ -1501,6 +1501,9 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 	if (health_policy === undefined) return null;
 	const networks = parseNetworks(Object.hasOwn(value, 'networks') ? value.networks : null);
 	if (networks === undefined) return null;
+	// api-v1 v1.50 item 1: absent, null or "host", and "host" never with shared networks.
+	const network = Object.hasOwn(value, 'network') ? value.network : null;
+	if (network != null && (network !== 'host' || networks.length > 0)) return null;
 	const spec: ImageSpec = {
 		kind: workload,
 		image,
@@ -1522,6 +1525,7 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 		health_policy
 	};
 	if (networks.length > 0) spec.networks = networks;
+	if (network === 'host') spec.network = 'host';
 	return spec;
 }
 
@@ -1726,15 +1730,19 @@ function parseEnvSetKey(value: unknown): EnvSetKey | null {
 		return null;
 	}
 	// reveal_pending implies secret (migration 0015 CHECK); a plain key never offers Reveal once.
-	return { key, is_secret: false, value: value.value == null ? null : value.value, preview: null, ...flags, reveal_pending: false };
+	return { key, is_secret: false, value: value.value == null ? null : value.value, preview: null, ...flags, reveal_pending: false, generated: false };
 }
 
-/** api-v1 v1.27 key flags. Missing or null (an older API) is false; a present non-boolean drops the key. */
-function envKeyFlags(value: Record<string, unknown>): { reveal_pending: boolean; needs_value: boolean } | null {
+/**
+ * api-v1 v1.27 key flags, and v1.56 generated (only a generated value offers Regenerate). Missing or null (an older
+ * API) is false; a present non-boolean drops the key.
+ */
+function envKeyFlags(value: Record<string, unknown>): { reveal_pending: boolean; needs_value: boolean; generated: boolean } | null {
 	const reveal_pending = reportedBool(value, 'reveal_pending');
 	const needs_value = reportedBool(value, 'needs_value');
-	if (reveal_pending === null || needs_value === null) return null;
-	return { reveal_pending, needs_value };
+	const generated = reportedBool(value, 'generated');
+	if (reveal_pending === null || needs_value === null || generated === null) return null;
+	return { reveal_pending, needs_value, generated };
 }
 
 export function parseEnvSet(value: unknown): EnvSet | null {

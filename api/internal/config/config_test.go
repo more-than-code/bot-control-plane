@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/uuid"
+)
 
 func TestRegistryAllowPrivate(t *testing.T) {
 	for val, want := range map[string]bool{"": false, "0": false, "true": false, "1": true, " 1 ": true} {
@@ -121,6 +125,37 @@ func TestGitHubRefreshSwitch(t *testing.T) {
 		}
 		if err != nil || cfg.GitHubRefreshOff != (want == "off") {
 			t.Fatalf("%q: %v %v", val, cfg.GitHubRefreshOff, err)
+		}
+	}
+}
+
+// api-v1 v1.58: BOT_API_SERVER_HOST names the host serving Deploybot (a
+// UUID); empty leaves the retention check off; anything else is an error.
+func TestServerHost(t *testing.T) {
+	base := map[string]string{
+		"BOT_API_LISTEN": ":8090", "DATABASE_URL": "postgres://x", "BOT_API_GOOGLE_CLIENT_ID": "id",
+		"BOT_API_GOOGLE_CLIENT_SECRET": "s", "BOT_API_DEVICE_VERIFICATION_URI": "http://127.0.0.1/device",
+		"BOT_API_AGENT_WS_URL": "ws://127.0.0.1/agent/v1/ws", "BOT_API_OAUTH_REDIRECT_URIS": "http://127.0.0.1/cb",
+	}
+	id := "4d0f7877-b2b7-4886-b372-80ee085ead9c"
+	for val, want := range map[string]string{"": "", " " + id + " ": id, "us1-portkey-io": "error", "00000000-0000-0000-0000-000000000000": "error"} {
+		env := map[string]string{"BOT_API_SERVER_HOST": val}
+		for k, v := range base {
+			env[k] = v
+		}
+		cfg, err := FromEnv(func(k string) string { return env[k] }, false)
+		if want == "error" {
+			if err == nil || err.Error() != "BOT_API_SERVER_HOST must be a host id (UUID) or empty" {
+				t.Fatalf("%q: %v", val, err)
+			}
+			continue
+		}
+		got := ""
+		if cfg.ServerHost != uuid.Nil {
+			got = cfg.ServerHost.String()
+		}
+		if err != nil || got != want {
+			t.Fatalf("%q: %q %v", val, got, err)
 		}
 	}
 }

@@ -479,6 +479,8 @@ const ITEMS: Notification[] = [
     href: "/whats-new#v0.2.40",
     at: "2026-11-19T00:00:00Z",
     read: false,
+    // What the parser makes of a release with no date_only (an API before v1.57).
+    date_only: true,
   },
   {
     key: `host_update:${P1}:0.2.10`,

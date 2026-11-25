@@ -31,6 +31,10 @@ var (
 	// ErrKeyExists is a generated key PUT over a key that already exists
 	// (api-v1 v1.27 item 1, rev 3: there is no regenerate). Nothing is written.
 	ErrKeyExists = errors.New("key already has a value")
+	// ErrNotGenerated is a regenerate of a secret key whose value was
+	// entered by hand (api-v1 v1.56): only an API-generated value may be
+	// replaced by a new generated one. Nothing is written.
+	ErrNotGenerated = errors.New("value was entered by hand")
 	// ErrSecretEmpty is a key PUT of "" over an existing secret key (api-v1 v1.18).
 	ErrSecretEmpty = errors.New("a secret value cannot be empty; delete the key instead")
 	// ErrTooManyFiles is a new file name when the project already has MaxProjectFiles.
@@ -535,6 +539,7 @@ type Store interface {
 	ProblemStore
 	HostFileStore
 	AgentUpgradeStore
+	HostAlertStore
 	// ListOpenRequests is the user's pending, unexpired value, file and
 	// connect requests at at, newest first, at most max (api-v1 v1.33 item
 	// 8), in projects that are not deleted.
@@ -699,7 +704,8 @@ type Store interface {
 	// InsertBatch inserts samples once per (host, batch). inserted is false when the batch was already stored.
 	InsertBatch(ctx context.Context, hostID, batchID uuid.UUID, samples []Sample, at time.Time) (inserted bool, err error)
 	// QueryChart returns at most 500 aggregated buckets per series. It does not return raw samples.
-	QueryChart(ctx context.Context, hostID uuid.UUID, measurement string, from, to time.Time, stepSec int) ([]ChartSeries, error)
+	// path is the disk mount (m=disk only; "" is "/", api-v1 v1.49 item 4).
+	QueryChart(ctx context.Context, hostID uuid.UUID, measurement, path string, from, to time.Time, stepSec int) ([]ChartSeries, error)
 	LoadMetric(ctx context.Context, hostID uuid.UUID, measurement string, from, to time.Time) ([]Sample, error)
 	// LatestProcesses returns the newest sample group for the host, sorted and
 	// limited in the store. It is not filtered by service project.
@@ -795,6 +801,12 @@ type Store interface {
 	// MarkConfirmationUsed sets used_at when the row is unused, unexpired, and owned by userID.
 	// Anything else is ErrNotFound.
 	MarkConfirmationUsed(ctx context.Context, hash []byte, userID uuid.UUID, at time.Time) error
+	// ReopenConfirmation clears used_at of a row owned by userID and used
+	// at or before at, after the host refused the task so nothing ran
+	// (api-v1 v1.55 item 2). expires_at becomes at least until, even when
+	// the plan expired while the host was asked. It returns the row's
+	// expires_at; anything else is ErrNotFound.
+	ReopenConfirmation(ctx context.Context, hash []byte, userID uuid.UUID, at, until time.Time) (time.Time, error)
 	// PutServiceConfirmation inserts one health-check plan. A duplicate token hash is ErrConflict.
 	PutServiceConfirmation(ctx context.Context, hash []byte, c ServiceConfirmation) error
 	GetServiceConfirmation(ctx context.Context, hash []byte) (ServiceConfirmation, error)
@@ -852,6 +864,24 @@ type Store interface {
 	GetImageDeploy(ctx context.Context, entryID, hostID, id uuid.UUID) (ImageDeploy, error)
 	// ReleaseImageOp deletes an in-flight row. A finished row is left as it is.
 	ReleaseImageOp(ctx context.Context, id uuid.UUID) error
+	// SetImageOpTask records the agent task id and action (deploy or
+	// rollback) on an in-flight row before the task is sent (api-v1 v1.50
+	// item 3). ErrNotFound when the row is not in flight.
+	SetImageOpTask(ctx context.Context, id, taskID uuid.UUID, action string) error
+	// ImageDeployByTask returns the row of host whose task id is taskID,
+	// with its action, project and entry name, or ErrNotFound.
+	ImageDeployByTask(ctx context.Context, hostID, taskID uuid.UUID) (DeployTask, error)
+	// SettleLateImageDeploy stores a late result on a row that is still in
+	// flight (finished_at becomes in.At) or was settled timeout by a
+	// different outcome (finished_at is kept, so history order does not
+	// move). Any other row, and a timeout row given timeout again, is
+	// ErrNotFound and left alone (api-v1 v1.50 items 3 and 9).
+	SettleLateImageDeploy(ctx context.Context, id uuid.UUID, in DeployFinish) (ImageDeploy, error)
+	// TimeoutStaleImageOps settles every in-flight row whose in_flight_until
+	// is before at as outcome timeout with finished_at at, and returns those
+	// rows with their project and entry name (api-v1 v1.50; Action is the
+	// stored task action or ""). It holds no state outside the store.
+	TimeoutStaleImageOps(ctx context.Context, at time.Time) ([]DeployTask, error)
 	// ListImageDeploys returns finished rows newest first: the newest 50
 	// non-automatic rows, plus at most the newest 20 automatic (via agent)
 	// rows newer than the oldest of those (v1.15 rev 2 item 5).
@@ -917,6 +947,10 @@ type Store interface {
 	// A Secret that differs from the stored flag is ErrSecretFixed.
 	// An empty Plain for an existing secret key is ErrSecretEmpty; nothing is written.
 	// The bool is true when the key was created. Only a created key rehashes.
+	// With Regenerate (and Generated) the key must already exist, be secret
+	// and hold a generated value: a missing set or key is ErrNotFound and
+	// writes nothing, a plain key is ErrSecretFixed, a hand-entered value is
+	// ErrNotGenerated (v1.56); ErrKeyExists does not apply.
 	PutEnvKey(ctx context.Context, projectID uuid.UUID, name string, in EnvKeyPut, actor uuid.UUID, at time.Time) (EnvKey, bool, error)
 	// MakeEnvKeysSecret marks plain keys secret in one transaction (api-v1 v1.17).
 	// It locks the set, then the named values, and calls seal with each plain

@@ -11,12 +11,17 @@ import (
 
 // QueryChart aggregates samples already held in memory. The Postgres
 // implementation does the same aggregation in SQL and does not return raw rows.
-func (m *Mem) QueryChart(ctx context.Context, hostID uuid.UUID, measurement string, from, to time.Time, stepSec int) ([]store.ChartSeries, error) {
+func (m *Mem) QueryChart(ctx context.Context, hostID uuid.UUID, measurement, path string, from, to time.Time, stepSec int) ([]store.ChartSeries, error) {
 	samples, err := m.LoadMetric(ctx, hostID, measurement, from, to)
 	if err != nil {
 		return nil, err
 	}
-	series, err := ingest.Bucket(measurement, from, to, stepSec, samples)
+	var series []ingest.Series
+	if measurement == "disk" {
+		series, err = ingest.BucketDisk(path, from, to, stepSec, samples)
+	} else {
+		series, err = ingest.Bucket(measurement, from, to, stepSec, samples)
+	}
 	if err != nil {
 		return nil, store.ErrUnknownMeasurement
 	}

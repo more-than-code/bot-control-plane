@@ -18,6 +18,13 @@ import (
 
 const edgeMigration = "0023_domains_edge_routes.sql"
 
+// forgetEdgeMigrations forgets 0023 and 0036 (it relaxes
+// domain_assignments_pattern_chk on the table 0023 creates), so Migrate
+// rebuilds the domain tables as the newest migration defines them.
+// Forgetting only 0023 would re-create the 0023 check while 0036 stays
+// recorded.
+const forgetEdgeMigrations = `DELETE FROM app.schema_migrations WHERE name IN ('` + edgeMigration + `', '0036_domain_assignment_names.sql')`
+
 // TestParityDomains runs the domain store rules against memstore and,
 // with a test database, Postgres.
 func TestParityDomains(t *testing.T) {
@@ -63,6 +70,25 @@ func TestParityDomains(t *testing.T) {
 		d, err = p.st.PutDomainAssignments(p.ctx, org, d.ID, []store.DomainAssignment{{ProjectID: home.ID, Pattern: "*"}, {ProjectID: home.ID, Pattern: "@"}})
 		if err != nil || len(d.Assignments) != 2 || d.Assignments[0].Pattern != "*" || d.Assignments[0].ProjectName != "dhome" {
 			p.t.Fatalf("assign %#v %v", d.Assignments, err)
+		}
+		// api-v1 v1.52: a single name and a narrower wildcard are patterns
+		// too; the same pair twice, or a bad shape, is ErrInvalid.
+		narrow, err := p.st.PutDomainAssignments(p.ctx, org, d.ID, []store.DomainAssignment{
+			{ProjectID: home.ID, Pattern: "app"}, {ProjectID: home.ID, Pattern: "*.dev"},
+		})
+		if err != nil || len(narrow.Assignments) != 2 {
+			p.t.Fatalf("narrow assign %#v %v", narrow.Assignments, err)
+		}
+		if _, err := p.st.PutDomainAssignments(p.ctx, org, d.ID, []store.DomainAssignment{{ProjectID: home.ID, Pattern: "app"}, {ProjectID: home.ID, Pattern: "app"}}); !errors.Is(err, store.ErrInvalid) {
+			p.t.Fatalf("the same pair twice %v", err)
+		}
+		for _, bad := range []string{"a..b", "**", "-app", strings.Repeat("a", 250)} {
+			if _, err := p.st.PutDomainAssignments(p.ctx, org, d.ID, []store.DomainAssignment{{ProjectID: home.ID, Pattern: bad}}); !errors.Is(err, store.ErrInvalid) {
+				p.t.Fatalf("pattern %q %v", bad, err)
+			}
+		}
+		if d, err = p.st.PutDomainAssignments(p.ctx, org, d.ID, []store.DomainAssignment{{ProjectID: home.ID, Pattern: "*"}, {ProjectID: home.ID, Pattern: "@"}}); err != nil {
+			p.t.Fatal(err)
 		}
 		mine, err := p.st.ProjectDomains(p.ctx, home.ID)
 		if err != nil || len(mine) != 1 || mine[0].ID != d.ID {
@@ -426,7 +452,7 @@ func TestDomainsEdgeRoutesMigration(t *testing.T) {
 	if edgeTables(t, d, ctx) != 0 {
 		t.Fatal("down left tables")
 	}
-	if _, err := conn.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+edgeMigration+`'`); err != nil {
+	if _, err := conn.Exec(ctx, forgetEdgeMigrations); err != nil {
 		t.Fatal(err)
 	}
 	if err := Migrate(ctx, url); err != nil {
@@ -453,7 +479,7 @@ func restoreEdgeMigration(url string) {
 	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'app' AND table_name = 'routes'`).Scan(&n); err != nil || n == 1 {
 		return
 	}
-	if _, err := d.pool.Exec(ctx, `DELETE FROM app.schema_migrations WHERE name = '`+edgeMigration+`'`); err != nil {
+	if _, err := d.pool.Exec(ctx, forgetEdgeMigrations); err != nil {
 		return
 	}
 	_ = Migrate(ctx, url)
@@ -661,6 +687,26 @@ func TestParityDomainScopeAndProjectDelete(t *testing.T) {
 		under, err := p.st.RoutesUnderDomain(p.ctx, orgA, domA.ID)
 		if err != nil || len(under) != 1 || under[0].Hostname != "app."+base {
 			p.t.Fatalf("under %#v %v", under, err)
+		}
+		// A route a narrower wildcard of another domain covers is left alone
+		// as an exact or `*` assignment is (api-v1 v1.52).
+		if _, err := p.st.PutDomainAssignments(p.ctx, orgA, www.ID, []store.DomainAssignment{{ProjectID: projA.ID, Pattern: "@"}, {ProjectID: projA.ID, Pattern: "deep"}}); err != nil {
+			p.t.Fatal(err)
+		}
+		if err := route(a.ID, projA, webA, "app."+base, "www."+base, "deep.www."+base); err != nil {
+			p.t.Fatal(err)
+		}
+		if under, err = p.st.RoutesUnderDomain(p.ctx, orgA, domA.ID); err != nil || len(under) != 1 || under[0].Hostname != "app."+base {
+			p.t.Fatalf("under with a deep name %#v %v", under, err)
+		}
+		// A deep route held by a more specific domain of the org was never
+		// the parent's, even once that domain's assignment is gone: the
+		// parent's delete leaves it alone.
+		if _, err := p.st.PutDomainAssignments(p.ctx, orgA, www.ID, []store.DomainAssignment{{ProjectID: projA.ID, Pattern: "@"}}); err != nil {
+			p.t.Fatal(err)
+		}
+		if under, err = p.st.RoutesUnderDomain(p.ctx, orgA, domA.ID); err != nil || len(under) != 1 || under[0].Hostname != "app."+base {
+			p.t.Fatalf("under after unassigning the deep name %#v %v", under, err)
 		}
 		del := putPlan(p, store.EdgeConfirmation{UserID: a.ID, Kind: store.EdgePlanDomainDelete, OrgID: &orgA, DomainID: &domA.ID})
 		if _, err := p.st.DeleteOrgDomain(p.ctx, orgA, domA.ID, store.RouteKeys(under), del, a.ID, p.at); err != nil {

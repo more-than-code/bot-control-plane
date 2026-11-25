@@ -14,7 +14,18 @@
 	import GitHubConnect from './GitHubConnect.svelte';
 	import NetworksCard from './NetworksCard.svelte';
 	import { Badge } from '$lib/components/ui/badge';
-	import { envSetUsers, fileUsers, GITHUB_NOTES, GITHUB_REGISTRY, registryUsers, usedByText, type GitHubNoteCode } from '$lib/settings-auto';
+	import {
+		envSetUsers,
+		fileUsers,
+		GITHUB_NOTES,
+		GITHUB_REGISTRY,
+		refusalText,
+		refusedTitle,
+		registryUsers,
+		usedByText,
+		type GitHubNoteCode,
+		type GitHubRefused
+	} from '$lib/settings-auto';
 	import { ENV_SET_STATUS_ID } from './env-set-panel';
 	import type { CatalogEntry, EnvSet, Host, Project, ProjectFile, Registry } from '$lib/api-types';
 	import { formatBytes } from '$lib/format';
@@ -63,9 +74,9 @@
 		githubConnect?: boolean;
 		/** The note after Connect GitHub (`?github=`) or a Disconnect whose revoke failed. */
 		githubNote?: GitHubNoteCode | null;
-		/** ghcr.io refused the GitHub connection for an image in this project's catalog. */
+		/** ghcr.io refused the GitHub connection for an image in this project's catalog, with GitHub's reasons (api-v1 v1.53). */
 		/** Streamed: its registry lookups never hold up the tab. */
-		githubRefused?: boolean | Promise<boolean>;
+		githubRefused?: GitHubRefused | Promise<GitHubRefused>;
 		/** The catalog, for each card's "Used by" note (names only). */
 		catalog?: CatalogEntry[];
 		/** False when the catalog failed to load, was truncated or left entries out: the notes say usage is unknown. */
@@ -96,8 +107,27 @@
 	let envSetNote = $state('');
 </script>
 
-{#snippet refusedBadge()}
-	<Badge variant="destructive" class="ml-1" title="ghcr.io refused this login for an image in the catalog. Reconnect GitHub.">Refused</Badge>
+{#snippet refusedBadge(state: GitHubRefused)}
+	<Badge variant="destructive" class="ml-1" title={refusedTitle(state)}>Refused</Badge>
+{/snippet}
+
+<!-- api-v1 v1.53: why ghcr.io refused, when GitHub told; an organization's grant is on GitHub, not here. -->
+{#snippet refusalLines(state: GitHubRefused)}
+	{#if typeof state === 'object'}
+		{#each state.refusals as refusal (`${refusal.reason}|${refusal.owner ?? ''}`)}
+			{@const text = refusalText(refusal)}
+			{#if text}
+				<p class="w-full min-w-0 text-sm break-words" data-refusal={refusal.reason}>
+					{text}
+					{#if refusal.reason === 'org_restricted' && refusal.url}
+						<a class="underline underline-offset-3" href={refusal.url} rel="noopener noreferrer" target="_blank"
+							>Grant on GitHub<span class="sr-only">{' (opens in a new tab)'}</span></a
+						>
+					{/if}
+				</p>
+			{/if}
+		{/each}
+	{/if}
 {/snippet}
 
 {#if message && !settingsField && !settingsName}
@@ -177,6 +207,7 @@
 					makeSecretAction={actionUrlFrom(page.url, 'makeEnvKeysSecret')}
 					mergeAction={actionUrlFrom(page.url, 'mergeEnvSet')}
 					revealAction={actionUrlFrom(page.url, 'revealEnvKey')}
+					regenerateAction={actionUrlFrom(page.url, 'regenerateEnvKey')}
 					mergeError={settingsField === 'merge' && settingsName === set.name ? message : null}
 					onAction={() => (envSetNote = '')}
 				/>
@@ -320,14 +351,21 @@
 								— connected to GitHub as <span class="text-foreground font-mono">{row.username}</span>{row.connected_by?.name ? ` by ${row.connected_by.name}` : ''},
 								<LocalTime iso={row.updated_at} />
 							</span>
-							{#if typeof githubRefused === 'boolean'}
-								{#if githubRefused}{@render refusedBadge()}{/if}
+							{#if !(githubRefused instanceof Promise)}
+								{#if githubRefused}{@render refusedBadge(githubRefused)}{/if}
 							{:else}
 								{#await githubRefused then refused}
-									{#if refused}{@render refusedBadge()}{/if}
+									{#if refused}{@render refusedBadge(refused)}{/if}
 								{/await}
 							{/if}
 						</p>
+						{#if !(githubRefused instanceof Promise)}
+							{#if githubRefused}{@render refusalLines(githubRefused)}{/if}
+						{:else}
+							{#await githubRefused then refused}
+								{#if refused}{@render refusalLines(refused)}{/if}
+							{/await}
+						{/if}
 						<p class="text-muted-foreground w-full min-w-0 text-xs break-words" data-delete-packages={row.delete_packages ? 'true' : 'false'}>
 							{row.delete_packages
 								? 'Can delete image versions: org owners and admins can delete unused versions from Image versions in the catalog.'

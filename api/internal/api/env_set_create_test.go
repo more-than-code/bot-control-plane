@@ -232,7 +232,7 @@ func TestEnvSetDelegatedReadNamesOnly(t *testing.T) {
 		for f := range k {
 			fields = append(fields, f)
 		}
-		if len(k) != 4 || k["is_secret"] == nil || k["reveal_pending"] == nil || k["needs_value"] == nil {
+		if len(k) != 5 || k["is_secret"] == nil || k["reveal_pending"] == nil || k["needs_value"] == nil || k["generated"] == nil {
 			t.Fatalf("%s fields %v", name, fields)
 		}
 	}

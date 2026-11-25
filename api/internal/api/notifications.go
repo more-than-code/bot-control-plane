@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,10 @@ type notification struct {
 	// Level and State are on problem items only (api-v1 v1.41 item 3).
 	Level string `json:"level,omitempty"`
 	State string `json:"state,omitempty"`
+	// DateOnly is on release items only (api-v1 v1.57): true when At is the
+	// CHANGELOG date at 00:00 UTC, false when it is when this server first
+	// served the release.
+	DateOnly *bool `json:"date_only,omitempty"`
 }
 
 // releaseEntries is the server's own CHANGELOG.md, newest first, unless a
@@ -74,8 +79,35 @@ func (s *Server) releaseNotices(now time.Time) []notification {
 	return out
 }
 
+// dateReleasesByFirstServed sets each release's at to when this server
+// first served it (migration 0038, api-v1 v1.57) and date_only to false;
+// a release with no record keeps its CHANGELOG date with date_only true.
+// A failed read keeps every date, so the bell still answers.
+func (s *Server) dateReleasesByFirstServed(ctx context.Context, items []notification) {
+	versions := make([]string, len(items))
+	for i, it := range items {
+		versions[i] = strings.TrimPrefix(it.Key, "release:")
+	}
+	served, err := s.Store.ReleasesServed(ctx, versions)
+	if err != nil {
+		// The SQLSTATE (a missing table or grant) helps the operator without naming hosts or users.
+		s.logger().Warn("release first-served times unavailable; dating releases by CHANGELOG", "sqlstate", dbErrCode(err))
+		served = nil
+	}
+	for i := range items {
+		dateOnly := true
+		if at, ok := served[versions[i]]; ok {
+			items[i].At = at.UTC()
+			dateOnly = false
+		}
+		items[i].DateOnly = &dateOnly
+	}
+}
+
 // hostUpdateNotices are the hosts with update_available (v1.34, v1.36) in
-// orgs where the caller is owner or admin.
+// orgs where the caller is owner or admin. at is when the API first saw the
+// host behind the latest version (migration 0035), so a host checking in
+// does not move its notice back to the top of the bell.
 func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]notification, error) {
 	if s.LatestAgentVersion == "" {
 		return nil, nil
@@ -85,6 +117,7 @@ func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]not
 		return nil, err
 	}
 	var out []notification
+	var ids []uuid.UUID
 	for _, o := range orgs {
 		if !store.OrgAdmin(o.Role) {
 			continue
@@ -99,20 +132,30 @@ func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]not
 				continue
 			}
 			latest := *v.LatestAgentVersion
-			// A host that never connected has no last_seen_at: use its enrolment.
-			at := h.EnrolledAt
-			if h.LastSeenAt != nil {
-				at = *h.LastSeenAt
-			}
+			ids = append(ids, h.ID)
 			out = append(out, notification{
 				Key:    "host_update:" + h.ID.String() + ":" + latest,
 				Kind:   "host_update",
 				Title:  "Update available on " + h.Name,
 				Detail: "bot-agent " + latest + " (this host: " + h.AgentVersion + ")",
 				Href:   "/hosts/" + h.ID.String(),
-				At:     at.UTC(),
 			})
 		}
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	noticed, err := s.Store.NoticeHostUpdates(ctx, ids, s.LatestAgentVersion, s.now())
+	if err != nil {
+		return nil, err
+	}
+	now := s.now().UTC()
+	for i := range out {
+		at, ok := noticed[ids[i]]
+		if !ok {
+			at = now
+		}
+		out[i].At = at.UTC()
 	}
 	return out, nil
 }
@@ -129,7 +172,9 @@ func (s *Server) notifications(ctx context.Context, userID uuid.UUID) ([]notific
 	if err != nil {
 		return nil, err
 	}
-	rest := append(s.releaseNotices(s.now()), hosts...)
+	releases := s.releaseNotices(s.now())
+	s.dateReleasesByFirstServed(ctx, releases)
+	rest := append(releases, hosts...)
 	rest = append(rest, resolved...)
 	// Stable on equal at: releases dated the same day keep the CHANGELOG
 	// order (newest first; key order would put 0.2.37 above 0.2.38), then

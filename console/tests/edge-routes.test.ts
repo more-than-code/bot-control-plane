@@ -6,17 +6,23 @@ import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
 import type { HostEdge, ImageEntry, OrgDomain, ProgramEntry } from '../src/lib/api-types.ts';
 import {
+	assignLinkRow,
+	assignmentText,
 	cleanDomainName,
+	cleanDomainPattern,
 	defaultRoutePort,
 	isDomainName,
+	isDomainPatternFor,
 	isNoStorePath,
 	isPathPrefix,
 	routePorts,
 	routesFromDrafts,
 	routesFromField,
-	routeUrl
+	routeUrl,
+	withoutAssignLink
 } from '../src/lib/edge-routes.ts';
 import { checkLabel, parseReadiness } from '../src/lib/settings-auto.ts';
+import { TXT_NOT_FOUND_HINT } from '../src/lib/server/edge-actions.ts';
 import { parseDomainList, parseEdgePlan, parseEdgeRoute, parseHostEdge, parseOrgDomain, parseRouteList } from '../src/lib/server/edge-shape.ts';
 import { parseHostPrograms } from '../src/lib/server/shape.ts';
 import HostEdgeSection from '../src/routes/hosts/[id]/HostEdgeSection.svelte';
@@ -156,6 +162,55 @@ describe('edge route rules', () => {
 	});
 });
 
+describe('v1.52 assignment patterns', () => {
+	test('a pattern is @, *, a name below the domain, or *. and a name', () => {
+		for (const pattern of ['@', '*', 'app', 'api.dev', '*.dev', 'a-b.c']) assert.equal(isDomainPatternFor('example.com', pattern), true, pattern);
+		for (const pattern of ['', '*', '**', 'a..b', '-app', 'app.', '*.*', 'A', 'app/x', null, 7]) {
+			if (pattern === '*') continue;
+			assert.equal(isDomainPatternFor('example.com', pattern), false, String(pattern));
+		}
+		// Written out, a pattern may not pass 253 characters.
+		assert.equal(isDomainPatternFor('example.com', 'a'.repeat(242)), false);
+		assert.equal(isDomainPatternFor('example.com', 'a'.repeat(60)), true);
+	});
+
+	test('a typed full name or trailing dot becomes the pattern it means', () => {
+		assert.equal(cleanDomainPattern('example.com', ' App.Example.com. '), 'app');
+		assert.equal(cleanDomainPattern('example.com', 'Example.com'), '@');
+		assert.equal(cleanDomainPattern('example.com', '*.dev.example.com'), '*.dev');
+		assert.equal(cleanDomainPattern('example.com', '*'), '*');
+		assert.equal(cleanDomainPattern('example.com', 'notadomain..'), null);
+		assert.equal(cleanDomainPattern('example.com', 7), null);
+	});
+
+	test('assignmentText writes the pattern out', () => {
+		assert.equal(assignmentText('example.com', '@'), 'example.com');
+		assert.equal(assignmentText('example.com', '*'), '*.example.com');
+		assert.equal(assignmentText('example.com', 'app'), 'app.example.com');
+		assert.equal(assignmentText('example.com', '*.dev'), '*.dev.example.com');
+	});
+
+	test('an assign link opens only for its own domain, project and a pattern that fits', () => {
+		const dom = { id: DOMAIN_ID, name: 'defectdrainer.com' };
+		const params = (q: Record<string, string>) => new URLSearchParams(q);
+		assert.deepEqual(assignLinkRow(params({ 'domains.assign': DOMAIN_ID, 'domains.project': PROJECT.id, 'domains.pattern': 'marketingos' }), dom, [PROJECT.id]), {
+			project_id: PROJECT.id,
+			pattern: 'marketingos'
+		});
+		// Another domain's link, an unknown project and a pattern that does not fit all open nothing.
+		assert.equal(assignLinkRow(params({ 'domains.assign': CONFIRMATION, 'domains.project': PROJECT.id, 'domains.pattern': 'app' }), dom, [PROJECT.id]), null);
+		assert.equal(assignLinkRow(params({ 'domains.assign': DOMAIN_ID, 'domains.project': KEY, 'domains.pattern': 'app' }), dom, [PROJECT.id]), null);
+		assert.equal(assignLinkRow(params({ 'domains.assign': DOMAIN_ID, 'domains.project': PROJECT.id, 'domains.pattern': '**' }), dom, [PROJECT.id]), null);
+		assert.equal(assignLinkRow(params({}), dom, [PROJECT.id]), null);
+	});
+
+	test('the link keys are dropped from the URL, and nothing else', () => {
+		const url = new URL(`http://console.example/orgs/${ORG.id}?tab=settings&domains.assign=${DOMAIN_ID}&domains.project=${PROJECT.id}&domains.pattern=app`);
+		assert.equal(withoutAssignLink(url).search, '?tab=settings');
+		assert.match(url.search, /domains\.assign/);
+	});
+});
+
 describe('v1.35 parsers', () => {
 	test('a domain keeps only the listed fields and checks the TXT name', () => {
 		const parsed = parseOrgDomain({ ...RAW_DOMAIN, secret: 'x' });
@@ -246,7 +301,20 @@ describe('v1.35 actions', () => {
 		const result = await orgActions.verifyDomain(orgEvent(`${settings}&/verifyDomain`, { domain_id: DOMAIN_ID }));
 		if (!isActionFailure(result)) assert.fail('expected a failure');
 		assert.equal(calls[0].url.pathname, `/v1/orgs/${ORG.id}/domains/${DOMAIN_ID}/verify`);
-		assert.deepEqual(result.data, { scope: 'settings', field: 'domain', domainId: DOMAIN_ID, message: text });
+		assert.deepEqual(result.data, { scope: 'settings', field: 'domain', domainId: DOMAIN_ID, message: `${text}. ${TXT_NOT_FOUND_HINT}` });
+	});
+
+	test('verify: another failure keeps the API text as is', async () => {
+		installFetch(() => envelope(null, 503, 'unavailable', 'the DNS lookup failed; try again'));
+		const result = await orgActions.verifyDomain(orgEvent(`${settings}&/verifyDomain`, { domain_id: DOMAIN_ID }));
+		if (!isActionFailure(result)) assert.fail('expected a failure');
+		assert.deepEqual(result.data, { scope: 'settings', field: 'domain', domainId: DOMAIN_ID, message: 'the DNS lookup failed; try again' });
+	});
+
+	test('verify: success answers on the row instead of redirecting', async () => {
+		installFetch(() => envelope({ ...RAW_DOMAIN, status: 'verified' }));
+		const result = await orgActions.verifyDomain(orgEvent(`${settings}&/verifyDomain`, { domain_id: DOMAIN_ID }));
+		assert.deepEqual(result, { scope: 'settings', field: 'domainVerified', domainId: DOMAIN_ID, message: null });
 	});
 
 	test('assignments are sent as pairs; a bad pattern or project is refused first', async () => {
@@ -270,6 +338,34 @@ describe('v1.35 actions', () => {
 		assert.equal(isActionFailure(bad), true);
 		const mismatched = await orgActions.setDomainAssignments(orgEvent(`${settings}&/setDomainAssignments`, { domain_id: DOMAIN_ID, project_id: [PROJECT.id], pattern: [] }));
 		assert.equal(isActionFailure(mismatched), true);
+		assert.equal(none.length, 0);
+	});
+
+	test('a name assignment is sent as a pattern, typed as the full name or relative (v1.52)', async () => {
+		const calls = installFetch(() => envelope(null));
+		await assert.rejects(
+			async () =>
+				orgActions.setDomainAssignments(
+					orgEvent(`${settings}&/setDomainAssignments`, {
+						domain_id: DOMAIN_ID,
+						domain_name: 'defectdrainer.com',
+						project_id: [PROJECT.id, PROJECT.id],
+						pattern: ['marketingos.defectdrainer.com', '*.dev']
+					})
+				),
+			(err: unknown) => isRedirect(err)
+		);
+		assert.deepEqual(JSON.parse(calls[0].body ?? ''), {
+			assignments: [
+				{ project_id: PROJECT.id, pattern: 'marketingos' },
+				{ project_id: PROJECT.id, pattern: '*.dev' }
+			]
+		});
+		const none = installFetch(() => envelope(null));
+		const bad = await orgActions.setDomainAssignments(
+			orgEvent(`${settings}&/setDomainAssignments`, { domain_id: DOMAIN_ID, domain_name: 'defectdrainer.com', project_id: [PROJECT.id], pattern: ['a..b'] })
+		);
+		assert.equal(isActionFailure(bad), true);
 		assert.equal(none.length, 0);
 	});
 
@@ -397,6 +493,15 @@ describe('v1.35 renders', () => {
 		assert.match(html, /→ Lab/);
 	});
 
+	test('an assignment of one name is written out in the row (v1.52)', () => {
+		setPageUrl(`http://console.example/orgs/${ORG.id}?tab=settings`);
+		const html = render(OrgDomainsSection, {
+			props: { domains: [domain({ assignments: [{ project_id: PROJECT.id, project_name: 'Lab', pattern: 'marketingos' }] })], projects: [PROJECT] }
+		}).body;
+		assert.match(html, /marketingos\.defectdrainer\.com/);
+		assert.doesNotMatch(html, /\*\.defectdrainer\.com/);
+	});
+
 	test('a lapsed domain warns; a verified one hides the TXT record', () => {
 		setPageUrl(`http://console.example/orgs/${ORG.id}?tab=settings`);
 		const lapsed = render(OrgDomainsSection, { props: { domains: [domain({ status: 'lapsed' })], projects: [] } }).body;
@@ -404,6 +509,15 @@ describe('v1.35 renders', () => {
 		const verified = render(OrgDomainsSection, { props: { domains: [domain({ status: 'verified', verified_at: '2026-11-17T00:00:00Z' })], projects: [] } }).body;
 		assert.doesNotMatch(verified, /deploybot-verify=/);
 		assert.doesNotMatch(verified, />Verify</);
+	});
+
+	test('a domain Verify just verified shows Verified before the list is read again', () => {
+		setPageUrl(`http://console.example/orgs/${ORG.id}?tab=settings`);
+		const html = render(OrgDomainsSection, { props: { domains: [domain()], projects: [], verifiedId: DOMAIN_ID } }).body;
+		assert.match(html, /Verified/);
+		assert.doesNotMatch(html, /Pending/);
+		assert.doesNotMatch(html, /deploybot-verify=/);
+		assert.doesNotMatch(html, />Verify</);
 	});
 
 	test('row buttons name their domain; a row refusal is a focusable notice', () => {

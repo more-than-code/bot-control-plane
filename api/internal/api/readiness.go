@@ -14,6 +14,8 @@ import (
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/github"
+	"github.com/more-than-code/bot-control-plane/api/internal/hostpolicy"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
@@ -32,6 +34,14 @@ const (
 	fixRegistryLogin = "add_registry_login"
 	fixGrantDeploy   = "grant_deploy_access"
 	fixPolicySnippet = "host_policy_snippet"
+	// api-v1 v1.51: the routes check's console steps.
+	fixVerifyDomain = "verify_domain"
+	fixAllowEdge    = "allow_edge"
+	fixTurnOnEdge   = "turn_on_edge"
+	// api-v1 v1.53: an organization has not granted the GitHub app.
+	fixGitHubOrgAccess = "github_org_access"
+	// api-v1 v1.52: assign one name of a verified domain to the project.
+	fixAssignDomain = "assign_domain"
 )
 
 // readyCheck is one readiness row. Message names keys, sets, files, hosts
@@ -52,6 +62,20 @@ type readyFix struct {
 	Name     string     `json:"name,omitempty"`
 	Registry string     `json:"registry,omitempty"`
 	HostID   *uuid.UUID `json:"host_id,omitempty"`
+	// ImagePattern is the repository a host_policy_snippet fix allows
+	// (api-v1 v1.51).
+	ImagePattern string `json:"image_pattern,omitempty"`
+	// OrgID is the org whose Domains a verify_domain or assign_domain fix
+	// opens.
+	OrgID *uuid.UUID `json:"org_id,omitempty"`
+	// Owner and URL are a github_org_access fix's organization and the
+	// GitHub page where it is granted (api-v1 v1.53).
+	Owner string `json:"owner,omitempty"`
+	URL   string `json:"url,omitempty"`
+	// DomainID and Pattern are the domain and the pattern an assign_domain
+	// fix fills in (api-v1 v1.52); Name is that pattern written out.
+	DomainID *uuid.UUID `json:"domain_id,omitempty"`
+	Pattern  string     `json:"pattern,omitempty"`
 }
 
 type readyList struct {
@@ -579,6 +603,21 @@ func (s *Server) checkRegistry(ctx context.Context, p principal, rd readiness, l
 		if host == store.GitHubRegistry {
 			msg = "the stored login for " + host + " was refused; reconnect GitHub"
 		}
+		if r := got.Refusal; r != nil && got.Login == loginGitHub {
+			switch r.Reason {
+			case github.RefusalSignIn:
+				msg = "the GitHub sign-in for " + host + " expired, was revoked or lost read:packages; reconnect GitHub"
+			case github.RefusalOrgRestricted:
+				msg = host + " refused the GitHub connection: the " + r.Owner + " organization has not granted the Deploybot GitHub app access; an owner of " + r.Owner + " grants it on GitHub (reconnecting will not help)"
+				loginFix = readyFix{Action: fixGitHubOrgAccess, Registry: host, Owner: r.Owner, URL: r.URL}
+			case github.RefusalNoPackageAccess:
+				account := "the connected GitHub account"
+				if r.Account != "" {
+					account = "the GitHub account " + r.Account
+				}
+				msg = host + " refused the GitHub connection: " + account + " cannot see the " + r.Owner + " package; give it read access on GitHub, or reconnect GitHub as an account that can"
+			}
+		}
 		list.add("registry", readyMissing, msg, loginFix)
 	case accessNotFound:
 		list.add("registry", readyMissing, notFoundText(ref), readyFix{})
@@ -614,6 +653,16 @@ func (s *Server) checkHost(ctx context.Context, rd readiness, host store.Host, l
 	if !rd.isImage {
 		return nil
 	}
+	// api-v1 v1.50 item 9: a host-network entry is reported under the
+	// same check name, so readers keep their list of checks.
+	if rd.img.Network == catalog.NetworkHost {
+		if hostNetworkReady(host, rd.img, "deploy") {
+			list.add("networks", readyOK, host.Name+" allows host networking", readyFix{})
+		} else {
+			list.add("networks", readyMissing, reasonNoHostNetwork, readyFix{})
+		}
+		return nil
+	}
 	if len(rd.img.Networks) == 0 {
 		list.add("networks", readyOK, "the entry joins no shared networks", readyFix{})
 		return nil
@@ -639,6 +688,22 @@ func (s *Server) checkHostPolicy(ctx context.Context, rd readiness, host store.H
 		list.add("host_policy", readyUnknown, "the host's policy is checked when the program runs", readyFix{})
 		return nil
 	}
+	// api-v1 v1.51: a console-managed host sends its image patterns, so
+	// the check is exact.
+	if host.Programs != nil && host.Programs.ConsolePolicy {
+		ref, err := catalog.ParseImageRef(rd.img.Image)
+		if err != nil {
+			list.add("host_policy", readyUnknown, "the host's image allowlist is checked at deploy", readyFix{})
+			return nil
+		}
+		pattern := ref.Host + "/" + ref.Path
+		if hostpolicy.Match(ref.Host, ref.Path, host.Programs.ImagePatterns) {
+			list.add("host_policy", readyOK, host.Name+" allows image "+pattern, readyFix{})
+			return nil
+		}
+		list.add("host_policy", readyMissing, "this host does not allow image "+pattern+"; an org admin allows it on the host's Policy tab", readyFix{Action: fixPolicySnippet, HostID: idPtr(host.ID), ImagePattern: pattern})
+		return nil
+	}
 	denied := false
 	if rd.entry.Name != "" {
 		var err error
@@ -654,7 +719,7 @@ func (s *Server) checkHostPolicy(ctx context.Context, rd readiness, host store.H
 	if ref, err := catalog.ParseImageRef(rd.img.Image); err == nil {
 		pattern = ref.Host + "/" + ref.Path
 	}
-	list.add("host_policy", readyMissing, "this host does not allow image "+pattern, readyFix{Action: fixPolicySnippet, HostID: idPtr(host.ID)})
+	list.add("host_policy", readyMissing, "this host does not allow image "+pattern, readyFix{Action: fixPolicySnippet, HostID: idPtr(host.ID), ImagePattern: pattern})
 	return nil
 }
 

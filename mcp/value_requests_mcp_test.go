@@ -15,10 +15,9 @@ const valueRequestID = "Zyxwvutsrqponmlkjihgfedcba9876543210_-ZYXWV"
 
 // TestRequestEnvValueThroughGateway runs request_env_value through the
 // production (stateless) gateway with a client that declares
-// elicitation.url (spec-env-request-value rev 2, AC 6). On 2025-11-25 the
-// client gets the link as text only. On 2026-07-28 it also gets a URL input
-// request (SEP-2322); its retry reads the state without a second create,
-// and the final text still carries the link.
+// elicitation.url (spec-env-request-value rev 2, AC 6). On 2025-11-25 and on 2026-07-28 the client
+// gets the link as text in one answer with one create and no URL input
+// request (DD 8hp8).
 func TestRequestEnvValueThroughGateway(t *testing.T) {
 	if len(valueRequestID) != 43 {
 		t.Fatalf("id length %d", len(valueRequestID))
@@ -47,8 +46,7 @@ func TestRequestEnvValueThroughGateway(t *testing.T) {
 			t.Cleanup(func() { _ = cs.Close() })
 			res := mustCall(t, cs, "request_env_value", map[string]any{"project_id": projectID, "set": "services", "key": "STRIPE_API_KEY"})
 			text := textOf(t, res)
-			newProtocol := protocol == "2026-07-28"
-			if res.IsError || elicited != newProtocol {
+			if res.IsError || elicited {
 				t.Fatalf("error %v elicited %v: %s", res.IsError, elicited, text)
 			}
 			if !strings.Contains(text, "https://console.example/fill/"+valueRequestID) || !strings.Contains(text, "Secret values are never sent through this tool or shown to you.") {
@@ -56,9 +54,6 @@ func TestRequestEnvValueThroughGateway(t *testing.T) {
 			}
 			raw, _ := json.Marshal(res.StructuredContent)
 			want := `"elicitation":"not_supported"`
-			if newProtocol {
-				want = `"elicitation":"accepted"`
-			}
 			if !strings.Contains(string(raw), want) {
 				t.Fatalf("structured %s", raw)
 			}
@@ -71,11 +66,7 @@ func TestRequestEnvValueThroughGateway(t *testing.T) {
 			if posts != 1 {
 				t.Fatalf("creates %d", posts)
 			}
-			if newProtocol {
-				assertLast(t, fake, http.MethodGet, "/v1/value-requests/"+valueRequestID, "", "")
-			} else {
-				assertLast(t, fake, http.MethodPost, "/v1/projects/"+projectID+"/env-sets/services/value-requests", "", `{"key":"STRIPE_API_KEY"}`)
-			}
+			assertLast(t, fake, http.MethodPost, "/v1/projects/"+projectID+"/env-sets/services/value-requests", "", `{"key":"STRIPE_API_KEY"}`)
 			if strings.Contains(logs.String(), valueRequestID) {
 				t.Fatal("the request id is in the gateway log")
 			}

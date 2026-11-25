@@ -2,7 +2,7 @@
  * An entry's private keys (api-v1 v1.33 item 6): the keys of its private set `@<entry>`, as `GET /catalog/{name}`
  * lists them. Names and flags only: the API never sends a value here, and nothing here would keep one.
  */
-export type PrivateKey = { key: string; is_secret: boolean; needs_value: boolean; reveal_pending: boolean };
+export type PrivateKey = { key: string; is_secret: boolean; needs_value: boolean; reveal_pending: boolean; generated: boolean };
 
 const ENV_KEY = /^[A-Z_][A-Z0-9_]{0,63}$/;
 
@@ -21,7 +21,7 @@ export function parsePrivateKeys(entry: unknown): PrivateKey[] | null {
 		const v = item as Record<string, unknown>;
 		if (typeof v.key !== 'string' || !ENV_KEY.test(v.key) || typeof v.is_secret !== 'boolean') return null;
 		if (out.some((row) => row.key === v.key)) return null;
-		out.push({ key: v.key, is_secret: v.is_secret, needs_value: v.needs_value === true, reveal_pending: v.reveal_pending === true });
+		out.push({ key: v.key, is_secret: v.is_secret, needs_value: v.needs_value === true, reveal_pending: v.reveal_pending === true, generated: v.generated === true });
 	}
 	return out.sort((a, b) => a.key.localeCompare(b.key));
 }
@@ -42,7 +42,7 @@ export function privateKeysFolded(count: number, collapsed: boolean): boolean {
 	return collapsed || count > PRIVATE_KEYS_OPEN_MAX;
 }
 
-const ENTRY_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
+export const ENTRY_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
 
 /** The entry of a private set name `@<entry>`, or null. */
 export function privateSetEntry(set: string): string | null {
@@ -61,4 +61,10 @@ export function privateKeyRevealPath(projectId: string, entry: string, key: stri
 /** After Reveal once (shown or refused), the row is an ordinary secret: no longer pending. The reload confirms it. */
 export function afterPrivateReveal(keys: readonly PrivateKey[], key: string): PrivateKey[] {
 	return keys.map((row) => (row.key === key ? { ...row, reveal_pending: false } : row));
+}
+
+/** The API path that regenerates one entry-private key (api-v1 v1.54), or null for a bad entry or key. */
+export function privateKeyRegeneratePath(projectId: string, entry: string, key: string): string | null {
+	const reveal = privateKeyRevealPath(projectId, entry, key);
+	return reveal == null ? null : reveal.replace(/\/reveal$/, '/regenerate');
 }

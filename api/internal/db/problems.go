@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
@@ -200,4 +201,44 @@ func scanProblem(row pgx.Row) (store.Problem, error) {
 		p.ResolvedAt = &t
 	}
 	return p, nil
+}
+
+// RetentionJobs reads TimescaleDB's own views (api-v1 v1.58). A job with no
+// stats row yet has zero runs and no times. -infinity (never) and other
+// non-finite times read as nil.
+func (d *DB) RetentionJobs(ctx context.Context) ([]store.RetentionJob, error) {
+	rows, err := d.pool.Query(ctx, `
+SELECT j.job_id, j.hypertable_name, coalesce(s.last_run_status, ''),
+       s.last_successful_finish, coalesce(s.total_runs, 0), coalesce(s.total_failures, 0), s.next_start
+FROM timescaledb_information.jobs j
+LEFT JOIN timescaledb_information.job_stats s ON s.job_id = j.job_id
+WHERE j.proc_name = 'policy_retention' AND j.hypertable_schema = 'metrics'
+ORDER BY j.hypertable_name, j.job_id
+`)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []store.RetentionJob{}
+	for rows.Next() {
+		var j store.RetentionJob
+		var lastOK, next pgtype.Timestamptz
+		if err := rows.Scan(&j.JobID, &j.Hypertable, &j.LastStatus, &lastOK, &j.TotalRuns, &j.TotalFailures, &next); err != nil {
+			return nil, mapErr(err)
+		}
+		j.LastSuccess, j.NextStart = finiteTime(lastOK), finiteTime(next)
+		out = append(out, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err)
+	}
+	return out, nil
+}
+
+func finiteTime(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid || t.InfinityModifier != pgtype.Finite {
+		return nil
+	}
+	u := t.Time.UTC()
+	return &u
 }

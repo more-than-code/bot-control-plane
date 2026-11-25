@@ -1,5 +1,7 @@
 <script lang="ts">
 	import CircleArrowUp from '@lucide/svelte/icons/circle-arrow-up';
+	import Cpu from '@lucide/svelte/icons/cpu';
+	import DatabaseZap from '@lucide/svelte/icons/database-zap';
 	import FileWarning from '@lucide/svelte/icons/file-warning';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -7,8 +9,7 @@
 	import ServerOff from '@lucide/svelte/icons/server-off';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import type { Notification } from '$lib/api-types';
-	import { formatAgo, formatWhen } from '$lib/format';
-	import { needsAction, NOTIFICATIONS_ERROR, problemAge, problemKindOf } from '$lib/notifications';
+	import { needsAction, NOTIFICATIONS_ERROR, problemKindOf, rowTime, rowTitle } from '$lib/notifications';
 	import { timeZoneSource } from '$lib/time-zone';
 	import { cn } from '$lib/utils';
 
@@ -16,6 +17,8 @@
 	 * The bell popover's rows (spec-header-org-project-bell §3.2) in the API's order: open problems first, then the
 	 * rest newest first. A problem row (api-v1 v1.41) has an icon by what broke (host from its href, registry login,
 	 * deploy, a host config file since v1.44), its age ("open 25 min", "resolved 3 h ago"), and is muted once resolved.
+	 * A release row shows its age when the API dated it by first-served (api-v1 v1.57), else its day ("24 Nov"); the time
+	 * sits after the truncated detail, so it is never cut off.
 	 */
 	let {
 		items,
@@ -32,7 +35,15 @@
 
 	const zones = timeZoneSource();
 
-	const PROBLEM_ICONS = { host_offline: ServerOff, registry_login: KeyRound, deploy: RotateCcw, host_file: FileWarning, agent_upgrade: CircleArrowUp };
+	const PROBLEM_ICONS = {
+		host_offline: ServerOff,
+		registry_login: KeyRound,
+		deploy: RotateCcw,
+		host_file: FileWarning,
+		agent_upgrade: CircleArrowUp,
+		host_resource: Cpu,
+		metrics_retention: DatabaseZap
+	};
 
 	function iconOf(item: Notification) {
 		const problem = problemKindOf(item);
@@ -52,7 +63,6 @@
 	<ul class="-mx-1 flex max-h-96 flex-col overflow-y-auto">
 		{#each items as item (item.key)}
 			{@const Icon = iconOf(item)}
-			{@const age = problemAge(item)}
 			{@const urgent = needsAction(item)}
 			<li>
 				<a
@@ -80,10 +90,13 @@
 							{#if !item.read}<span class="sr-only">Unread:</span>{/if}
 							{item.title}
 						</span>
-						<span class="text-muted-foreground truncate text-xs" title={item.detail || undefined}>
+						<span class="text-muted-foreground flex min-w-0 gap-1 text-xs">
 							{#if urgent}<span class="sr-only">Needs action:</span>{/if}
-							{#if item.detail}{item.detail} <span aria-hidden="true">·</span>{/if}
-							<time datetime={item.at} title={formatWhen(item.at, zones?.current)}>{age ?? formatAgo(item.at)}</time>
+							{#if item.detail}
+								<span class="truncate" title={item.detail}>{item.detail}</span>
+								<span aria-hidden="true">·</span>
+							{/if}
+							<time datetime={item.at} title={rowTitle(item, zones?.current)} class="shrink-0">{rowTime(item)}</time>
 						</span>
 					</span>
 				</a>

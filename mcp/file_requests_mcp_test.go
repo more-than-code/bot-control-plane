@@ -15,9 +15,9 @@ const fileRequestID = "Fyxwvutsrqponmlkjihgfedcba9876543210_-FILES"
 
 // TestRequestFileThroughGateway runs request_file through the production
 // (stateless) gateway with a client that declares elicitation.url
-// (spec-file-request AC 6). On 2025-11-25 the client gets the link as text
-// only. On 2026-07-28 it also gets a URL input request; its retry reads the
-// state without a second create, and the final text still carries the link.
+// (spec-file-request AC 6). On 2025-11-25 and on 2026-07-28 the client
+// gets the link as text in one answer with one create and no URL input
+// request (DD 8hp8).
 func TestRequestFileThroughGateway(t *testing.T) {
 	if len(fileRequestID) != 43 {
 		t.Fatalf("id length %d", len(fileRequestID))
@@ -46,22 +46,15 @@ func TestRequestFileThroughGateway(t *testing.T) {
 			t.Cleanup(func() { _ = cs.Close() })
 			res := mustCall(t, cs, "request_file", map[string]any{"project_id": projectID, "name": "nginx.conf", "reason": "the proxy config"})
 			text := textOf(t, res)
-			newProtocol := protocol == "2026-07-28"
 			link := "https://console.example/fill-file/" + fileRequestID
-			if res.IsError || (elicited != nil) != newProtocol {
+			if res.IsError || elicited != nil {
 				t.Fatalf("error %v elicited %v: %s", res.IsError, elicited, text)
-			}
-			if newProtocol && (elicited.Mode != "url" || elicited.URL != link || elicited.ElicitationID != fileRequestID || !strings.Contains(elicited.Message, "never sees the content")) {
-				t.Fatalf("elicit %#v", elicited)
 			}
 			if !strings.Contains(text, link) || !strings.Contains(text, "File contents are never sent through this tool or shown to you.") {
 				t.Fatalf("text %s", text)
 			}
 			raw, _ := json.Marshal(res.StructuredContent)
 			want := `"elicitation":"not_supported"`
-			if newProtocol {
-				want = `"elicitation":"accepted"`
-			}
 			if !strings.Contains(string(raw), want) || strings.Contains(string(raw), "content") {
 				t.Fatalf("structured %s", raw)
 			}
@@ -74,11 +67,7 @@ func TestRequestFileThroughGateway(t *testing.T) {
 			if posts != 1 {
 				t.Fatalf("creates %d", posts)
 			}
-			if newProtocol {
-				assertLast(t, fake, http.MethodGet, "/v1/file-requests/"+fileRequestID, "", "")
-			} else {
-				assertLast(t, fake, http.MethodPost, "/v1/projects/"+projectID+"/file-requests", "", `{"name":"nginx.conf","reason":"the proxy config"}`)
-			}
+			assertLast(t, fake, http.MethodPost, "/v1/projects/"+projectID+"/file-requests", "", `{"name":"nginx.conf","reason":"the proxy config"}`)
 			if strings.Contains(logs.String(), fileRequestID) {
 				t.Fatal("the request id is in the gateway log")
 			}

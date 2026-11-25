@@ -50,6 +50,9 @@ func clonePrograms(p *store.HostPrograms) *store.HostPrograms {
 	if p.HostFiles != nil {
 		cp.HostFiles = append([]store.HostFile{}, p.HostFiles...)
 	}
+	if p.ImagePatterns != nil {
+		cp.ImagePatterns = append([]string{}, p.ImagePatterns...)
+	}
 	if p.Edge != nil {
 		edge := *p.Edge
 		cp.Edge = &edge
@@ -352,6 +355,22 @@ func (m *Mem) MarkConfirmationUsed(_ context.Context, hash []byte, userID uuid.U
 	rec.row.UsedAt = &used
 	m.confirmations[key] = rec
 	return nil
+}
+
+func (m *Mem) ReopenConfirmation(_ context.Context, hash []byte, userID uuid.UUID, at, until time.Time) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := hashKey(hash)
+	rec, ok := m.confirmations[key]
+	if !ok || !secret.Equal(hash, rec.hash) || rec.row.UserID != userID || rec.row.UsedAt == nil || rec.row.UsedAt.After(at) {
+		return time.Time{}, store.ErrNotFound
+	}
+	rec.row.UsedAt = nil
+	if until.After(rec.row.ExpiresAt) {
+		rec.row.ExpiresAt = until
+	}
+	m.confirmations[key] = rec
+	return rec.row.ExpiresAt, nil
 }
 
 func (m *Mem) GetIdempotency(_ context.Context, userID uuid.UUID, key string, at time.Time) (store.IdempotencyRecord, error) {

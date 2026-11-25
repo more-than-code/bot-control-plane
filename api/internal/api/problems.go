@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/more-than-code/bot-control-plane/api/internal/authz"
 	"github.com/more-than-code/bot-control-plane/api/internal/catalog"
+	"github.com/more-than-code/bot-control-plane/api/internal/github"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
 
@@ -152,7 +153,7 @@ func (s *Server) RunProblems(ctx context.Context) {
 }
 
 // SweepProblems is one sweep: nothing in the first 5 minutes after start;
-// then host_offline and the deploy check every call, and once an hour (in
+// then host_offline, the deploy, host file and host resource checks every call, and once an hour (in
 // its own goroutine, never two at once) the registry check and the prune
 // of resolved problems older than 30 days.
 func (s *Server) SweepProblems(ctx context.Context) {
@@ -181,6 +182,7 @@ func (s *Server) SweepProblems(ctx context.Context) {
 	s.sweepHosts(ctx, now)
 	s.sweepDeploys(ctx)
 	s.sweepHostFiles(ctx, now)
+	s.sweepHostResources(ctx, now)
 }
 
 // hourlyProblems is the hourly work, within problemsHourlyDeadline.
@@ -194,6 +196,7 @@ func (s *Server) hourlyProblems(ctx context.Context, now time.Time) {
 	ctx, cancel := context.WithTimeout(ctx, problemsHourlyDeadline)
 	defer cancel()
 	s.checkRegistries(ctx)
+	s.sweepMetricsRetention(ctx, now)
 	if _, err := s.Store.PruneProblems(ctx, now.Add(-store.ProblemRetention)); err != nil {
 		s.logger().Error("problem prune failed")
 	}
@@ -264,10 +267,36 @@ const (
 	detailGitHubLoginRefused = "GitHub sign-in expired or was revoked. Reconnect GitHub in Settings."
 )
 
+// refusalText is the person-facing reason a GitHub connection was refused
+// (api-v1 v1.53), with the GitHub page that fixes it; "" when the reason
+// is unknown or is the sign-in itself (the v1.43 detail says that).
+func refusalText(r *accessRefusal) string {
+	if r == nil {
+		return ""
+	}
+	switch r.Reason {
+	case github.RefusalOrgRestricted:
+		text := "The " + r.Owner + " organization has not granted the Deploybot GitHub app access, so reconnecting will not help. " +
+			"An org owner clicks Grant (a member clicks Request) next to " + r.Owner
+		if r.URL != "" {
+			return text + " at " + r.URL
+		}
+		return text + " in GitHub Settings → Applications → Authorized OAuth Apps."
+	case github.RefusalNoPackageAccess:
+		account := "The connected GitHub account"
+		if r.Account != "" {
+			account = "The GitHub account " + r.Account
+		}
+		return account + " cannot see the " + r.Owner + " package. Give it read access to the package on GitHub, or reconnect GitHub as an account that can."
+	default:
+		return ""
+	}
+}
+
 // noteRegistryAccess is the registry_login hook on every image-access
 // answer that used a stored login: login_failed opens, private_ok resolves.
 // login is the image-access login kind (manual or github).
-func (s *Server) noteRegistryAccess(ctx context.Context, projectID uuid.UUID, host, login, access string) {
+func (s *Server) noteRegistryAccess(ctx context.Context, projectID uuid.UUID, host, login, access string, refusal *accessRefusal) {
 	if !s.problemsOn() {
 		return
 	}
@@ -284,6 +313,9 @@ func (s *Server) noteRegistryAccess(ctx context.Context, projectID uuid.UUID, ho
 		detail := detailLoginRefused
 		if login == loginGitHub {
 			detail = detailGitHubLoginRefused
+			if text := refusalText(refusal); text != "" {
+				detail = text
+			}
 		}
 		s.openProblem(ctx, store.ProblemOpen{
 			Kind: store.ProblemRegistryLogin, Subject: subject, OrgID: project.OrgID, ProjectID: &id,
@@ -542,6 +574,8 @@ type problemReader struct {
 	roles     map[uuid.UUID]string
 	grants    map[uuid.UUID][]store.CatalogGrant
 	names     map[uuid.UUID]map[uuid.UUID]string
+	// disks is each host's mounts, read for a hashed disk subject's link.
+	disks map[uuid.UUID][]store.HostDisk
 }
 
 func (s *Server) newProblemReader(ctx context.Context, userID uuid.UUID) (*problemReader, error) {
@@ -599,11 +633,12 @@ func (r *problemReader) list(ctx context.Context, since *time.Time) ([]store.Pro
 	return out, nil
 }
 
-// sees: host_offline for org owners and admins; registry_login for project
+// sees: host_offline, host_file, host_resource and metrics_retention for org owners and admins; registry_login for project
 // owners and admins (org owners and admins are project admins); deploy for
 // those plus anyone holding the entry's deploy action.
 func (r *problemReader) sees(ctx context.Context, p store.Problem) (bool, error) {
-	if p.Kind == store.ProblemHostOffline || p.Kind == store.ProblemHostFile || p.Kind == store.ProblemAgentUpgrade {
+	if p.Kind == store.ProblemHostOffline || p.Kind == store.ProblemHostFile || p.Kind == store.ProblemAgentUpgrade || p.Kind == store.ProblemHostResource ||
+		p.Kind == store.ProblemMetricsRetention {
 		return r.adminOrgs[p.OrgID], nil
 	}
 	if p.ProjectID == nil {
@@ -636,9 +671,14 @@ func (r *problemReader) sees(ctx context.Context, p store.Problem) (bool, error)
 // href is the console page that fixes the problem.
 func (r *problemReader) href(ctx context.Context, p store.Problem) string {
 	switch {
+	case p.Kind == store.ProblemMetricsRetention:
+		// The org Settings anchor explains it; the fragment tells the console the kind.
+		return "/orgs/" + p.OrgID.String() + "?tab=settings#metrics-retention"
 	case p.Kind == store.ProblemHostFile && p.HostID != nil:
 		_, name, _ := strings.Cut(p.Subject, ":")
 		return hostFileHref(*p.HostID, name)
+	case p.Kind == store.ProblemHostResource && p.HostID != nil:
+		return r.resourceHref(ctx, p)
 	case p.Kind == store.ProblemHostOffline && p.HostID != nil:
 		return "/hosts/" + p.HostID.String()
 	case p.Kind == store.ProblemAgentUpgrade && p.HostID != nil:

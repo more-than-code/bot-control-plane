@@ -209,6 +209,17 @@ WHERE id = $1::uuid
 	return dom, nil
 }
 
+func (d *DB) TouchDomainCheck(ctx context.Context, orgID, domainID uuid.UUID, at time.Time) error {
+	dom, err := getDomain(ctx, d.pool, orgID, domainID, false)
+	if err != nil {
+		return err
+	}
+	return mapErr(exec(ctx, d.pool, `
+UPDATE app.org_domains SET last_check_at = $2
+WHERE id = $1::uuid AND status <> 'verified'
+`, dom.ID.String(), at))
+}
+
 func (d *DB) RecordDomainCheck(ctx context.Context, domainID uuid.UUID, ok bool, at time.Time) (store.OrgDomain, bool, error) {
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
@@ -275,13 +286,14 @@ func (d *DB) PutDomainAssignments(ctx context.Context, orgID, domainID uuid.UUID
 		return store.OrgDomain{}, mapErr(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, err := getDomain(ctx, tx, orgID, domainID, true); err != nil {
+	cur, err := getDomain(ctx, tx, orgID, domainID, true)
+	if err != nil {
 		return store.OrgDomain{}, err
 	}
 	seen := map[string]bool{}
 	for _, a := range in {
-		key := a.ProjectID.String() + a.Pattern
-		if seen[key] || (a.Pattern != "@" && a.Pattern != "*") {
+		key := a.ProjectID.String() + " " + a.Pattern
+		if seen[key] || !store.ValidPattern(cur.Name, a.Pattern) {
 			return store.OrgDomain{}, store.ErrInvalid
 		}
 		seen[key] = true
@@ -447,13 +459,23 @@ func routesUnder(ctx context.Context, q queryer, orgID, domainID uuid.UUID) ([]s
 	sql := `SELECT ` + routeCols + routeFrom + `
 JOIN app.org_domains d ON d.id = $2::uuid AND d.org_id = $1::uuid
 WHERE p.org_id = $1::uuid
-  AND (r.hostname = d.name OR substr(r.hostname, strpos(r.hostname, '.') + 1) = d.name)
+  AND (r.hostname = d.name OR substr(r.hostname, strpos(r.hostname, '.') + 1) = d.name
+    -- Deeper names (api-v1 v1.52) only when no more specific domain of the
+    -- org holds them: such a route was never this domain's.
+    OR (right(r.hostname, length(d.name) + 1) = '.' || d.name
+      AND NOT EXISTS (
+        SELECT 1 FROM app.org_domains d3
+        WHERE d3.org_id = $1::uuid AND d3.id <> d.id AND length(d3.name) > length(d.name)
+          AND (r.hostname = d3.name OR right(r.hostname, length(d3.name) + 1) = '.' || d3.name))))
   AND NOT EXISTS (
     SELECT 1 FROM app.org_domains d2
     JOIN app.domain_assignments a2 ON a2.domain_id = d2.id AND a2.project_id = r.project_id
     WHERE d2.id <> d.id AND d2.org_id = $1::uuid AND d2.status IN ('verified', 'lapsed')
       AND ((a2.pattern = '@' AND d2.name = r.hostname)
-        OR (a2.pattern = '*' AND strpos(r.hostname, '.') > 1 AND substr(r.hostname, strpos(r.hostname, '.') + 1) = d2.name))
+        OR (a2.pattern = '*' AND strpos(r.hostname, '.') > 1 AND substr(r.hostname, strpos(r.hostname, '.') + 1) = d2.name)
+        OR (left(a2.pattern, 2) = '*.' AND strpos(r.hostname, '.') > 1
+            AND substr(r.hostname, strpos(r.hostname, '.') + 1) = substr(a2.pattern, 3) || '.' || d2.name)
+        OR (a2.pattern <> '@' AND strpos(a2.pattern, '*') = 0 AND r.hostname = a2.pattern || '.' || d2.name))
   )
 ORDER BY r.hostname, r.path_prefix`
 	return collectRoutes(ctx, q, sql, orgID.String(), domainID.String())

@@ -39,6 +39,25 @@ const maxResponseBytes = 8 << 20
 type Client struct {
 	base *url.URL
 	http *http.Client
+	// console is BOT_MCP_CONSOLE_ORIGIN with no trailing slash, or "" when
+	// unset: tool results then carry no console links.
+	console string
+}
+
+// SetConsoleOrigin sets the console origin tool results link to. Call it
+// before the client is shared.
+func (c *Client) SetConsoleOrigin(origin string) {
+	c.console = strings.TrimRight(origin, "/")
+}
+
+// ConsoleURL is the console origin plus path, which starts with "/" and
+// may carry a query and a fragment. It is "" when no origin is set or the
+// path does not start with exactly one "/".
+func (c *Client) ConsoleURL(path string) string {
+	if c == nil || c.console == "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return ""
+	}
+	return c.console + path
 }
 
 // HTTPAllowed reports whether a cleartext http URL for hostname is permitted.
@@ -97,6 +116,9 @@ type Error struct {
 	Status int
 	Code   string
 	Msg    string
+	// Payload is the refusal's payload, when it had one. Only a caller that
+	// knows that refusal reads it, and never into an error string.
+	Payload json.RawMessage
 }
 
 func (e *Error) Error() string {
@@ -195,7 +217,7 @@ func decodeEnvelope(status int, data []byte) (json.RawMessage, error) {
 		return nil, &Error{Status: status, Code: code, Msg: msg}
 	}
 	if env.Code != "ok" {
-		return nil, &Error{Status: status, Code: env.Code, Msg: env.Msg}
+		return nil, &Error{Status: status, Code: env.Code, Msg: env.Msg, Payload: env.Payload}
 	}
 	if status < 200 || status >= 300 {
 		return nil, &Error{Status: status, Code: "error", Msg: "unexpected http status"}

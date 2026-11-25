@@ -57,6 +57,8 @@ var delegatedDenyPatterns = []string{
 	"POST /v1/projects/{id}/env-sets/{set}/secret",
 	"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal",
 	"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/reveal",
+	"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/regenerate",
+	"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/regenerate",
 	"POST /v1/value-requests/{request_id}/fill",
 	"POST /v1/value-requests/{request_id}/decline",
 	"POST /v1/file-requests/{request_id}/fill",
@@ -73,10 +75,13 @@ var delegatedDenyPatterns = []string{
 	"POST /v1/me/notifications/read",
 	"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}",
 	"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply",
+	"POST /v1/orgs/{id}/hosts/{host_id}/policy",
 }
 
 var delegatedAllowPatterns = []string{
+	"PUT /v1/hosts/{id}/alert-settings",
 	"POST /v1/hosts/{id}/snapshot",
+	"POST /v1/hosts/{id}/docker-usage",
 	"POST /v1/services/{id}/probe",
 	"POST /v1/projects/{id}/catalog/{name}/logs",
 	"POST /v1/projects/{id}/catalog/{name}/status",
@@ -250,6 +255,14 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 			"", func(t *testing.T) string {
 				return envSnap(t, w, sc.project.ID, "svc")
 			}},
+		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/regenerate", http.MethodPost, "/v1/projects/" + project + "/env-sets/svc/keys/TOKEN/regenerate",
+			`{"generate":{"kind":"hex"}}`, func(t *testing.T) string {
+				return envSnap(t, w, sc.project.ID, "svc")
+			}},
+		{"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/regenerate", http.MethodPost, "/v1/projects/" + project + "/catalog/web/private-keys/TOKEN/regenerate",
+			`{"generate":{"kind":"hex"}}`, func(t *testing.T) string {
+				return envSnap(t, w, sc.project.ID, "@web")
+			}},
 		{"POST /v1/value-requests/{request_id}/fill", http.MethodPost, "/v1/value-requests/" + strings.Repeat("A", 43) + "/fill",
 			`{"value":"nope"}`, func(t *testing.T) string {
 				return envSnap(t, w, sc.project.ID, "svc")
@@ -305,6 +318,9 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 			return hostFileSnap(t, w, sc.host.ID)
 		}},
 		{"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply", http.MethodPost, org + "/hosts/" + host + "/files/dd-policy/apply", `{"version":1}`, func(t *testing.T) string {
+			return hostFileSnap(t, w, sc.host.ID)
+		}},
+		{"POST /v1/orgs/{id}/hosts/{host_id}/policy", http.MethodPost, org + "/hosts/" + host + "/policy", `{"base_hash":"` + strings.Repeat("a", 64) + `","edge":true,"images":[],"projects":[]}`, func(t *testing.T) string {
 			return hostFileSnap(t, w, sc.host.ID)
 		}},
 	}

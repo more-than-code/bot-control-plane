@@ -319,7 +319,7 @@ func TestEntryPrivateSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	pk := entry.Payload.PrivateKeys
-	if len(pk) != 2 || pk[0]["key"] != "SIGNING" || pk[0]["reveal_pending"] != true || pk[1]["key"] != "TOKEN" || pk[1]["needs_value"] != true || len(pk[0]) != 4 {
+	if len(pk) != 2 || pk[0]["key"] != "SIGNING" || pk[0]["reveal_pending"] != true || pk[1]["key"] != "TOKEN" || pk[1]["needs_value"] != true || pk[0]["generated"] != true || pk[1]["generated"] != false || len(pk[0]) != 5 {
 		t.Fatalf("private_keys %v", pk)
 	}
 	// Lists hide the private set unless asked.

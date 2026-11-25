@@ -570,6 +570,9 @@ func (s *Server) issueConfirmation(w http.ResponseWriter, r *http.Request, p pri
 			shown = imageDigest
 		}
 		plan = imagePlan(action, entry.Name, shown, host.Name, imageNetworks)
+		if img, err := catalog.ParseStored(entry.ImageRaw); err == nil && img.Network == catalog.NetworkHost {
+			plan += hostNetworkPlan(action)
+		}
 	}
 	payload := map[string]any{
 		"confirmation_id": plain,
@@ -782,6 +785,15 @@ func grantForAction(kind, action string) string {
 
 func programPlan(action, entry, display, runAs, host string) string {
 	return fmt.Sprintf("will %s program %s (%s, as %s) on %s", action, entry, display, runAs, host)
+}
+
+// hostNetworkPlan is the plan suffix for an entry with network "host" on a
+// deploy, rollback or run (api-v1 v1.50 item 9), else "".
+func hostNetworkPlan(action string) string {
+	if action != "deploy" && action != "rollback" && action != "run" {
+		return ""
+	}
+	return "; runs on the host network (shares the host's loopback)"
 }
 
 // imagePlan is the delegated confirm sentence. A deploy or rollback of an

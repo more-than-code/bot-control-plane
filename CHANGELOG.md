@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.48 — 2026-11-24
+- See what fills a host's disk: the host page lists each mount's used and total size, and org owners and admins can check what Docker uses there and what can be reclaimed, as `docker system df` shows it. The Docker check needs bot-agent 0.2.17; MCP has a new `host_disk_usage` tool.
+- Deploybot watches its own metrics retention: if the database stops deleting metrics older than 7 days, the owners and admins of the organization that owns the server's host get a problem in the bell.
+- A release in the bell shows how long ago this server started running it, so two releases on the same day are told apart and sort by when they went live.
+- Every notification's time stays visible, even when its text is long.
+
+## v0.2.47 — 2026-11-24
+- A deploy the host refuses as invalid names the spec field that failed (needs bot-agent 0.2.16), and a deploy the host refused keeps its plan, so you can confirm it again after fixing the cause.
+- Regenerate is offered only for values Deploybot generated. A secret you entered yourself, such as a provider's API key, is changed with Edit, so it can no longer be replaced by a random value by mistake.
+- The Regenerate dialog says nothing changes until you redeploy the entries that use the key, and warns that a value also set somewhere else (a database user, a first-start setting) must be changed there too.
+- The notification bell loads again (it failed on v0.2.46).
+
+## v0.2.46 — 2026-11-24
+- Host resource alerts: Deploybot opens a problem when an always-on host runs low on memory or disk, or stays busy on CPU or load, and resolves it after recovery. Org owners and admins can set per-host thresholds on the host page, and the memory chart shows available memory.
+- Deploybot can run its own server in containers: image entries can use the host's network when the host's owner allows it, secrets can come from root-only files on the host, and a deploy started before the server goes away is still recorded when the host reports back. This needs bot-agent 0.2.15.
+- Host settings from the console: a host's owner can let org owners and admins change its edge, images and projects in the console. This needs a bot-agent that supports it.
+- Assign one name of a domain (for example api.example.com) to a project, not only the whole domain or a wildcard.
+- When ghcr.io refuses a GitHub connection, the console says why (for example, the GitHub organization has not approved the app).
+- Regenerate a generated secret value from the console.
+- MCP: request tools return their console link at once, results link to the console page they concern, a step only the person can do (such as revealing a generated value) comes with the link to send them, and an invalid image entry names the field that is wrong.
+
 ## v0.2.45 — 2026-11-23
 - Delete stale image versions from the image picker: an org owner or admin can remove a ghcr.io version after allowing it in the GitHub connection. A version that is running, is a rollback target or is among the last 5 deploys is kept, and the message says why.
 - The image picker lists ghcr.io tags newest first.

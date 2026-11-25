@@ -337,3 +337,40 @@ func restoreNotificationMigration(url string) {
 	}
 	_ = Migrate(ctx, url)
 }
+
+// TestParityHostUpdateNotices: the first notice of a host behind a version
+// keeps its time; a newer version starts a new one; unknown hosts are
+// skipped (migration 0035).
+func TestParityHostUpdateNotices(t *testing.T) {
+	runParity(t, func(p parity) {
+		u := p.user("hun")
+		org := p.org(u.ID)
+		// A project in the org, so the 0015 down script that TestOrgsMigration
+		// runs on the shared test database finds an owner for these hosts (it
+		// refuses a host in an org that never had a project).
+		p.project(org, u.ID, "hun")
+		a, b := p.enroll(org, nil, u.ID, "hun-a"), p.enroll(org, nil, u.ID, "hun-b")
+		ghost := uuid.New()
+		got, err := p.st.NoticeHostUpdates(p.ctx, []uuid.UUID{a.ID, ghost}, "0.3.0", p.at)
+		if err != nil || len(got) != 1 || !got[a.ID].Equal(p.at) {
+			p.t.Fatalf("first %v %v", got, err)
+		}
+		later := p.at.Add(time.Hour)
+		got, err = p.st.NoticeHostUpdates(p.ctx, []uuid.UUID{a.ID, b.ID}, "0.3.0", later)
+		if err != nil || len(got) != 2 || !got[a.ID].Equal(p.at) || !got[b.ID].Equal(later) {
+			p.t.Fatalf("kept %v %v", got, err)
+		}
+		// A newer version is noticed anew, and the old row goes.
+		got, err = p.st.NoticeHostUpdates(p.ctx, []uuid.UUID{a.ID}, "0.3.1", later)
+		if err != nil || !got[a.ID].Equal(later) {
+			p.t.Fatalf("newer %v %v", got, err)
+		}
+		got, err = p.st.NoticeHostUpdates(p.ctx, []uuid.UUID{a.ID}, "0.3.0", later.Add(time.Hour))
+		if err != nil || !got[a.ID].Equal(later.Add(time.Hour)) {
+			p.t.Fatalf("old row not deleted %v %v", got, err)
+		}
+		if got, err := p.st.NoticeHostUpdates(p.ctx, nil, "0.3.0", p.at); err != nil || len(got) != 0 {
+			p.t.Fatalf("none %v %v", got, err)
+		}
+	})
+}

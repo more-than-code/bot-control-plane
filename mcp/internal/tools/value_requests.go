@@ -64,7 +64,7 @@ func registerValueRequests(server *mcp.Server, api *apiclient.Client) {
 		Description: valueRule + " Ask the signed-in person to enter one env value in the Deploybot console. " +
 			"Deploybot makes a one-time link, valid for 15 minutes, that only that person can use; they type or paste the value " +
 			"(or let Deploybot generate one) in their own browser, and it is stored encrypted as a secret. You get the link, never the value. " +
-			"The result always has the link as text, alone on its first line; show it to the person. " + severalLinks + " A client on MCP 2026-07-28 that supports URL elicitation also offers the link to the person directly before the result. " +
+			"The result always has the link as text, alone on its first line, and the call returns at once; show it to the person. " + severalLinks + " " +
 			"Needs owner or admin on the project. Name an env set with set, or an entry with entry for one of its private secrets (secret_env KEY: {\"fill\": true}). " +
 			"The key may be new to the set, a placeholder without a value, or a secret that already has a value: the person then replaces it (a rotation). A plain key with a value is refused; change it with update_env_set. " +
 			"Asking again for the same key replaces your earlier link, which then stops working. " +
@@ -171,14 +171,15 @@ func requestEnvValue(ctx context.Context, api *apiclient.Client, call requestCal
 	}
 	payload, fail := post(ctx, api, in.createPath(), body)
 	if fail != nil {
-		return keepFixedMessage(fail, "conflict", in.Key+" already has a value; edit it in the console")
+		link := projectSettingsURL(api, in.ProjectID, "env-sets")
+		if in.Entry != "" {
+			link = entryURL(api, in.ProjectID, in.Entry)
+		}
+		return keepFixedLinked(fail, "conflict", in.Key+" already has a value; edit it in the console", link)
 	}
 	created, ok := valueRequestKind.parseCreated(payload)
 	if !ok {
 		return toolError("error", errStatusShape.Error())
-	}
-	if call.wantsURLInput() {
-		return valueRequestKind.inputRequired(created, fillMessage(in))
 	}
 	return valueRequestKind.result(created, in.subject(), "", elicitNotSupported)
 }
@@ -204,10 +205,6 @@ func requestEnvValueRetry(ctx context.Context, api *apiclient.Client, in request
 	}
 	created.ExpiresAt = view.expiresAt
 	return valueRequestKind.result(created, in.subject(), view.state, elicitOutcome(call.responses[fillInputID]))
-}
-
-func fillMessage(in requestEnvValueArgs) string {
-	return fmt.Sprintf("Deploybot needs a value for %s. Open this link in your browser to enter it; the agent never sees the value.", in.subject())
 }
 
 type valueRequestView struct {

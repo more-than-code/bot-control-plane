@@ -17,8 +17,10 @@ import (
 // Helpers shared by the request tools: request_env_value (value_requests.go,
 // api-v1 v1.28) and request_file (file_requests.go, v1.30). The agent asks;
 // the person who asked answers on a console page. Every client gets the link
-// as text; a client on MCP 2026-07-28 that declares elicitation.url first
-// gets a URL input request (SEP-2322), and its retry reads the state.
+// as text in the first answer. No tool sends a URL input request (SEP-2322):
+// a client that showed it but got no answer from the person blocked the call
+// until its own time limit and never got the link (DD 8hp8). A retry that
+// carries a requestState from an older gateway still reads that state.
 
 const maxReasonRunes = 200
 
@@ -26,11 +28,8 @@ const maxReasonRunes = 200
 // agent-usability-1 F1): several links in one turn go out together.
 const severalLinks = "When you ask for several values, files or connections in one turn, list all links together with their expiry in one message."
 
-// newProtocol is the first MCP version with input-required results
-// (SEP-2322): the server returns the elicitation and the client retries.
-const newProtocol = "2026-07-28"
-
-// fillInputID names the one URL elicitation in an input-required result.
+// fillInputID names the one URL elicitation in an input-required result an
+// older gateway sent; its retry's response is read under this id.
 const fillInputID = "open_fill_page"
 
 // Elicitation outcomes in the structured result.
@@ -55,25 +54,15 @@ func reasonOK(s string) bool {
 	return true
 }
 
-// requestCall is what an eliciting tool reads from one tools/call.
+// requestCall is what a request tool reads from one tools/call.
 type requestCall struct {
 	args      json.RawMessage
-	protocol  string
-	caps      *mcp.ClientCapabilities
 	state     string
 	responses mcp.InputResponseMap
 }
 
-// wantsURLInput reports a 2026-07-28 client whose capabilities on this
-// request declare elicitation.url. Older clients never get an input request:
-// on a stateless gateway the SDK could not deliver it to them.
-func (c requestCall) wantsURLInput() bool {
-	return c.protocol >= newProtocol && c.caps != nil && c.caps.Elicitation != nil && c.caps.Elicitation.URL != nil
-}
-
 // addElicitingTool registers a request tool. It uses server.AddTool directly
-// (not addTool) because it reads the protocol version, the per-request
-// client capabilities and a retry's requestState and inputResponses.
+// (not addTool) because it reads a retry's requestState and inputResponses.
 func addElicitingTool(server *mcp.Server, tool *mcp.Tool, h func(context.Context, requestCall) *mcp.CallToolResult) {
 	server.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (res *mcp.CallToolResult, err error) {
 		defer func() {
@@ -84,14 +73,10 @@ func addElicitingTool(server *mcp.Server, tool *mcp.Tool, h func(context.Context
 			}
 		}()
 		var call requestCall
-		if req != nil {
-			call.protocol = req.ProtocolVersion()
-			call.caps = req.ClientCapabilities()
-			if req.Params != nil {
-				call.args = req.Params.Arguments
-				call.state = req.Params.RequestState
-				call.responses = req.Params.InputResponses
-			}
+		if req != nil && req.Params != nil {
+			call.args = req.Params.Arguments
+			call.state = req.Params.RequestState
+			call.responses = req.Params.InputResponses
 		}
 		return h(ctx, call), nil
 	})
@@ -119,7 +104,8 @@ func elicitOutcome(resp mcp.InputResponse) string {
 	}
 }
 
-// requestState is the requestState of an input-required result. It names
+// requestState is the requestState of an input-required result an older
+// gateway sent (tests build one to drive the retry). It names
 // only the request id and its link, which the agent sees anyway, so it is
 // not signed; the API answers only the person who asked.
 type requestState struct {
@@ -159,6 +145,17 @@ func keepFixedMessage(fail *mcp.CallToolResult, code, fixed string) *mcp.CallToo
 		return toolError(code, fixed)
 	}
 	return fail
+}
+
+// keepFixedLinked is keepFixedMessage for a step only the person can do:
+// when the API's fixed message came back, it adds the console page to send
+// them, when there is one.
+func keepFixedLinked(fail *mcp.CallToolResult, code, fixed, link string) *mcp.CallToolResult {
+	kept := keepFixedMessage(fail, code, fixed)
+	if kept == fail || link == "" {
+		return kept
+	}
+	return toolError(code, fixed+"; only the person can do that: send them this link: "+link)
 }
 
 // requestKind is what differs between request types in what the agent sees.
@@ -207,21 +204,6 @@ func (k requestKind) decodeState(s string) (createdRequest, bool) {
 // readPath is the API read of one request.
 func (k requestKind) readPath(id string) string {
 	return k.path + url.PathEscape(id)
-}
-
-// inputRequired is the first answer to a client that wants URL input: one
-// URL elicitation and the state for its retry. It carries no content (the
-// SDK refuses a result that has both): the link text comes with the retry.
-func (k requestKind) inputRequired(created createdRequest, message string) *mcp.CallToolResult {
-	return &mcp.CallToolResult{
-		InputRequests: mcp.InputRequestMap{fillInputID: &mcp.ElicitParams{
-			Mode:          "url",
-			Message:       message,
-			URL:           created.URL,
-			ElicitationID: created.RequestID,
-		}},
-		RequestState: encodeRequestState(created),
-	}
 }
 
 // result is the result every client ends with: the link as text. state is

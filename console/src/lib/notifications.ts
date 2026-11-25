@@ -3,6 +3,7 @@
  * The browser calls only the console route `/notifications`, never the API.
  */
 import type { Notification, NotificationList, ProblemKind } from './api-types';
+import { formatAgo, formatWhen } from './format';
 
 /** The console route the bell reads (GET) and marks read through (POST). */
 export const NOTIFICATIONS_ROUTE = '/notifications';
@@ -31,14 +32,17 @@ export function needActionCount(list: NotificationList | null): number {
 /**
  * A problem item's kind, from its link (bell items carry no problem kind, api-v1 v1.41 item 3): a host page is
  * `host_offline`, a host's Config files tab `host_file` (api-v1 v1.44), a host link ending `#agent-upgrade`
- * `agent_upgrade` (api-v1 v1.48), the registries section `registry_login`,
+ * `agent_upgrade` (api-v1 v1.48), a host page over a range `host_resource` (api-v1 v1.49), a link ending
+ * `#metrics-retention` `metrics_retention` (api-v1 v1.58), the registries section `registry_login`,
  * anything else (a catalog entry) `deploy`.
  */
 export function problemKindOf(item: Notification): ProblemKind | null {
 	if (item.kind !== 'problem') return null;
 	if (item.href.startsWith('/hosts/') && /[?&]tab=files(&|#|$)/.test(item.href)) return 'host_file';
 	if (item.href.startsWith('/hosts/') && item.href.endsWith('#agent-upgrade')) return 'agent_upgrade';
+	if (item.href.startsWith('/hosts/') && /[?&]range=/.test(item.href)) return 'host_resource';
 	if (item.href.startsWith('/hosts/')) return 'host_offline';
+	if (item.href.endsWith('#metrics-retention')) return 'metrics_retention';
 	if (item.href.endsWith('#registries')) return 'registry_login';
 	return 'deploy';
 }
@@ -61,6 +65,39 @@ export function problemAge(item: Notification, now: number = Date.now()): string
 	if (!Number.isFinite(at) || !Number.isFinite(now)) return null;
 	const ms = Math.max(0, now - at);
 	return item.state === 'resolved' ? `resolved ${span(ms)} ago` : `open ${span(ms)}`;
+}
+
+/** A release's day, as its CHANGELOG states it: "24 Nov". UTC, so the day never shifts in the viewer's zone. */
+export const RELEASE_DAY = new Intl.DateTimeFormat('en-NZ', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const RELEASE_DATE = new Intl.DateTimeFormat('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+/** The tooltip of a release row's time: the CHANGELOG date only, with no invented clock time. */
+export function releaseDateTitle(item: Notification): string | undefined {
+	const at = Date.parse(item.at);
+	return Number.isFinite(at) ? `Released ${RELEASE_DATE.format(at)}` : undefined;
+}
+
+/** A release row whose `at` is only its CHANGELOG date (api-v1 v1.57 `date_only`; missing means a date). */
+export function releaseDateOnly(item: Notification): boolean {
+	return item.kind === 'release' && item.date_only !== false;
+}
+
+/**
+ * The time a bell row shows. A release the server dated by when it first served it (api-v1 v1.57) shows its age like
+ * any row; one dated only by its CHANGELOG date (midnight UTC) shows that date ("24 Nov") rather than an age counted
+ * from midnight. A problem shows "open 25 min" or "resolved 3 h ago"; anything else its age ("2 h ago").
+ */
+export function rowTime(item: Notification, now: number = Date.now()): string {
+	if (releaseDateOnly(item)) {
+		const at = Date.parse(item.at);
+		return Number.isFinite(at) ? RELEASE_DAY.format(at) : 'n/a';
+	}
+	return problemAge(item, now) ?? formatAgo(item.at, now);
+}
+
+/** The hover text of a bell row's time: the release date for a date-only release, else the full time in `timeZone`. */
+export function rowTitle(item: Notification, timeZone?: string): string | undefined {
+	return releaseDateOnly(item) ? releaseDateTitle(item) : formatWhen(item.at, timeZone);
 }
 
 /** The list the console route answers, or null for anything else (the bell then shows its error line). */

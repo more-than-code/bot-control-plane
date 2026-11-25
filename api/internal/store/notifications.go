@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"regexp"
 	"time"
 	"unicode/utf8"
 
@@ -20,6 +21,12 @@ const MaxNotificationKey = 200
 // MaxNotificationMarks is how many read marks a user keeps: a write deletes
 // the oldest beyond this (by read_at, then key), never a key in keep.
 const MaxNotificationMarks = 500
+
+// releaseVersionRE is the 0038 check: X.Y.Z, each part 1 to 4 digits.
+var releaseVersionRE = regexp.MustCompile(`^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$`)
+
+// ValidReleaseVersion is a version RecordReleaseServed accepts.
+func ValidReleaseVersion(v string) bool { return releaseVersionRE.MatchString(v) }
 
 // ValidNotificationKey is 1 to 200 characters of valid UTF-8 with no
 // control character (U+0000–U+001F, U+007F).
@@ -49,4 +56,17 @@ type NotificationStore interface {
 	MarkNotificationsRead(ctx context.Context, userID uuid.UUID, keys, keep []string, at time.Time) error
 	// NotificationReads returns the subset of keys the user marked read.
 	NotificationReads(ctx context.Context, userID uuid.UUID, keys []string) (map[string]bool, error)
+	// NoticeHostUpdates returns, for each host, when the API first saw it
+	// behind version (migration 0035): a host with no row for version gets
+	// one at at, and its rows for other versions are deleted; an existing
+	// row keeps its time. Unknown hosts are skipped.
+	NoticeHostUpdates(ctx context.Context, hostIDs []uuid.UUID, version string, at time.Time) (map[uuid.UUID]time.Time, error)
+	// RecordReleaseServed records that this server served version at at,
+	// unless the version already has a record (migration 0038, api-v1
+	// v1.57): the first time is kept. A version that fails
+	// ValidReleaseVersion is ErrInvalid and nothing is written.
+	RecordReleaseServed(ctx context.Context, version string, at time.Time) error
+	// ReleasesServed returns the first-served time of each listed version
+	// that has one.
+	ReleasesServed(ctx context.Context, versions []string) (map[string]time.Time, error)
 }

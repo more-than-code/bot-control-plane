@@ -56,37 +56,50 @@ func TestRequestFileLink(t *testing.T) {
 	}
 }
 
-// TestRequestFileInputRequest: a 2026-07-28 client that declares
-// elicitation.url gets a URL-mode input request; its retry reads the
-// state, creates nothing, and returns the link. No content in any result.
-func TestRequestFileInputRequest(t *testing.T) {
+// TestRequestFileNoInputRequest: a 2026-07-28 client that declares elicitation.url
+// gets the link as text in the first answer, with no URL input request, so
+// a client that would wait for the person never blocks the call (DD 8hp8).
+func TestRequestFileNoInputRequest(t *testing.T) {
+	var got *mcp.ElicitParams
+	cs, seen := vrSessionAt(t, "2026-07-28", urlClient("accept", &got), fileCreatedReply)
+	if v := cs.InitializeResult().ProtocolVersion; v != "2026-07-28" {
+		t.Fatalf("protocol %s", v)
+	}
+	res, text, out := callVR(t, cs, "request_file", frArgs)
+	if res.IsError || got != nil {
+		t.Fatalf("error %v elicited %#v: %s", res.IsError, got, text)
+	}
+	if !strings.HasPrefix(text, frURL+"\n") || out["elicitation"] != elicitNotSupported || out["url"] != frURL || len(out) != 4 {
+		t.Fatalf("text %s structured %v", text, out)
+	}
+	if calls := seen(); len(calls) != 1 || calls[0].Method != http.MethodPost {
+		t.Fatalf("calls %#v", calls)
+	}
+}
+
+// TestRequestFileLegacyRetry: a retry that carries the requestState and response of
+// an input request an older gateway sent reads the state, creates nothing,
+// and returns the link with the outcome.
+func TestRequestFileLegacyRetry(t *testing.T) {
 	for action, want := range map[string]string{"accept": elicitAccepted, "decline": elicitDeclined, "cancel": elicitCancelled} {
 		t.Run(action, func(t *testing.T) {
-			var got *mcp.ElicitParams
-			cs, seen := vrSessionAt(t, newProtocol, urlClient(action, &got), fileCreatedReply)
-			res, text, out := callVR(t, cs, "request_file", frArgs)
-			if res.IsError {
-				t.Fatalf("error %s", text)
+			cs, seen := vrSession(t, nil, fileCreatedReply)
+			res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:           "request_file",
+				Arguments:      frArgs,
+				RequestState:   encodeRequestState(createdRequest{RequestID: frID, URL: frURL}),
+				InputResponses: mcp.InputResponseMap{fillInputID: &mcp.ElicitResult{Action: action}},
+			})
+			if err != nil || res.IsError {
+				t.Fatalf("%v %v", res, err)
 			}
-			if got == nil || got.Mode != "url" || got.URL != frURL || got.ElicitationID != frID || got.RequestedSchema != nil {
-				t.Fatalf("elicit params %#v", got)
-			}
-			if !strings.Contains(got.Message, "tls.pem") || !strings.Contains(got.Message, "never sees the content") {
-				t.Fatalf("message %q", got.Message)
-			}
+			_, text, out := callVRResult(res)
 			calls := seen()
-			if len(calls) != 2 || calls[0].Method != http.MethodPost || calls[1].Method != http.MethodGet || calls[1].Path != "/v1/file-requests/"+frID {
+			if len(calls) != 1 || calls[0].Method != http.MethodGet || calls[0].Path != "/v1/file-requests/"+frID {
 				t.Fatalf("calls %#v", calls)
 			}
-			if out["elicitation"] != want || out["state"] != "pending" || out["url"] != frURL {
-				t.Fatalf("structured %v", out)
-			}
-			raw, _ := json.Marshal(out)
-			if strings.Contains(text, frLeak) || strings.Contains(string(raw), frLeak) {
-				t.Fatal("content passed on")
-			}
-			if !strings.Contains(text, frURL) || !strings.Contains(text, fileRule) || !strings.Contains(text, "is pending; it can be filled until 2026-11-16T10:15:00Z") {
-				t.Fatalf("text %s", text)
+			if out["elicitation"] != want || out["state"] != "pending" || !strings.HasPrefix(text, frURL+"\n") {
+				t.Fatalf("structured %v text %s", out, text)
 			}
 		})
 	}
@@ -259,7 +272,7 @@ func TestFileRequestSummaryPerState(t *testing.T) {
 
 // TestReadinessNextAddFile: check_readiness names request_file for add_file.
 func TestReadinessNextAddFile(t *testing.T) {
-	got := nextStep(map[string]any{"action": "add_file", "name": "tls.pem"}, vrProject, "web")
+	got := nextStep(map[string]any{"action": "add_file", "name": "tls.pem"}, vrProject, "web", "")
 	if got != "call request_file with project_id "+vrProject+" and name tls.pem; the person adds the file in the browser." {
 		t.Fatalf("next %q", got)
 	}

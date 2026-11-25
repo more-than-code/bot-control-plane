@@ -66,6 +66,12 @@ func copyRefresh(in store.RegistryRefreshMaterial) store.RegistryRefreshMaterial
 
 type imageDeployRec = store.ImageDeploy
 
+// deployTaskRec is a deploy row's agent task (api-v1 v1.50 item 3).
+type deployTaskRec struct {
+	taskID uuid.UUID
+	action string
+}
+
 func envKey(projectID uuid.UUID, name string) string {
 	return projectID.String() + "/" + name
 }
@@ -125,19 +131,34 @@ func (m *Mem) FinishImageDeployWith(ctx context.Context, id uuid.UUID, in store.
 	if !ok || !row.InFlight {
 		return store.ImageDeploy{}, store.ErrNotFound
 	}
+	row, err := applyFinish(row, in)
+	if err != nil {
+		return store.ImageDeploy{}, err
+	}
+	finished := in.At
+	row.FinishedAt = &finished
+	row.InFlight = false
+	m.imageDeploys[id] = row
+	return copyDeploy(row), nil
+}
+
+// applyFinish stores in's outcome, digest, exit code, reason, final status
+// and log tail on row, with the DB's checks. Times and in_flight are left
+// to the caller.
+func applyFinish(row imageDeployRec, in store.DeployFinish) (imageDeployRec, error) {
 	digest := in.Digest
 	if digest != nil && !catalog.ValidDigest(*digest) {
 		digest = nil
 	}
 	// Mirror the DB checks (migration 0031).
 	if in.Reason != nil && len(*in.Reason) > 1024 {
-		return store.ImageDeploy{}, store.ErrConflict
+		return row, store.ErrConflict
 	}
 	if len(in.LogTail) > 50 {
-		return store.ImageDeploy{}, store.ErrConflict
+		return row, store.ErrConflict
 	}
 	if in.Outcome == "refused" && (digest != nil || row.Via == "agent") {
-		return store.ImageDeploy{}, store.ErrConflict
+		return row, store.ErrConflict
 	}
 	row.Outcome = in.Outcome
 	row.Digest = cloneString(digest)
@@ -153,8 +174,111 @@ func (m *Mem) FinishImageDeployWith(ctx context.Context, id uuid.UUID, in store.
 	if in.LogTail != nil {
 		row.LogTail = append([]string{}, in.LogTail...)
 	}
-	finished := in.At
-	row.FinishedAt = &finished
+	return row, nil
+}
+
+func (m *Mem) SetImageOpTask(ctx context.Context, id, taskID uuid.UUID, action string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if action != "deploy" && action != "rollback" {
+		return store.ErrConflict // the DB check (migration 0034)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if row, ok := m.imageDeploys[id]; !ok || !row.InFlight {
+		return store.ErrNotFound
+	}
+	for other, rec := range m.deployTasks {
+		if _, live := m.imageDeploys[other]; live && other != id && rec.taskID == taskID {
+			return store.ErrConflict // the unique index
+		}
+	}
+	m.deployTasks[id] = deployTaskRec{taskID: taskID, action: action}
+	return nil
+}
+
+func (m *Mem) ImageDeployByTask(ctx context.Context, hostID, taskID uuid.UUID) (store.DeployTask, error) {
+	if err := ctx.Err(); err != nil {
+		return store.DeployTask{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, rec := range m.deployTasks {
+		if rec.taskID != taskID {
+			continue
+		}
+		row, ok := m.imageDeploys[id]
+		if !ok || row.HostID != hostID {
+			continue
+		}
+		entry, ok := m.entries[row.EntryID]
+		if !ok {
+			break
+		}
+		return store.DeployTask{Deploy: copyDeploy(row), Action: rec.action, ProjectID: entry.ProjectID, Entry: entry.Name}, nil
+	}
+	return store.DeployTask{}, store.ErrNotFound
+}
+
+func (m *Mem) TimeoutStaleImageOps(ctx context.Context, at time.Time) ([]store.DeployTask, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []store.DeployTask{}
+	for id, row := range m.imageDeploys {
+		if !row.InFlight || !row.InFlightUntil.Before(at) {
+			continue
+		}
+		finished := at
+		row.Outcome = "timeout"
+		row.FinishedAt = &finished
+		row.InFlight = false
+		m.imageDeploys[id] = row
+		entry, ok := m.entries[row.EntryID]
+		if !ok {
+			continue
+		}
+		out = append(out, store.DeployTask{Deploy: copyDeploy(row), Action: m.deployTasks[id].action, ProjectID: entry.ProjectID, Entry: entry.Name})
+	}
+	return out, nil
+}
+
+func (m *Mem) SettleLateImageDeploy(ctx context.Context, id uuid.UUID, in store.DeployFinish) (store.ImageDeploy, error) {
+	if err := ctx.Err(); err != nil {
+		return store.ImageDeploy{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row, ok := m.imageDeploys[id]
+	if !ok || (!row.InFlight && (row.Outcome != "timeout" || in.Outcome == "timeout")) {
+		return store.ImageDeploy{}, store.ErrNotFound
+	}
+	wasInFlight := row.InFlight
+	row, err := applyFinish(row, in)
+	if err != nil {
+		return store.ImageDeploy{}, err
+	}
+	// Like the DB UPDATE, a late result replaces what a timeout stored,
+	// absent values included.
+	row.ExitCode, row.FinalStatus, row.LogTail = nil, nil, nil
+	if in.ExitCode != nil {
+		n := *in.ExitCode
+		row.ExitCode = &n
+	}
+	if in.FinalStatus != nil {
+		st := *in.FinalStatus
+		row.FinalStatus = &st
+	}
+	if in.LogTail != nil {
+		row.LogTail = append([]string{}, in.LogTail...)
+	}
+	if wasInFlight {
+		finished := in.At
+		row.FinishedAt = &finished
+	}
 	row.InFlight = false
 	m.imageDeploys[id] = row
 	return copyDeploy(row), nil
@@ -593,7 +717,8 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 	if !m.projectAliveLocked(projectID) {
 		return store.EnvKey{}, false, store.ErrNotFound
 	}
-	if !catalog.ValidName(name) {
+	// Only a regenerate reaches a private set "@<entry>" (api-v1 v1.54).
+	if !catalog.ValidName(name) && !(in.Regenerate && catalog.IsPrivateSet(name)) {
 		return store.EnvKey{}, false, store.ErrInvalid
 	}
 	if err := catalog.ValidateEnvKey(in.Key); err != nil {
@@ -616,7 +741,21 @@ func (m *Mem) PutEnvKey(_ context.Context, projectID uuid.UUID, name string, in 
 	}
 	created := idx < 0
 	secret := true
-	if created {
+	if in.Regenerate {
+		// api-v1 v1.54: replace an existing secret value only.
+		if !exists || created {
+			return store.EnvKey{}, false, store.ErrNotFound
+		}
+		if !values[idx].IsSecret {
+			return store.EnvKey{}, false, store.ErrSecretFixed
+		}
+		if !values[idx].Generated && !values[idx].NeedsValue {
+			// v1.56: a hand-entered value is never replaced by a random one.
+			// An empty placeholder has no value to lose.
+			return store.EnvKey{}, false, store.ErrNotGenerated
+		}
+		secret = true
+	} else if created {
 		if in.Secret != nil {
 			secret = *in.Secret
 		}

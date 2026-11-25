@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -38,9 +39,11 @@ func Register(server *mcp.Server, api *apiclient.Client) {
 	registerListProblems(server, api)
 	registerListServices(server, api)
 	registerQueryMetrics(server, api)
+	registerAlertSettings(server, api)
 	registerListProcesses(server, api)
 	registerServiceHealthHistory(server, api)
 	registerHostSnapshot(server, api)
+	registerHostDiskUsage(server, api)
 	registerProbeService(server, api)
 	registerGetHealthChecks(server, api)
 	registerListCatalog(server, api)
@@ -141,11 +144,28 @@ func fromAPI(err error) *mcp.CallToolResult {
 	var apiErr *apiclient.Error
 	if errors.As(err, &apiErr) {
 		if apiErr.Code == "bad_request" && envRefusal(apiErr.Msg) {
-			return toolError(apiErr.Code, apiErr.Msg)
+			return toolError(apiErr.Code, apiErr.Msg+placeholderStep(apiErr.Msg))
 		}
 		return toolError(apiErr.Code, redactText(apiErr.Msg))
 	}
 	return toolError("error", "api request failed")
+}
+
+// noValueMsg is the deploy refusal for a placeholder without a value.
+var noValueMsg = regexp.MustCompile(`^env ([A-Z_][A-Z0-9_]{0,63}) in set (@?[a-z0-9][a-z0-9-]{0,47}) has no value yet; set it in the console$`)
+
+// placeholderStep is the agent's next step for that refusal: the person
+// enters the value through request_env_value's link, not by finding the
+// console page.
+func placeholderStep(msg string) string {
+	m := noValueMsg.FindStringSubmatch(msg)
+	if m == nil {
+		return ""
+	}
+	if strings.HasPrefix(m[2], "@") {
+		return fmt.Sprintf(". Next: call request_env_value with this project, entry %s and key %s; the person opens its link and enters the value", m[2][1:], m[1])
+	}
+	return fmt.Sprintf(". Next: call request_env_value with this project, set %s and key %s; the person opens its link and enters the value", m[2], m[1])
 }
 
 // call sends one API request with the delegated token from ctx.
@@ -159,9 +179,17 @@ func call(ctx context.Context, api *apiclient.Client, method, path string, query
 // callStatus is call plus the HTTP status of an ok envelope. Status 202 is
 // not a tool error here; the caller decides what it means.
 func callStatus(ctx context.Context, api *apiclient.Client, method, path string, query url.Values, body any) (int, json.RawMessage, *mcp.CallToolResult) {
+	status, payload, fail, _ := callStatusErr(ctx, api, method, path, query, body)
+	return status, payload, fail
+}
+
+// callStatusErr is callStatus and also the API refusal itself, for the one
+// caller that reads a refusal's payload (set_routes, api-v1 v1.52). It is
+// nil when the call succeeded or failed before the API answered.
+func callStatusErr(ctx context.Context, api *apiclient.Client, method, path string, query url.Values, body any) (int, json.RawMessage, *mcp.CallToolResult, *apiclient.Error) {
 	token, ok := auth.DelegatedFromContext(ctx)
 	if !ok {
-		return 0, nil, toolError("unauthorized", "missing bearer token")
+		return 0, nil, toolError("unauthorized", "missing bearer token"), nil
 	}
 	status, payload, err := api.DoStatus(ctx, token, method, path, query, body)
 	if err != nil {
@@ -169,9 +197,9 @@ func callStatus(ctx context.Context, api *apiclient.Client, method, path string,
 		if errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
 			auth.NoteRejected(ctx)
 		}
-		return 0, nil, fromAPI(err)
+		return 0, nil, fromAPI(err), apiErr
 	}
-	return status, payload, nil
+	return status, payload, nil, nil
 }
 
 func get(ctx context.Context, api *apiclient.Client, path string, query url.Values) (json.RawMessage, *mcp.CallToolResult) {

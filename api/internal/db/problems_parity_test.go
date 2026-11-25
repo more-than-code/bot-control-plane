@@ -17,13 +17,17 @@ import (
 
 const problemsMigration = "0027_problems.sql"
 
+const retentionProblemMigration = "0039_problem_metrics_retention.sql"
+
 // dropProblemsSchema takes app.problems down on conn (already
 // deploybot_owner) and forgets every migration that built it, so Migrate
-// rebuilds it as the newest migration defines it: first 0032 (it widens
-// the problems kind check again and adds the agent upgrade table), then
-// 0029 (it widens the check and adds the host file objects), then 0027.
-// 0031 (deploy reasons) does not touch app.problems and stays applied: its
-// down script would delete refused deploy rows.
+// rebuilds it as the newest migration defines it: first 0039 (it widens
+// the kind check for metrics_retention), then 0033 (it widens
+// the kind check again and adds the host alert settings), then 0032 (it
+// widens the check and adds the agent upgrade table), then 0029 (it widens
+// the check and adds the host file objects), then 0027. 0031 (deploy
+// reasons) does not touch app.problems and stays applied: its down script
+// would delete refused deploy rows.
 // Forgetting only 0027 would re-create the table with the 0027 check while
 // 0029 stays recorded. A database without app.problems (already taken
 // down, both rows forgotten) is left as it is.
@@ -37,6 +41,8 @@ func dropProblemsSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 		return
 	}
 	for _, m := range []struct{ down, up string }{
+		{"0039_problem_metrics_retention.down.sql", retentionProblemMigration},
+		{"0033_host_alerts.down.sql", hostAlertsMigration},
 		{"0032_agent_upgrades.down.sql", agentUpgradesMigration},
 		{"0029_host_files.down.sql", hostFilesMigration},
 		{"0027_problems.down.sql", problemsMigration},
@@ -55,7 +61,8 @@ func dropProblemsSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 }
 
 // assertNewestProblemsSchema fails when the live problems kind check is not
-// the one the newest migration defines (it must allow agent_upgrade, 0032).
+// the one the newest migration defines (it must allow agent_upgrade, 0032,
+// host_resource, 0033, and metrics_retention, 0039).
 func assertNewestProblemsSchema(t *testing.T, ctx context.Context, d *DB) {
 	t.Helper()
 	var def string
@@ -63,7 +70,8 @@ func assertNewestProblemsSchema(t *testing.T, ctx context.Context, d *DB) {
 		t.Errorf("problems_kind_chk: %v", err)
 		return
 	}
-	if !strings.Contains(def, "'host_file'") || !strings.Contains(def, "'agent_upgrade'") {
+	if !strings.Contains(def, "'host_file'") || !strings.Contains(def, "'agent_upgrade'") || !strings.Contains(def, "'host_resource'") ||
+		!strings.Contains(def, "'metrics_retention'") {
 		t.Errorf("problems_kind_chk is not the newest definition: %s", def)
 	}
 }

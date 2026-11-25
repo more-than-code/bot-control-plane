@@ -107,8 +107,8 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 			"the image registry is reachable with the stored login, and, with host_id, deploy access, the host being online, containers, the host's image policy and shared networks, and for an entry with routes (set_routes), the routes check: a verified domain, a published port and the edge on the entry's host (an org admin turns the edge on in the console). " +
 			"Each check has a status (ok, missing, warn, unknown) and a fix. Fixes you can do yourself: fill_value with request_env_value, create_env_set with create_env_set, add_file with request_file (the person adds the file in the browser); " +
 			"you can start connect_github with connect_registry, and the person approves on github.com. " +
-			"Fixes for the person: ask the person to add a registry login in the console (" + settingsHint + "), or ask an org admin to grant deploy access. " +
-			"For host_policy_snippet, call host_policy_snippet and show the person the snippet. Advisory only: deploy keeps its own refusals. " +
+			"Fixes for the person (add_registry_login, grant_deploy_access, host_policy_snippet, allow_edge, turn_on_edge, verify_domain, assign_domain): the fix carries console_url, the console page for that step, already pointed at the change; post it for the person. " +
+			"Never edit a host's runner.toml or enter a secret yourself. For host_policy_snippet on a host whose root has not let the console manage its policy, also call host_policy_snippet and show the person the snippet. " + linkRule + " Advisory only: deploy keeps its own refusals. " +
 			"Needs owner or admin, or the entry's deploy permission on a host the project deploys to. Reads stored API data and may ask the image registry (cached). Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(checkReadinessSchema),
@@ -159,7 +159,7 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 		if fail != nil {
 			return fail
 		}
-		out, summary, err := projectReadiness(payload, in.ProjectID, label)
+		out, summary, err := projectReadinessLinks(api, payload, in.ProjectID, label)
 		if err != nil {
 			return toolError("error", err.Error())
 		}
@@ -169,8 +169,8 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name: "image_access",
 		Description: noSecretRule + " Say whether an image can be pulled with the project's registry logins: public (no login needed), private_ok (the stored login works), " +
-			"private_no_login (private or missing; ask the person to connect GitHub for ghcr.io, or add a registry login, in the console, " + settingsHint + "), " +
-			"login_failed (the stored login was refused; ask the person to reconnect GitHub or update the login in the console), not_found, or unknown. " +
+			"private_no_login (private or missing) or login_failed (the stored login was refused): for ghcr.io call connect_registry, which gives the person a link to approve on github.com; for another registry only the person can add or update the login, and console_url is the page to send them. not_found, or unknown. " +
+			"For a refused GitHub connection, refusal says why when GitHub told: github_sign_in (reconnect GitHub), org_restricted (the owner organization has not granted the Deploybot GitHub app; github_url is the GitHub page where an org owner clicks Grant, so send the person that link instead of reconnecting), or no_package_access (the connected account cannot see the package). " +
 			"login says which login is stored: none, manual or github. Needs owner or admin. Asks the image registry (cached 60 s, 20 lookups per minute). Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(imageAccessSchema),
@@ -195,25 +195,47 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 			return fail
 		}
 		var body struct {
-			Registry string `json:"registry"`
-			Access   string `json:"access"`
-			Login    string `json:"login"`
+			Registry string         `json:"registry"`
+			Access   string         `json:"access"`
+			Login    string         `json:"login"`
+			Refusal  map[string]any `json:"refusal"`
 		}
 		if err := json.Unmarshal(payload, &body); err != nil || !imageAccesses[body.Access] || !imageLogins[body.Login] || !registryHostPattern.MatchString(body.Registry) {
 			return toolError("error", errStatusShape.Error())
 		}
-		out, err := json.Marshal(map[string]any{"registry": body.Registry, "access": body.Access, "login": body.Login})
+		result := map[string]any{"registry": body.Registry, "access": body.Access, "login": body.Login}
+		summary := accessSummary(body.Registry, body.Access, body.Login)
+		var refusal map[string]any
+		if body.Access == "login_failed" && body.Login == "github" {
+			refusal = githubRefusal(body.Refusal)
+		}
+		if refusal != nil {
+			result["refusal"] = refusal
+			summary = refusalSummary(refusal)
+		}
+		if refusal != nil && refusal["reason"] == "org_restricted" {
+			// The fix is on github.com; the console cannot do it.
+			if link, _ := refusal["url"].(string); link != "" {
+				result["github_url"] = link
+			}
+		} else if (body.Access == "private_no_login" || body.Access == "login_failed") && body.Registry != connectRegistryHost {
+			if link := projectSettingsURL(api, in.ProjectID, "registries"); link != "" {
+				result["console_url"] = link
+				summary = withLink(summary, link) + " Send the person that link; do not describe where to click."
+			}
+		}
+		out, err := json.Marshal(result)
 		if err != nil {
 			return toolError("error", "internal error")
 		}
-		return present(out, accessSummary(body.Registry, body.Access, body.Login))
+		return present(out, summary)
 	})
 
 	addTool(server, &mcp.Tool{
 		Name: "host_policy_snippet",
 		Description: noSecretRule + " Get the lines a host's root adds to /etc/bot-agent/runner.toml so the host allows this image entry: the image pattern (the entry's repository), " +
 			"the project slug, the runner.toml lines and the matching install.sh command. Show the snippet to the person: only the host's root can apply it, " +
-			"over SSH or Cloud Assistant; Deploybot never edits runner.toml. Use it when check_readiness reports host_policy missing. Needs owner or admin. Text only. Does not contact any host.",
+			"over SSH or Cloud Assistant, unless the root set console_policy = true: then an org owner or admin allows the image on the host's console Policy tab (console_url opens it with the change staged). The agent never edits runner.toml. " + linkRule + " Use it when check_readiness reports host_policy missing. Needs owner or admin. Text only. Does not contact any host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(hostPolicySnippetSchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -252,14 +274,23 @@ func registerReadiness(server *mcp.Server, api *apiclient.Client) {
 		toml := fmt.Sprintf("images = [%q]\nprojects = [%q]\n", body.ImagePattern, body.Project)
 		command := fmt.Sprintf("sudo ./install.sh install --runner --project %s --image '%s'", body.Project, body.ImagePattern)
 		note := clip(publicString(body.Note), maxErrorBytes)
-		out, err := json.Marshal(map[string]any{
+		link := hostPolicyURL(api, in.HostID, false, body.ImagePattern)
+		result := map[string]any{
 			"image_pattern": body.ImagePattern, "project": body.Project, "toml": toml, "command": command, "note": note,
-		})
+		}
+		if link != "" {
+			result["console_url"] = link
+		}
+		out, err := json.Marshal(result)
 		if err != nil {
 			return toolError("error", "internal error")
 		}
 		summary := "Show this to the person; the host's root applies it (Deploybot never edits runner.toml).\n" +
 			"Add to /etc/bot-agent/runner.toml, keeping the entries already there:\n" + toml + "Or, for a new policy: " + command + "\n" + note
+		if link != "" {
+			summary = "Send the person this link: on a host whose root set console_policy = true, an org owner or admin allows the image on the host's Policy tab, with the change already staged: " + link + "\n" +
+				"On a host without it, the host's root applies the snippet instead.\n" + summary
+		}
 		return present(out, summary)
 	})
 }
@@ -273,9 +304,15 @@ type readyRow struct {
 	Next    string         `json:"next,omitempty"`
 }
 
-// projectReadiness rebuilds the readiness answer from allowlisted fields
-// and adds, per check, what to do next.
+// projectReadiness is projectReadinessLinks with no console links.
 func projectReadiness(payload json.RawMessage, projectID, entry string) (json.RawMessage, string, error) {
+	return projectReadinessLinks(nil, payload, projectID, entry)
+}
+
+// projectReadinessLinks rebuilds the readiness answer from allowlisted
+// fields and adds, per check, what to do next and, for a step the person
+// does, console_url.
+func projectReadinessLinks(api *apiclient.Client, payload json.RawMessage, projectID, entry string) (json.RawMessage, string, error) {
 	var body struct {
 		Ready  bool `json:"ready"`
 		Checks []struct {
@@ -298,7 +335,16 @@ func projectReadiness(payload json.RawMessage, projectID, entry string) (json.Ra
 		fix := projectFix(c.Fix)
 		row := readyRow{Check: c.Check, Status: c.Status, Message: readinessMessage(c.Message), Fix: fix}
 		if c.Status != "ok" {
-			row.Next = nextStep(fix, projectID, entry)
+			// A step the agent does with a tool gets no console link: the
+			// tool's own result carries the person's link.
+			link := ""
+			if personStep(fix) {
+				link = fixURL(api, fix, projectID)
+			}
+			row.Next = nextStep(fix, projectID, entry, link)
+			if link != "" {
+				fix["console_url"] = link
+			}
 		}
 		if c.Status == "missing" {
 			missing++
@@ -348,7 +394,8 @@ func readinessMessage(msg string) string {
 func projectFix(in map[string]any) map[string]any {
 	action, _ := in["action"].(string)
 	switch action {
-	case "create_env_set", "fill_value", "add_file", "connect_github", "add_registry_login", "grant_deploy_access", "host_policy_snippet", "none":
+	case "create_env_set", "fill_value", "add_file", "connect_github", "add_registry_login", "grant_deploy_access", "host_policy_snippet",
+		"allow_edge", "turn_on_edge", "verify_domain", "assign_domain", "github_org_access", "none":
 	default:
 		return map[string]any{"action": "none"}
 	}
@@ -363,13 +410,61 @@ func projectFix(in map[string]any) map[string]any {
 	keep("name", fileNamePattern)
 	keep("registry", registryHostPattern)
 	keep("host_id", uuidPattern)
+	keep("org_id", uuidPattern)
+	keep("image_pattern", imagePatternRule)
+	if action == "github_org_access" {
+		// api-v1 v1.53: the organization and GitHub's grant page.
+		keep("owner", githubLoginPattern)
+		keep("url", githubGrantPattern)
+		if out["owner"] == nil {
+			return map[string]any{"action": "none"}
+		}
+	}
+	if action == "assign_domain" {
+		// api-v1 v1.52: only the org, the domain, the pattern and its
+		// written-out name mean anything on this fix; fixURL builds the
+		// Assign link from them. The agent never assigns anything itself.
+		out = map[string]any{"action": action}
+		keep("org_id", uuidPattern)
+		keep("domain_id", uuidPattern)
+		keep("name", routeHostPattern)
+		if p, ok := in["pattern"].(string); ok && len(p) <= 253 && assignLinkPattern.MatchString(p) {
+			out["pattern"] = p
+		}
+	}
 	return out
 }
 
-// nextStep is the agent's next move for one fix: a tool it can call, or
-// what to ask the person to do in the console.
-func nextStep(fix map[string]any, projectID, entry string) string {
+// personStep reports whether a fix is the person's to do in the console,
+// as opposed to a tool the agent calls (which brings its own link) or a
+// step on github.com.
+func personStep(fix map[string]any) bool {
 	str := func(k string) string { s, _ := fix[k].(string); return s }
+	switch fix["action"] {
+	case "fill_value":
+		return str("key") == ""
+	case "add_file":
+		return !managedFilePattern.MatchString(str("name"))
+	case "create_env_set", "connect_github", "github_org_access":
+		return false
+	}
+	return true
+}
+
+// askPerson is a person's console step. With link it hands the person the
+// exact page; without (no BOT_MCP_CONSOLE_ORIGIN) it names the place.
+func askPerson(who, action, where, link string) string {
+	if link != "" {
+		return fmt.Sprintf("send %s this link, which opens the page for it, to %s: %s", who, action, link)
+	}
+	return fmt.Sprintf("ask %s to %s in the console (%s).", who, action, where)
+}
+
+// nextStep is the agent's next move for one fix: a tool it can call, or
+// the person's console step, as a link when link is set.
+func nextStep(fix map[string]any, projectID, entry, link string) string {
+	str := func(k string) string { s, _ := fix[k].(string); return s }
+	const person, admin = "the person", "an org owner or admin"
 	switch fix["action"] {
 	case "fill_value":
 		if str("set") == "" && str("key") != "" {
@@ -382,24 +477,58 @@ func nextStep(fix map[string]any, projectID, entry string) string {
 		if str("key") != "" {
 			return fmt.Sprintf("call request_env_value with project_id %s, set %s and key %s; the person enters the value.", projectID, str("set"), str("key"))
 		}
-		return fmt.Sprintf("ask the person to fix the reference in env set %s in the console (%s, Env sets).", str("set"), settingsHint)
+		return askPerson(person, "fix the reference in env set "+str("set"), settingsHint+", Env sets", link)
 	case "create_env_set":
 		return fmt.Sprintf("call create_env_set to create env set %s with the key names the entry needs.", str("set"))
 	case "connect_github":
 		return fmt.Sprintf("call connect_registry with project_id %s and registry ghcr.io; the person opens the link and approves on github.com.", projectID)
 	case "add_registry_login":
-		return fmt.Sprintf("ask the person to add a registry login for %s in the console (%s, Registries).", str("registry"), settingsHint)
+		return askPerson(person, "add a registry login for "+str("registry"), settingsHint+", Registries", link)
 	case "add_file":
 		if managedFilePattern.MatchString(str("name")) {
 			return fmt.Sprintf("call request_file with project_id %s and name %s; the person adds the file in the browser.", projectID, str("name"))
 		}
-		return fmt.Sprintf("ask the person to add file %s in the console (%s, Files).", str("name"), settingsHint)
+		return askPerson(person, "add file "+str("name"), settingsHint+", Files", link)
 	case "grant_deploy_access":
-		return "ask an org owner or admin to grant this project deploy access to the host in the console (the host's Access section)."
+		return askPerson(admin, "grant this project deploy access to the host", "the host's Access section", link)
+	case "assign_domain":
+		name := "that name"
+		if str("name") != "" {
+			name = str("name")
+		}
+		return askPerson(admin, "assign "+name+" to this project (assigning a domain is console only)", "the organization's Domains, Assign", link)
 	case "host_policy_snippet":
-		return fmt.Sprintf("call host_policy_snippet with project_id %s, entry %s and host_id %s, and show the person the snippet.", projectID, entry, str("host_id"))
+		return askPerson(admin, "allow the image on the host's Policy tab", "the host's Policy tab", link) +
+			fmt.Sprintf(" If the host's root has not set console_policy = true, call host_policy_snippet with project_id %s, entry %s and host_id %s, and show the person the snippet.", projectID, entry, str("host_id"))
+	case "allow_edge":
+		return askPerson(admin, "allow the edge", "the host's Policy tab", link) +
+			" The host's root must have set console_policy = true; otherwise the root adds edge = true to runner.toml."
+	case "turn_on_edge":
+		return askPerson(admin, "turn the edge on", "the host's Edge section", link)
+	case "verify_domain":
+		return askPerson(admin, "add, verify and assign the domain to this project", "the organization's Domains", link)
+	case "github_org_access":
+		return orgGrantStep(str("owner"), str("url"))
 	default:
 		return ""
+	}
+}
+
+// refusalSummary is the image_access summary when GitHub told why ghcr.io
+// refused the GitHub connection (api-v1 v1.53).
+func refusalSummary(r map[string]any) string {
+	str := func(k string) string { s, _ := r[k].(string); return s }
+	switch str("reason") {
+	case "org_restricted":
+		return "ghcr.io refused the GitHub connection because the " + str("owner") + " organization has not granted the Deploybot GitHub app access to its packages. Next: " + orgGrantStep(str("owner"), str("url"))
+	case "no_package_access":
+		account := "The connected GitHub account"
+		if str("account") != "" {
+			account = "The GitHub account " + str("account")
+		}
+		return "ghcr.io refused the GitHub connection. " + account + " cannot see the " + str("owner") + " package: ask the person to give it read access to the package on GitHub, or to reconnect GitHub as an account that can (call connect_registry; the person opens its link)."
+	default:
+		return "The GitHub sign-in for ghcr.io expired, was revoked or lost read:packages. Call connect_registry with this project and registry ghcr.io to reconnect GitHub; the person opens its link and approves on github.com."
 	}
 }
 
@@ -414,14 +543,14 @@ func accessSummary(registry, access, login string) string {
 		return "Private image; the stored login for " + registry + " can pull it."
 	case "private_no_login":
 		if registry == "ghcr.io" {
-			return "Private or missing, and no login is stored. Ask the person to click Connect GitHub in the console (" + settingsHint + ", Registries)."
+			return "Private or missing, and no login is stored. Call connect_registry with this project and registry ghcr.io; the person opens its link and approves on github.com."
 		}
-		return "Private or missing, and no login is stored. Ask the person to add a registry login for " + registry + " in the console (" + settingsHint + ", Registries)."
+		return "Private or missing, and no login is stored. Only the person can add a registry login for " + registry + ", in the console (" + settingsHint + ", Registries)."
 	case "login_failed":
 		if registry == "ghcr.io" {
-			return "The stored login for ghcr.io was refused. Ask the person to reconnect GitHub in the console (" + settingsHint + ", Registries)."
+			return "The stored login for ghcr.io was refused. Call connect_registry with this project and registry ghcr.io to reconnect GitHub; the person opens its link and approves on github.com."
 		}
-		return "The stored login for " + registry + " was refused. Ask the person to update it in the console (" + settingsHint + ", Registries)."
+		return "The stored login for " + registry + " was refused. Only the person can update it, in the console (" + settingsHint + ", Registries)."
 	case "not_found":
 		return "The registry says this image does not exist."
 	default:

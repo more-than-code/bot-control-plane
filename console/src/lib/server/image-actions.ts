@@ -2,7 +2,7 @@ import { error, fail, isHttpError, isRedirect, redirect, type RequestEvent } fro
 import { randomUUID } from 'node:crypto';
 import { ENV_KEY, byteLength, duplicateEntryMessage, isCatalogName, isIdempotencyKey } from '$lib/catalog';
 import { pastedText } from '$lib/file-request';
-import { privateKeyRevealPath, privateSetEntry } from '$lib/private-keys';
+import { ENTRY_NAME, privateKeyRegeneratePath, privateKeyRevealPath, privateSetEntry } from '$lib/private-keys';
 import {
 	IMAGE_ACTION_WAIT_MS,
 	STILL_RUNNING,
@@ -21,7 +21,7 @@ import {
 	type ImageDraft,
 	type KnownSet
 } from '$lib/image-spec';
-import { generateRequestBody, isGenerateKind, revealFailedText } from '$lib/env-generate';
+import { generateRequestBody, isGenerateKind, regenerateFailedText, revealFailedText } from '$lib/env-generate';
 import { imageRepository, isTaggedRef, tagLookupError, type ImageDigestResult, type ImageTagsResult, type TagLookupError } from '$lib/image-tags';
 import type { EnvSet, ProjectFile, Registry } from '$lib/api-types';
 import type { ConflictTimes, ImageDeployState, ImageEditorState } from '$lib/project-action';
@@ -634,6 +634,71 @@ export async function revealPrivateKey(event: RequestEvent) {
 		const answered = err instanceof ApiError && !stillRunning(err) && err.code !== 'unavailable';
 		return fail(apiStatus(err), { scope: 'catalog' as const, revealError: answered ? apiMessage(err) : revealFailedText(key) });
 	}
+}
+
+/**
+ * Regenerate a secret key and show the new value once (api-v1 v1.54): `POST …/regenerate` with the chosen kind, then
+ * the v1.27 reveal. As revealEnvKey, the value is only in this action's result, read by the Regenerate dialog's own
+ * fetch, and a post that is not that fetch is refused before the API is called. When the reveal answer is lost the
+ * key stays pending, so the row offers Reveal once.
+ */
+async function regenerateAndReveal(
+	event: RequestEvent,
+	scope: 'settings' | 'catalog',
+	key: string,
+	kind: string,
+	regeneratePath: string | null,
+	revealPath: string | null
+) {
+	if (!regeneratePath || !revealPath) return fail(400, { scope, regenerateError: 'That key is not valid.' });
+	if (!isGenerateKind(kind)) return fail(400, { scope, regenerateError: 'Choose what to generate.' });
+	const accept = event.request.headers.get('accept') ?? '';
+	if (event.request.headers.get('x-sveltekit-action') !== 'true' || !accept.includes('application/json')) {
+		return fail(400, { scope, regenerateError: 'Showing a value needs JavaScript.' });
+	}
+	const { generate } = generateRequestBody(kind);
+	let usedBy: string[] = [];
+	try {
+		const payload = await apiFetch(event, regeneratePath, { method: 'POST', body: JSON.stringify({ generate }) });
+		const item = payload != null && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+		if (Array.isArray(item?.used_by)) usedBy = item.used_by.filter((name): name is string => typeof name === 'string' && ENTRY_NAME.test(name));
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		// An API answer (not secret, not found, a bad kind) names the key only. A lost answer may have made a new value.
+		const answered = err instanceof ApiError && !stillRunning(err) && err.code !== 'unavailable';
+		return fail(apiStatus(err), { scope, regenerateError: answered ? apiMessage(err) : regenerateFailedText(key) });
+	}
+	try {
+		const payload = await apiFetch(event, revealPath, { method: 'POST', body: '{}' });
+		const item = payload != null && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+		if (!item || item.key !== key || typeof item.value !== 'string') return fail(502, { scope, regenerateError: regenerateFailedText(key) });
+		return { scope, regenerated: { key, value: item.value, used_by: usedBy } };
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return fail(apiStatus(err), { scope, regenerateError: regenerateFailedText(key) });
+	}
+}
+
+/** Regenerate a key of a shared env set (api-v1 v1.54), for the Regenerate dialog's fetch only. */
+export async function regenerateEnvKey(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const form = await event.request.formData();
+	const key = formText(form, 'key');
+	const path = envKeyPath(id, formText(form, 'set'), key);
+	return regenerateAndReveal(event, 'settings', key, formText(form, 'generate_kind'), path && `${path}/regenerate`, path && `${path}/reveal`);
+}
+
+/** Regenerate a key of an entry's private set (api-v1 v1.54); the dialog posts `set` `@<entry>`. */
+export async function regeneratePrivateKey(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const form = await event.request.formData();
+	const key = formText(form, 'key');
+	const entry = privateSetEntry(formText(form, 'set'));
+	const regenerate = entry == null ? null : privateKeyRegeneratePath(id, entry, key);
+	const reveal = entry == null ? null : privateKeyRevealPath(id, entry, key);
+	return regenerateAndReveal(event, 'catalog', key, formText(form, 'generate_kind'), regenerate, reveal);
 }
 
 export async function deleteEnvKey(event: RequestEvent) {

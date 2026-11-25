@@ -27,6 +27,9 @@ const (
 	ActionHostRevoke      = "host.revoke"
 	ActionHostRename      = "host.rename"
 	ActionHostArchive     = "host.archive"
+	// ActionHostAlertSettings is a change of a host's alert settings
+	// (api-v1 v1.49 item 3). Detail: host and the changed fields.
+	ActionHostAlertSettings = "host.alert_settings"
 	// api-v1 v1.24 item 8. The old host.share* and catalog approval
 	// actions stay readable in history; nothing writes them now.
 	ActionHostAccessGrant          = "host.access_grant"
@@ -73,9 +76,12 @@ const (
 	ActionEnvSetKeyDelete          = "env_set.key_delete"
 	ActionEnvSetKeySecret          = "env_set.key_secret"
 	ActionEnvSetKeyReveal          = "env_set.key_reveal"
-	ActionEnvSetCreate             = "env_set.create"
-	ActionEnvSetWriteConfirmation  = "env_set.write_confirmation_issued"
-	ActionEnvSetDelete             = "env_set.delete"
+	// ActionEnvSetKeyRegenerate replaces a secret value with a generated
+	// one (api-v1 v1.54); detail set, key, kind and used_by, never a value.
+	ActionEnvSetKeyRegenerate     = "env_set.key_regenerate"
+	ActionEnvSetCreate            = "env_set.create"
+	ActionEnvSetWriteConfirmation = "env_set.write_confirmation_issued"
+	ActionEnvSetDelete            = "env_set.delete"
 	// ActionEnvSetUpdate is a confirmed update_env_set plan (api-v1 v1.33
 	// item 1). Detail names keys per action, never a value.
 	ActionEnvSetUpdate = "env_set.update"
@@ -107,7 +113,16 @@ const (
 	// state and reason when the row settles.
 	ActionHostAgentUpgrade       = "host.agent_upgrade"
 	ActionHostAgentUpgradeResult = "host.agent_upgrade_result"
-	ActionFileDelete             = "file.delete"
+	// Docker usage (api-v1 v1.59 item 2). Detail: host; error_code is the
+	// refusal or failure code.
+	ActionHostDockerUsage = "host.docker_usage"
+	// Console host policy (api-v1 v1.51). Detail: host, the change
+	// (edge_from, edge_to, images_added, images_removed, projects_added,
+	// projects_removed), the refusal reason on a denied start; host and
+	// outcome (applied, rolled_back, unknown) when it settles.
+	ActionHostPolicyApply  = "host.policy_apply"
+	ActionHostPolicyResult = "host.policy_result"
+	ActionFileDelete       = "file.delete"
 	// File requests (api-v1 v1.30). The fill itself is file.put with
 	// detail via "file_request".
 	ActionFileRequested       = "file.requested"

@@ -278,13 +278,13 @@ describe('G: private sets, used_by, env_pairs', () => {
 			]
 		});
 		assert.deepEqual(keys, [
-			{ key: 'A_ID', is_secret: false, needs_value: false, reveal_pending: false },
-			{ key: 'Z_TOKEN', is_secret: true, needs_value: true, reveal_pending: false }
+			{ key: 'A_ID', is_secret: false, needs_value: false, reveal_pending: false, generated: false },
+			{ key: 'Z_TOKEN', is_secret: true, needs_value: true, reveal_pending: false, generated: false }
 		]);
 		assert.equal(JSON.stringify(keys).includes('leak'), false);
 		assert.deepEqual(parsePrivateKeys({ name: 'serve' }), []);
 		assert.equal(parsePrivateKeys({ private_keys: [{ key: 'lower', is_secret: true }] }), null);
-		assert.deepEqual(privateKeyNotes({ key: 'K', is_secret: true, needs_value: true, reveal_pending: true }), ['secret', 'needs a value', 'generated, not shown yet']);
+		assert.deepEqual(privateKeyNotes({ key: 'K', is_secret: true, needs_value: true, reveal_pending: true, generated: true }), ['secret', 'needs a value', 'generated, not shown yet']);
 	});
 
 	test('the catalogPrivateKeys action reads the entry and returns no value', async () => {
@@ -293,7 +293,7 @@ describe('G: private sets, used_by, env_pairs', () => {
 		const ev = fakeEvent({ url: `http://console.example/projects/${PROJECT.id}?/catalogPrivateKeys`, form: { entry: 'serve' }, params: { id: PROJECT.id }, user: USER, session: TOKEN }).event as never;
 		const result = (await projectActions.catalogPrivateKeys(ev)) as { privateKeys: unknown };
 		assert.equal(calls[0]?.url.pathname, `/v1/projects/${PROJECT.id}/catalog/serve`);
-		assert.deepEqual(result.privateKeys, [{ key: 'K', is_secret: true, needs_value: false, reveal_pending: false }]);
+		assert.deepEqual(result.privateKeys, [{ key: 'K', is_secret: true, needs_value: false, reveal_pending: false, generated: false }]);
 		assert.equal(JSON.stringify(result).includes('leak'), false);
 		globalThis.fetch = originalFetch;
 		restoreEnv();
@@ -743,7 +743,7 @@ describe('private-key reveal (api-v1 v1.33) and snippet access', () => {
 		assert.equal(render(PrivateKeys, { props: { entry: 'serve' } }).body.includes('Loading secrets'), true);
 		const source = readFileSync(new URL('../src/routes/projects/[id]/PrivateKeys.svelte', import.meta.url), 'utf8');
 		assert.match(source, /row\.reveal_pending && row\.is_secret && canAdmin/);
-		const pending = { key: 'K', is_secret: true, needs_value: false, reveal_pending: true };
+		const pending = { key: 'K', is_secret: true, needs_value: false, reveal_pending: true, generated: true };
 		const other = { ...pending, key: 'L' };
 		assert.deepEqual(afterPrivateReveal([pending, other], 'K'), [{ ...pending, reveal_pending: false }, other]);
 		assert.deepEqual(privateKeyNotes(afterPrivateReveal([pending], 'K')[0]!), ['secret']);

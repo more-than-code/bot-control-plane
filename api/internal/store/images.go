@@ -42,6 +42,15 @@ type ImageDeploy struct {
 	InFlightUntil time.Time `json:"-"`
 }
 
+// DeployTask is the deploy or rollback row an agent task id names (api-v1
+// v1.50 item 3), with the action and the entry's project and name.
+type DeployTask struct {
+	Deploy    ImageDeploy
+	Action    string
+	ProjectID uuid.UUID
+	Entry     string
+}
+
 // DeployFinalStatus is the part of ImageStatus a deploy row keeps.
 type DeployFinalStatus struct {
 	State        string `json:"state"`
@@ -114,8 +123,9 @@ func IsAutoOutcome(outcome string) bool {
 // The store leaves Preview nil. The HTTP handler fills it and never puts the secret in Value.
 // RevealPending is true from a generated write until its one reveal; NeedsValue
 // marks a placeholder that has no value yet (api-v1 v1.27 item 2).
-// Generated is true while the stored value is API-generated; it only picks
-// the preview (always four bullets) and is not part of the HTTP object.
+// Generated is true while the stored value is API-generated; it picks the
+// preview (always four bullets) and, since api-v1 v1.56, is sent as
+// "generated" so the console offers Regenerate only on generated values.
 type EnvKey struct {
 	Key           string  `json:"key"`
 	IsSecret      bool    `json:"is_secret"`
@@ -123,7 +133,7 @@ type EnvKey struct {
 	Preview       *string `json:"preview"`
 	RevealPending bool    `json:"reveal_pending"`
 	NeedsValue    bool    `json:"needs_value"`
-	Generated     bool    `json:"-"`
+	Generated     bool    `json:"generated"`
 	// Replaced is set by FillValueRequest when the fill replaced a stored
 	// secret value (api-v1 v1.33 item 3). It is not JSON.
 	Replaced bool `json:"-"`
@@ -134,6 +144,10 @@ type EnvKey struct {
 // Nonce and Ciphertext seal Plain when the stored flag is secret.
 // Generated marks an API-generated value: a secret key is stored with
 // reveal_pending and generated true. Any other write stores both false.
+// Regenerate (api-v1 v1.54) replaces the value of an existing secret key
+// with a generated one: the key must exist (else ErrNotFound), be secret
+// (else ErrSecretFixed) and hold a generated value (else ErrNotGenerated,
+// v1.56); it never creates the set or the key.
 type EnvKeyPut struct {
 	Key        string
 	Plain      string
@@ -142,6 +156,7 @@ type EnvKeyPut struct {
 	Ciphertext []byte
 	KeyVersion int
 	Generated  bool
+	Regenerate bool
 }
 
 // EnvSet is one project env set.

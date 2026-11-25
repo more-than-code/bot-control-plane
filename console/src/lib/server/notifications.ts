@@ -34,8 +34,12 @@ export function parseNotification(value: unknown): Notification | null {
 	const at = line(value.at, 64);
 	if (!key || !title || !href || !CONSOLE_PATH.test(href) || !at || Number.isNaN(Date.parse(at))) return null;
 	if (typeof value.read !== 'boolean') return null;
-	if (value.kind === 'release' || value.kind === 'host_update') {
-		return { key, kind: value.kind, title, detail, href, at, read: value.read };
+	if (value.kind === 'release') {
+		// api-v1 v1.57: only an explicit false means `at` is a real time; an older API sends no field.
+		return { key, kind: 'release', title, detail, href, at, read: value.read, date_only: value.date_only !== false };
+	}
+	if (value.kind === 'host_update') {
+		return { key, kind: 'host_update', title, detail, href, at, read: value.read };
 	}
 	if (value.kind !== 'problem') return null;
 	// api-v1 v1.41: a problem carries its level and state; a resolved one is never unread.

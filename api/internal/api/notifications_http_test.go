@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	changelog "github.com/more-than-code/bot-control-plane"
 	"github.com/more-than-code/bot-control-plane/api/internal/store"
 )
@@ -23,6 +24,8 @@ type notificationsWire struct {
 		Href   string    `json:"href"`
 		At     time.Time `json:"at"`
 		Read   bool      `json:"read"`
+		// DateOnly is on release items only (api-v1 v1.57).
+		DateOnly *bool `json:"date_only"`
 	} `json:"items"`
 	Unread int `json:"unread"`
 }
@@ -178,24 +181,36 @@ func TestNotificationsReleases(t *testing.T) {
 }
 
 // TestNotificationsHostUpdates: host items only for org owners and admins,
-// never for revoked or current hosts, sorted with the releases by at.
+// never for revoked or current hosts, dated when the API first saw the host
+// behind the latest version and sorted with the releases by at.
 func TestNotificationsHostUpdates(t *testing.T) {
 	sc := newNotificationScene(t)
 	w := sc.w
 	oldKey := "host_update:" + sc.old.ID.String() + ":0.3.0"
 	neverKey := "host_update:" + sc.neverSaw.ID.String() + ":0.3.0"
+	// The first list is two days ago: both hosts are noticed then, a day
+	// before the release.
+	noticed := w.now.Add(-48 * time.Hour)
+	w.srv.Now = func() time.Time { return noticed }
+	getNotifications(t, w, w.token(sc.owner.ID))
+	w.srv.Now = func() time.Time { return w.now }
 	for _, u := range []store.User{sc.owner, sc.admin} {
 		got := getNotifications(t, w, w.token(u.ID))
-		// old was seen an hour ago, the release is a day old, never was
-		// enrolled at w.now and never seen.
-		if keys := strings.Join(wireKeys(got), ","); keys != neverKey+","+oldKey+",release:0.9.1" {
+		// Equal at keeps the host list order (by name).
+		if keys := strings.Join(wireKeys(got), ","); keys != "release:0.9.1,"+neverKey+","+oldKey {
 			t.Fatalf("%s: %s", u.Email, keys)
 		}
-		host := got.Items[1]
+		host := got.Items[2]
 		if host.Kind != "host_update" || host.Title != "Update available on old" || host.Detail != "bot-agent 0.3.0 (this host: 0.2.9)" ||
-			host.Href != "/hosts/"+sc.old.ID.String() || !host.At.Equal(w.now.Add(-time.Hour)) || host.Read || got.Unread != 3 {
+			host.Href != "/hosts/"+sc.old.ID.String() || !host.At.Equal(noticed) || host.Read || got.Unread != 3 {
 			t.Fatalf("host item %+v unread %d", host, got.Unread)
 		}
+	}
+	// A check-in does not move a notice back to the top.
+	touchAt(t, w, sc.old, w.now, "")
+	touchAt(t, w, sc.neverSaw, w.now, "")
+	if keys := strings.Join(wireKeys(getNotifications(t, w, w.token(sc.owner.ID))), ","); keys != "release:0.9.1,"+neverKey+","+oldKey {
+		t.Fatalf("after check-in %s", keys)
 	}
 	for _, u := range []store.User{sc.member, sc.projOnly} {
 		got := getNotifications(t, w, w.token(u.ID))
@@ -208,13 +223,13 @@ func TestNotificationsHostUpdates(t *testing.T) {
 	if got := getNotifications(t, w, w.token(sc.owner.ID)); len(got.Items) != 1 {
 		t.Fatalf("no latest %v", wireKeys(got))
 	}
-	// An upgraded host drops out; a newer latest changes the key.
+	// An upgraded host drops out; a newer latest changes the key and is
+	// noticed now, above the day-old release.
 	w.srv.LatestAgentVersion = "0.3.1"
 	touchAt(t, w, sc.old, w.now, "0.3.1")
 	got := getNotifications(t, w, w.token(sc.owner.ID))
-	// never (enrolled at w.now) is newer than current (seen a minute ago).
-	want := []string{neverKey[:len(neverKey)-len("0.3.0")] + "0.3.1", "host_update:" + sc.current.ID.String() + ":0.3.1", "release:0.9.1"}
-	if keys := strings.Join(wireKeys(got), ","); keys != strings.Join(want, ",") {
+	want := []string{"host_update:" + sc.current.ID.String() + ":0.3.1", neverKey[:len(neverKey)-len("0.3.0")] + "0.3.1", "release:0.9.1"}
+	if keys := strings.Join(wireKeys(got), ","); keys != strings.Join(want, ",") || !got.Items[0].At.Equal(w.now) {
 		t.Fatalf("after upgrade %s", keys)
 	}
 }
@@ -223,12 +238,14 @@ func TestNotificationsHostUpdates(t *testing.T) {
 func TestNotificationsCap(t *testing.T) {
 	sc := newNotificationScene(t)
 	w := sc.w
-	var bulk19 string
+	var bulk18 string
 	for i := 0; i < 25; i++ {
 		h := enrollAt(t, w, sc.project, sc.owner.ID, fmt.Sprintf("bulk%02d", i), "0.2.0")
-		touchAt(t, w, h, w.now.Add(-time.Duration(i+10)*time.Minute), "")
-		if i == 19 {
-			bulk19 = "host_update:" + h.ID.String() + ":0.3.0"
+		if _, err := w.mem.NoticeHostUpdates(context.Background(), []uuid.UUID{h.ID}, "0.3.0", w.now.Add(-time.Duration(i+10)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		if i == 18 {
+			bulk18 = "host_update:" + h.ID.String() + ":0.3.0"
 		}
 	}
 	got := getNotifications(t, w, w.token(sc.owner.ID))
@@ -240,9 +257,11 @@ func TestNotificationsCap(t *testing.T) {
 			t.Fatalf("not newest first at %d: %v", i, wireKeys(got))
 		}
 	}
-	// never (w.now), then bulk00..bulk18 (10 to 28 minutes ago); old, the
-	// other bulk hosts and the release fall off.
-	if got.Items[0].Title != "Update available on never" || got.Items[19].Title != "Update available on bulk18" {
+	// never and old (both noticed by this list, at w.now), then
+	// bulk00..bulk17 (noticed 10 to 27 minutes ago); the other bulk hosts
+	// and the release fall off.
+	if got.Items[0].Title != "Update available on never" || got.Items[1].Title != "Update available on old" ||
+		got.Items[19].Title != "Update available on bulk17" {
 		t.Fatalf("last kept %s", got.Items[19].Title)
 	}
 
@@ -253,14 +272,14 @@ func TestNotificationsCap(t *testing.T) {
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
 	w.srv.Now = func() time.Time { return w.now }
 
-	// all marks exactly the 20 returned keys; the 21st item (bulk19) stays
+	// all marks exactly the 20 returned keys; the 21st item (bulk18) stays
 	// unread.
 	status, env, _ = markRead(t, w, w.token(sc.owner.ID), `{"all":true}`)
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
-	keys := append(wireKeys(got), bulk19)
+	keys := append(wireKeys(got), bulk18)
 	reads, err := w.mem.NotificationReads(context.Background(), sc.owner.ID, keys)
-	if err != nil || len(reads) != 20 || reads[bulk19] || !reads[first] {
-		t.Fatalf("all marked %d bulk19=%v first=%v %v", len(reads), reads[bulk19], reads[first], err)
+	if err != nil || len(reads) != 20 || reads[bulk18] || !reads[first] {
+		t.Fatalf("all marked %d bulk18=%v first=%v %v", len(reads), reads[bulk18], reads[first], err)
 	}
 	if after := getNotifications(t, w, w.token(sc.owner.ID)); after.Unread != 0 || len(after.Items) != 20 {
 		t.Fatalf("after all unread %d items %d", after.Unread, len(after.Items))

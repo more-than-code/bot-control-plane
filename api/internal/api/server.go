@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,6 +73,10 @@ type Server struct {
 	// ProblemsOff is BOT_API_PROBLEMS=off (api-v1 v1.41 item 6): no
 	// detector runs and the problem routes answer empty lists.
 	ProblemsOff bool
+	// ServerHostID is BOT_API_SERVER_HOST (api-v1 v1.58): the host that
+	// serves this Deploybot. The owners and admins of its org get the
+	// metrics_retention problem. uuid.Nil turns that check off.
+	ServerHostID uuid.UUID
 	// sweep is the problems sweep clock (start grace, hourly work).
 	sweep problemSweep
 	// GitHubRefreshOff is BOT_API_GITHUB_REFRESH=off (api-v1 v1.43 item 4):
@@ -88,6 +93,18 @@ type Server struct {
 	// agentUpgradeWaitTest, when non-zero, replaces the 130 s agent upgrade
 	// task wait. Tests only.
 	agentUpgradeWaitTest time.Duration
+	// dockerUsageWaitTest, when non-zero, replaces the 50 s Docker usage
+	// wait (tests).
+	dockerUsageWaitTest time.Duration
+	// dockerUsageRuns holds the host ids with a Docker usage check in
+	// flight (api-v1 v1.59: one per host at a time).
+	dockerUsageRuns sync.Map
+	// hostPolicies is the console policy applies waiting for a hello
+	// (api-v1 v1.51), by host.
+	hostPolicies hostPolicyRuns
+	// hostPolicyWaitTest, when non-zero, replaces the 70 s policy task
+	// wait. Tests only.
+	hostPolicyWaitTest time.Duration
 }
 
 // delegatedPolicy says what an api_delegated session may do on a route.
@@ -165,6 +182,9 @@ func contractRoutes() []route {
 		{"GET /v1/orgs/{id}/hosts/{host_id}/files/{name}/versions/{v}", false, (*Server).handleHostFileVersion, delegatedDenyRead},
 		{"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}", false, (*Server).handleHostFilePut, delegatedDeny},
 		{"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply", false, (*Server).handleHostFileApply, delegatedDeny},
+		// api-v1 v1.51: a host's console-managed policy, console only.
+		{"GET /v1/orgs/{id}/hosts/{host_id}/policy", false, (*Server).handleHostPolicyGet, delegatedDenyRead},
+		{"POST /v1/orgs/{id}/hosts/{host_id}/policy", false, (*Server).handleHostPolicyApply, delegatedDeny},
 		// api-v1 v1.35 item 1: org domains, console only.
 		{"GET /v1/orgs/{id}/domains", false, (*Server).handleDomainList, delegatedDenyRead},
 		{"POST /v1/orgs/{id}/domains", false, (*Server).handleDomainCreate, delegatedDeny},
@@ -222,12 +242,15 @@ func contractRoutes() []route {
 		{"DELETE /v1/projects/{id}/env-sets/{set}/keys/{key}", false, (*Server).handleEnvKeyDelete, delegatedDeny},
 		{"POST /v1/projects/{id}/env-sets/{set}/secret", false, (*Server).handleEnvKeysSecret, delegatedDeny},
 		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/reveal", false, (*Server).handleEnvKeyReveal, delegatedDeny},
+		// api-v1 v1.54: a new generated value for an existing secret key, console only.
+		{"POST /v1/projects/{id}/env-sets/{set}/keys/{key}/regenerate", false, (*Server).handleEnvKeyRegenerate, delegatedDeny},
 		// api-v1 v1.28 value requests: create decides in its handler; the fill page, fill and decline are console only.
 		{"POST /v1/projects/{id}/env-sets/{set}/value-requests", false, (*Server).handleValueRequestCreate, delegatedHandler},
 		// api-v1 v1.33 item 6: a value request for a key of the entry's private set.
 		{"POST /v1/projects/{id}/catalog/{name}/value-requests", false, (*Server).handleEntryValueRequestCreate, delegatedHandler},
 		// api-v1 v1.33 item 6 (review A): show-once reveal of a generated private key, console only.
 		{"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/reveal", false, (*Server).handlePrivateKeyReveal, delegatedDeny},
+		{"POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/regenerate", false, (*Server).handlePrivateKeyRegenerate, delegatedDeny},
 		{"GET /v1/value-requests/{request_id}", false, (*Server).handleValueRequestGet, delegatedAllow},
 		{"GET /v1/value-requests/{request_id}/fill", false, (*Server).handleValueRequestFillPage, delegatedDenyRead},
 		{"POST /v1/value-requests/{request_id}/fill", false, (*Server).handleValueRequestFill, delegatedDeny},
@@ -280,6 +303,10 @@ func contractRoutes() []route {
 		// api-v1 v1.48: agent upgrades; the MCP server asks for confirm first.
 		{"POST /v1/hosts/{id}/agent-upgrade", false, (*Server).handleAgentUpgrade, delegatedAllow},
 		{"GET /v1/hosts/{id}/agent-upgrades", false, (*Server).handleAgentUpgrades, delegatedAllow},
+		// api-v1 v1.49 items 3 and 4: alert settings and mounts.
+		{"GET /v1/hosts/{id}/alert-settings", false, (*Server).handleAlertSettingsGet, delegatedAllow},
+		{"PUT /v1/hosts/{id}/alert-settings", false, (*Server).handleAlertSettingsPut, delegatedAllow},
+		{"GET /v1/hosts/{id}/disks", false, (*Server).handleHostDisks, delegatedAllow},
 		// api-v1 v1.24 items 3 and 4: removed routes answer 410 for one release.
 		{"GET /v1/hosts/{id}/shares", false, (*Server).handleSharesGone, delegatedAllow},
 		{"GET /v1/hosts/{id}/shares/{project_id}", false, (*Server).handleSharesGone, delegatedAllow},
@@ -296,6 +323,8 @@ func contractRoutes() []route {
 		{"GET /v1/hosts/{id}/processes", false, (*Server).handleProcesses, delegatedAllow},
 		{"GET /v1/services/{id}/health", false, (*Server).handleHealthHistory, delegatedAllow},
 		{"POST /v1/hosts/{id}/snapshot", false, (*Server).handleSnapshot, delegatedAllow},
+		// api-v1 v1.59 item 2: Docker usage, org owners and admins.
+		{"POST /v1/hosts/{id}/docker-usage", false, (*Server).handleDockerUsage, delegatedAllow},
 		{"POST /v1/services/{id}/probe", false, (*Server).handleProbe, delegatedAllow},
 		{"POST /v1/confirmations/{confirmation_id}", false, (*Server).handleConfirmation, delegatedAllow},
 		{"GET /v1/projects/{id}/audit", false, (*Server).handleAudit, delegatedAllow},
@@ -681,12 +710,16 @@ type hostView struct {
 func (s *Server) withUpdateHint(h store.Host, last *store.AgentUpgrade) hostView {
 	allowed := agentUpgradeAllowed(h)
 	// api-v1 v1.44: host files are listed by their own route, never on a
-	// Host; v1.48: nor is programs.agent_upgrade. Every Host answer goes
-	// through here (hostViews, hostRead).
-	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade) {
+	// Host; v1.48: nor is programs.agent_upgrade; v1.50: nor is
+	// programs.host_network. Every Host answer goes through here
+	// (hostViews, hostRead).
+	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.HostNetwork || h.Programs.ImagePatterns != nil) {
 		cp := *h.Programs
 		cp.HostFiles = nil
 		cp.AgentUpgrade = false
+		cp.HostNetwork = false
+		// api-v1 v1.51: image patterns only through the policy route.
+		cp.ImagePatterns = nil
 		h.Programs = &cp
 	}
 	v := hostView{Host: h, AgentUpgradeAllowed: allowed}

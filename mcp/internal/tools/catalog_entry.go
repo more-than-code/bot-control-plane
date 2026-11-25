@@ -44,7 +44,7 @@ const setEntryImageSchema = `{
 func registerGetCatalogEntry(server *mcp.Server, api *apiclient.Client) {
 	addTool(server, &mcp.Tool{
 		Name:        "get_catalog_entry",
-		Description: "Read one catalog entry in full. For an image entry it returns the whole spec as update_catalog_entry takes it: image, kind, command, entrypoint, ports, inline env values (plain values only), secret_env as references (\"<set>.<KEY>\"), env set names, volumes and files with their targets, the healthcheck command and timings, logging, health_policy, restart, user, memory and wait times. Secret values and file contents are never returned. A program entry returns name, kind, command_display and my_actions only; programs are edited in the console. To change only the image, use set_entry_image instead of rewriting the spec. Does not contact the host.",
+		Description: "Read one catalog entry in full. For an image entry it returns the whole spec as update_catalog_entry takes it: image, kind, command, entrypoint, ports, inline env values (plain values only), secret_env as references (\"<set>.<KEY>\"), env set names, volumes and files with their targets, the healthcheck command and timings, logging, health_policy, restart, user, memory and wait times. Secret values and file contents are never returned. A program entry returns name, kind, command_display and my_actions only; programs are edited in the console. console_url is the entry's console page, where the person edits a program, reveals a generated secret or fills a private key; post it rather than describing clicks. To change only the image, use set_entry_image instead of rewriting the spec. Does not contact the host.",
 		Annotations: readOnlyAnnotations(false),
 		InputSchema: json.RawMessage(getCatalogEntrySchema),
 	}, func(ctx context.Context, raw json.RawMessage) *mcp.CallToolResult {
@@ -68,6 +68,18 @@ func registerGetCatalogEntry(server *mcp.Server, api *apiclient.Client) {
 		projected, summary, err := projectFullCatalogEntry(payload)
 		if err != nil {
 			return toolError("error", errCatalogEntryShape.Error())
+		}
+		// The console page where the person edits a program, reveals a
+		// generated secret or fills a private key (privileged steps).
+		if link := entryURL(api, in.ProjectID, in.Name); link != "" {
+			var m map[string]json.RawMessage
+			if json.Unmarshal(projected, &m) == nil {
+				m["console_url"], _ = json.Marshal(link)
+				if b, err := json.Marshal(m); err == nil {
+					projected = b
+				}
+			}
+			summary += "\nConsole page (edit, reveal a generated secret, fill a private key): " + link
 		}
 		return present(projected, summary)
 	})
@@ -107,6 +119,9 @@ func registerSetEntryImage(server *mcp.Server, api *apiclient.Client) {
 		}
 		spec, err := storedImageSpec(payload)
 		if err != nil {
+			if link := entryURL(api, in.ProjectID, in.Name); link != "" && errors.Is(err, errProgramEntry) {
+				return toolError("bad_request", err.Error()+"; only the person can edit it: send them this link: "+link)
+			}
 			return toolError("bad_request", err.Error())
 		}
 		image, err := json.Marshal(in.Image)
@@ -141,6 +156,9 @@ func requireImageRef(image string) error {
 	return nil
 }
 
+// errProgramEntry refuses set_entry_image on a program entry.
+var errProgramEntry = errors.New("set_entry_image is for image entries; program entries are edited in the console")
+
 // storedImageSpec returns the stored spec of an image entry with every field
 // kept as the API sent it, so a GET then PUT changes only what the caller sets
 // (api-v1 v1.24.1). A program entry or a body without a spec object is refused.
@@ -153,7 +171,7 @@ func storedImageSpec(raw json.RawMessage) (map[string]json.RawMessage, error) {
 		return nil, errCatalogEntryShape
 	}
 	if row.Kind == "program" {
-		return nil, errors.New("set_entry_image is for image entries; program entries are edited in the console")
+		return nil, errProgramEntry
 	}
 	if row.Kind != "image" {
 		return nil, errCatalogEntryShape

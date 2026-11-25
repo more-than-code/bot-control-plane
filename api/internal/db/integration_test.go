@@ -123,9 +123,11 @@ TRUNCATE TABLE
     app.oauth_grants,
     app.problems,
     app.notification_reads,
+    app.host_update_notices,
     app.host_file_applies,
     app.host_file_versions,
     app.host_agent_upgrades,
+    app.host_alert_settings,
     app.hosts,
     app.project_members,
     app.sessions,
@@ -309,6 +311,7 @@ WHERE id = $1::uuid
 	assertEnvMakeSecret(t, d, ctx, at)
 	assertProgramSecrets(t, d, ctx, at)
 	assertEnvGenerate(t, d, ctx, at)
+	assertEnvRegenerate(t, d, ctx, at)
 }
 
 func enrollHostDB(t *testing.T, d *DB, ctx context.Context, projectID, ownerID uuid.UUID, name string, at time.Time) store.Host {

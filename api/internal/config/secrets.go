@@ -26,11 +26,34 @@ func ReadSecretsKey(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseSecretsKey(line, "BOT_SECRETS_KEY_FILE")
+}
+
+// LoadSecretsKey is the secrets key from BOT_SECRETS_KEY (value) or, when
+// that is empty, BOT_SECRETS_KEY_FILE (path; api-v1 v1.50 item 2). The
+// value has the file line's rule: standard base64 of exactly 32 bytes.
+func LoadSecretsKey(value, path string) ([]byte, error) {
+	if value == "" {
+		return ReadSecretsKey(path)
+	}
+	return parseSecretsKey(value, "BOT_SECRETS_KEY")
+}
+
+func parseSecretsKey(line, name string) ([]byte, error) {
 	raw, err := base64.StdEncoding.DecodeString(line)
 	if err != nil || len(raw) != 32 {
-		return nil, errors.New("BOT_SECRETS_KEY_FILE is invalid")
+		return nil, errors.New(name + " is invalid")
 	}
 	return raw, nil
+}
+
+// envSecretLine checks an env-value secret is one line, as a file's first
+// line is. Errors name only the variable.
+func envSecretLine(value, name string) error {
+	if strings.ContainsAny(value, "\r\n") {
+		return errors.New(name + " is invalid")
+	}
+	return nil
 }
 
 // readSecretFile returns the first line of a secret file (a trailing CR

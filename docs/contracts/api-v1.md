@@ -891,6 +891,10 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
 7. **Lifecycle:** deleting an env set, or its project, removes its requests (cascade). An expired request is never filled; expired rows may be deleted after 7 days.
 8. **Migration 0018** (applied by `--migrate`): table `app.env_value_requests` (`id_hash`, `user_id`, `project_id`, `set_name`, `key`, `reason`, `state`, `created_at`, `expires_at`, `done_at`), foreign keys to users and projects `ON DELETE CASCADE`, an index for the per-user open count; **no value column**. `0018_env_value_requests.down.sql` drops the table (pending requests are lost; filled values stay in their sets).
 9. **Unchanged:** every other env-set route and its delegated refusal; no route returns an env value or preview to a delegated session; v1.27 items 1–8.
+10. **MCP consumers, no URL input request (amended 2026-11-23, bot-control-plane PR 10, DD 8hp8; MCP only, no API change):** `request_env_value`, `request_file` (v1.30 item 9) and `connect_registry` (v1.31 item 10) return the link at once to every client, as text and in the structured result with `elicitation` `not_supported`.
+    - Before: a 2026-07-28 client declaring `elicitation.url` got a SEP-2322 URL input request instead, and its retry read the state.
+    - Why: a client that showed the input request but got no answer from the person held the call until its own time limit and never received the link, and each retry replaced the earlier link.
+    - A retry carrying a `requestState` from an older MCP server still reads the request and creates nothing.
 
 ## v1.29 automatic project settings: Connect GitHub, image access, readiness (2026-11-16, approved spec `docs/spec-settings-automatic.md` rev 1; migration 0019; additive)
 
@@ -919,7 +923,7 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
 6. **Decline:** `POST /v1/file-requests/{request_id}/decline`, console only, same user and state checks → `200 {"state":"declined"}`. Audit `file.request_declined` (`name`, `request`).
 7. **Lifecycle:** deleting the project removes its requests (cascade); expired rows are deleted 7 days after expiry; a file created by other means leaves the request pending and its fill answers `conflict`.
 8. **Migration 0020:** table `app.file_requests` (`id_hash`, `user_id`, `project_id`, `name`, `secret`, `reason`, `state`, `created_at`, `expires_at`, `done_at`), foreign keys to users and projects `ON DELETE CASCADE`, an index for the per-user open count and one on `expires_at`; no content column. `deploybot_api`: SELECT, INSERT, DELETE, and UPDATE on (`state`, `done_at`, `expires_at`). Down drops the table.
-9. **MCP:** `request_file` and `get_file_request`, as v1.28's tools (link as text for every client; a SEP-2322 URL input request for a 2026-07-28 client declaring `elicitation.url`, whose retry reads the state without a second create). `check_readiness`'s next step for `add_file` names `request_file`.
+9. **MCP:** `request_file` and `get_file_request`, as v1.28's tools (the link as text for every client; amended 2026-11-23, see v1.28 item 10: no URL input request). `check_readiness`'s next step for `add_file` names `request_file`.
 10. **Unchanged:** v1.9 file routes and rules, v1.29 readiness shape, every delegated refusal on file routes.
 
 ## v1.31 Connect GitHub started from chat (2026-11-16, approved spec `docs/spec-settings-automatic.md` rev 2 §3.6; migration 0021; additive)
@@ -935,7 +939,7 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
 7. **Decline:** `POST /v1/registry-connect-requests/{request_id}/decline`, console only, the creator while still owner or admin (else `not_found`), `pending` and unexpired → `200 {"state":"declined"}`. Audit `registry.github_connect_declined` (`request`).
 8. **Lifecycle:** deleting the project removes its requests; expired rows are deleted 7 days after expiry.
 9. **Migration 0021:** table `app.registry_connect_requests` (`id_hash`, `user_id`, `project_id`, `reason`, `state`, `created_at`, `expires_at`, `done_at`), foreign keys `ON DELETE CASCADE`, indexes for the per-user open count and `expires_at`; no token column. `deploybot_api`: SELECT, INSERT, DELETE and UPDATE on (`state`, `done_at`, `expires_at`). Down drops the table.
-10. **MCP:** `connect_registry` (`project_id`, `registry` = `"ghcr.io"`, `reason`?) and `get_registry_connect_request` (`request_id`), as v1.28's tools (link as text for every client; a SEP-2322 URL input request for a 2026-07-28 client declaring `elicitation.url`, whose retry reads the state without a second create). Neither returns a token. `check_readiness`'s next step for `connect_github` names `connect_registry`.
+10. **MCP:** `connect_registry` (`project_id`, `registry` = `"ghcr.io"`, `reason`?) and `get_registry_connect_request` (`request_id`), as v1.28's tools (the link as text for every client; amended 2026-11-23, see v1.28 item 10: no URL input request). Neither returns a token. `check_readiness`'s next step for `connect_github` names `connect_registry`.
 11. **Unchanged:** v1.29 Settings flow, disconnect and revoke, `registry_auth`, and every token-secrecy rule.
 
 
@@ -1027,8 +1031,9 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
 
 1. **`GET /v1/me/notifications`** (session callers only; a delegated session answers `forbidden`). Answers `{"items":[Notification],"unread":<int>}`, newest first, at most 20 items. `Notification` is `{"key":"<string>","kind":"release"|"host_update","title":"<string>","detail":"<string>","href":"<path>","at":"<RFC3339>","read":<bool>}`. Items are computed on each call, never stored:
    - **release:** one per `CHANGELOG.md` release dated within the last 90 days (at most 5), from the server's own build. `key` `release:<version>` (for example `release:0.2.40`), `title` `Deploybot v<version> is out`, `detail` the release's first bullet, `href` `/whats-new#v<version>`, `at` the release date at 00:00 UTC.
-   - **host_update:** one per non-revoked host whose `update_available` is true (v1.34, v1.36), only in orgs where the caller is `owner` or `admin`. `key` `host_update:<host id>:<latest version>`, `title` `Update available on <host name>`, `detail` `bot-agent <latest> (this host: <agent_version>)`, `href` `/hosts/<host id>`, `at` the host's `last_seen_at` (its `enrolled_at` if it never connected). Project members with deploy access do not get host items.
+   - **host_update:** one per non-revoked host whose `update_available` is true (v1.34, v1.36), only in orgs where the caller is `owner` or `admin`. `key` `host_update:<host id>:<latest version>`, `title` `Update available on <host name>`, `detail` `bot-agent <latest> (this host: <agent_version>)`, `href` `/hosts/<host id>`, `at` the time the API first listed the host behind that latest version (amended 2026-11-23, bot-control-plane PR 11, migration 0035; before: the host's `last_seen_at`, or `enrolled_at` if it never connected, so every check-in moved the notice back to the top of the bell). Project members with deploy access do not get host items.
    - `read` is true when the caller has a read mark for that `key`. `unread` counts the items with `read` false.
+   - **Migration 0035 (2026-11-23, amends this item):** `app.host_update_notices (host_id, version, noticed_at)`, primary key `(host_id, version)`, `ON DELETE CASCADE` from `app.hosts`. Listing notifications writes a row at the current time for each host behind `BOT_API_LATEST_AGENT_VERSION` that has none for that version and deletes the host's rows for other versions; an existing row keeps its time, which is the `host_update` item's `at`. A newer latest version starts a new notice. A host already behind when 0035 is first applied is dated by the first list after the upgrade. The down script drops the table.
 2. **`POST /v1/me/notifications/read`** (session callers only; delegated → `forbidden`). Body `{"keys":["<key>",…]}` (1–50 keys, each 1–200 characters of valid UTF-8 with no control characters (U+0000–U+001F, U+007F); otherwise `bad_request` `invalid keys`) or `{"all":true}` (marks every item the GET would return now). Answers `200` with the usual envelope (`{"code":"ok","msg":"ok","payload":null}`). Marking an unknown key is allowed and stores the mark. A body with both or neither field (`{"all":false}` alone counts as neither) → `bad_request` `send keys or all`. Not audited.
 3. **Storage:** migration `0024_notification_reads.sql` creates `app.notification_reads (user_id uuid REFERENCES app.users ON DELETE CASCADE, key text, read_at timestamptz, PRIMARY KEY (user_id, key))`, with `0024_notification_reads.down.sql`. When marks are written, the caller's marks older than 90 days are pruned unless their key is still among the caller's current items (so a long-standing item never turns unread again). A caller keeps at most 500 marks: beyond that the oldest are dropped (by `read_at`), never a key among the caller's current items. The down script never refuses: read marks are harmless to lose.
 4. **`GET /v1/me`:** each project gains `org_name` (the name of the project's org), also when the caller is not a member of that org. Additive; `org_id` and `via` are unchanged.
@@ -1173,10 +1178,38 @@ Supersedes the owning-project model of v1.1/v1.1.1 (shares) and the per-entry ho
    - Output: `tag`, `image` (`<repository>:<tag>`), `updated_at` and, with `entry`, `current`. It also returns `repository`, `order` and `truncated`.
    - Deploys still go through `set_entry_image`, `confirm` and `deploy_entry`.
 
-## v1.47 why a deploy failed (2026-11-23, spec `docs/spec-deploy-reason.md` in bot-control-plane; migration 0031_deploy_reason; implemented on bot-control-plane `dev` 48e1d4c/2451123, merged 949dc69)
-Summary from bot-control-plane `AGENTS.md`: `ImageDeploy.reason` and `final_status`, the stored redacted log tail, and outcome `refused` for a deploy or rollback the host refused. Refused rows are kept in history but not counted for last deployed, rollback targets, recent image-version holds or deploy problems. The full section was written in another session and is not yet copied here.
+## v1.47 why a deploy failed (2026-11-23, spec `docs/spec-deploy-reason.md` rev 1 in bot-control-plane; migration 0031_deploy_reason; with agent-protocol v1.19; implemented on bot-control-plane `dev` 48e1d4c/2451123, merged 949dc69)
+1. **Stored with each finished deploy or rollback** (migration 0031, columns on `app.image_deploys`):
+   - `reason` (text, at most 1024 bytes);
+   - `final_status` (`{"state","exit_code","restart_count"}` from the agent's status; null when the state is unknown);
+   - `log_tail` (the agent's redacted lines, the newest at most 50 lines and 16 KiB, after the API's own exact-value redaction).
+2. **`ImageDeploy`** gains `"reason": string|null` and `"final_status": {...}|null`.
+   - `reason` is null on `succeeded`, `unchanged` and a running row.
+   - A row without a stored reason (older rows, agent auto actions, a stale row closed as `timeout`) answers a reason worked out from its outcome.
+   - Both appear in the deploy and rollback answers and in `GET …/deploys`. The list never carries lines.
+3. **Reason rules.**
+   - When the agent sent a `reason` (agent-protocol v1.19: one printable line of at most 512 bytes, exact-value redacted), it is the cause.
+   - Otherwise the API works one out: a job's non-zero `exit_code` → "the job exited with code N"; else from `final_status`: restarting or `restart_count > 0` → "the container kept restarting (N restarts)"; exited or dead → "the container exited with code N" / "the container stopped"; missing or created → "the container did not start"; running → "the container did not pass its health checks in time".
+   - `rolled_back` appends "; rolled back; the previous version is running again" and `rollback_failed` "; the rollback failed too; the service may be down".
+   - Other outcomes have fixed sentences (`image_unavailable`, `forbidden_spec`, `conflict`, `timeout`).
+4. **Outcome `refused`** (new, in responses and storage).
+   - When the host refuses the task (`unavailable`, `forbidden`, `bad_request`, `not_found` from the agent session), the in-flight row is finished as `refused` with no digest and `reason` = "<phrase>: <message>" (the fixed phrase when the message held a secret), instead of being deleted. The request still answers the same envelope error.
+   - `refused` does not count for `last_deployed_at`, rollback targets, recent image-version holds (v1.45) or deploy problems (v1.41). An automatic agent action never copies the spec hash of a `refused` row.
+   - A frame too large to send is still not a deploy (row deleted).
+   - A host that drops while a sent task is waiting did not refuse it and the deploy may have run; v1.50 item 8 keeps that row `in_flight` for a late result or the sweep.
+   - The single-deploy route shows a running row past its deadline as `timeout`, like the list.
+5. **`GET /v1/projects/{id}/catalog/{name}/deploys/{deploy_id}?host_id=`** (console or delegated; the same permission as the list: any catalog action on the entry) → `{"deploy": ImageDeploy, "lines": [string]|null}`.
+   - `lines` is the stored tail (`[]` when none), re-redacted with the entry's current secret forms; null for a caller who holds neither `logs` nor `deploy` on the entry.
+   - A running row has outcome `in_flight` and `ends_by` (v1.42).
+   - An unknown id, or one of another entry or host → `not_found`; a malformed id → `bad_request`.
+6. **Migration 0031:** adds the three columns and allows outcome `refused`. Its down script deletes `refused` rows and drops the three columns; roll the API back to v1.46 first.
+7. **MCP:**
+   - New read tool `deploy_history` (`project_id`, `entry`, `host_id`, optional `deploy_id`, optional `limit` 1–20, default 10): the newest rows with `id`, outcome, digest, times, via, `reason` and `final_status`, and `detail`, the stored log tail of `deploy_id` or of the newest finished row (`lines` null without the logs or deploy permission). It reads stored data and works while the host is offline.
+   - Deploy and rollback results (`confirm`) keep `deploy.id` and `deploy.reason`; when the outcome is not `succeeded` or `unchanged`, the text points to `deploy_history`. "still running on the host" points to it too.
+   - `deploy_entry`'s attached history carries `reason` for rows that did not succeed and shows at most the newest `refused` row, which does not take one of the three rows kept for rollback choices. `list_problems` names `deploy_history` as the fix for a deploy problem.
+8. **Console:** accepts `refused` (badge in the revoked tone) and shows `reason` under a deploy result and under each history row. An older console drops a `refused` row as unreadable.
 
-## v1.48 agent upgrade from the console or MCP (renumbered from v1.47 on 2026-11-23 because of the clash above; migration **0032**) (2026-11-23, approved spec `docs/spec-agent-self-upgrade.md` rev 1; migration 0031; additive; not yet implemented)
+## v1.48 agent upgrade from the console or MCP (renumbered from v1.47 on 2026-11-23 because of the clash above; migration **0032**) (2026-11-23, approved spec `docs/spec-agent-self-upgrade.md` rev 1; migration 0032; additive; with agent-protocol v1.20; implemented on bot-control-plane `dev`, merged 93fef50; released in v0.2.45)
 1. **`POST /v1/hosts/{id}/agent-upgrade {"version"}`**: org owner or admin of the host's org. Console sessions and MCP-delegated tokens are allowed; the MCP server asks for `confirm` first.
    - Refusals, in order:
      - not found, or no access → `not_found` / `forbidden`;
@@ -1221,3 +1254,204 @@ Summary from bot-control-plane `AGENTS.md`: `ImageDeploy.reason` and `final_stat
    - The "Update available" badge offers **Upgrade** when `agent_upgrade_allowed` is true. Otherwise the tooltip says how to opt in.
    - Upgrade opens a confirm dialog, then shows a running state and the outcome.
    - The host Overview lists the history.
+
+## v1.49 host resource alerts (2026-11-23, approved spec `docs/spec-host-resource-alerts.md` rev 1; migration 0033; additive; implemented on bot-control-plane `dev` 2026-11-23, not yet released; ships with v1.50)
+1. **Problem kind `host_resource`.**
+   - Audience: org owners and admins of the host's org.
+   - Subjects: `<host_id>:mem`, `<host_id>:disk:<path>`, `<host_id>:cpu`, `<host_id>:load`.
+   - Levels: `needs_action` for mem and disk, `heads_up` for cpu and load.
+   - The href is `/hosts/<id>?range=1h`.
+   - Title and detail carry only the host name, the mount path and numbers.
+2. **Sweep** (inside the 1-minute problems sweep, after the 5-minute grace; off with `BOT_API_PROBLEMS=off`).
+   - Watched hosts are always-on, not revoked, online, with the newest sample under 2 minutes old and alerts enabled.
+   - The sweep runs one grouped query per measurement over 15 minutes.
+   - Default thresholds:
+
+     | Check | Opens | Resolves |
+     |---|---|---|
+     | mem | avg `available` < max(15 % of total, 96 MiB) over 10 min | ≥ max(20 %, 128 MiB) over 5 min |
+     | disk (each mount) | `used_percent` ≥ 90 for 10 min, latest included | < 85 over 5 min |
+     | cpu | avg busy (100 − idle) ≥ 90 % over 15 min | < 75 % over 5 min |
+     | load | avg load5 / `n_cpus` ≥ 2.0 over 15 min | < 1.2 over 5 min |
+
+   - A mount no longer reported, a host no longer watched, or alerts switched off resolves the open problem with "No longer checked".
+3. **`GET /v1/hosts/{id}/alert-settings`** (anyone who can see the host) and **`PUT …/alert-settings`** (org owner or admin; console sessions and MCP-delegated tokens).
+   - Body: `{"alerts_enabled":bool, "mem_min_available_percent":5–50|null, "disk_max_used_percent":50–99|null, "cpu_max_busy_percent":50–100|null}`. Null means the default.
+   - With an override, the resolve point is the override plus 5 points for memory, or minus 5 for disk and cpu.
+   - Out-of-range values → `bad_request`.
+   - Audit `host.alert_settings {"host", changed fields}`.
+4. **Metrics query:**
+   - `m=mem` adds `available` (average bytes per step).
+   - `m=disk` accepts `&path=<mount>`, default `/`. An unknown path returns an empty series.
+   - `GET /v1/hosts/{id}/disks` lists the mounts seen in the last 24 h: `{"items":[{"path","fstype"}]}`.
+5. **Migration 0033:**
+   - `app.host_alert_settings` (host_id pk, fk cascade; the four columns with checks; updated_at; updated_by);
+   - the problems kind check gains `host_resource`;
+   - narrow grants.
+   - The down script deletes `host_resource` problems, restores the previous kind check and drops the table.
+6. **MCP:**
+   - `list_problems` describes `host_resource`;
+   - new tools `get_alert_settings {host_id}` and `set_alert_settings {host_id, …}`, the latter through `confirm`;
+   - `query_metrics` accepts `path` for disk.
+7. **Implementation notes (2026-11-23):**
+   - `PUT …/alert-settings`: `alerts_enabled` is required; the body holds only the four fields (unknown fields, an `idempotency_key` or a fractional number → `bad_request`). A revoked host → `conflict`. A PUT that changes nothing writes and audits nothing. MCP-delegated tokens call it directly (the MCP server keeps the confirm step, as for v1.48).
+   - Memory floors: the 96 MiB open and 128 MiB resolve floors apply only to the default. With `mem_min_available_percent` set, the percent alone decides.
+   - For an open problem the resolve test runs first, so 5 minutes of recovery resolve it even while the longer open window still holds the bad minutes.
+   - Coverage: a window opens or resolves only with at least half the samples the metrics interval (10 s) gives it: 15 of 30 for 5 minutes, 30 of 60 for 10, 45 of 90 for 15.
+   - Disk: at most 50 mounts per host are judged, in path order. A mount the host stops reporting resolves with "No longer reported: the host no longer reports this mount."; other cases keep "No longer checked: …".
+   - Disk subject: `<host_id>:disk:<path>` when the path is printable and the subject stays within 300 characters; otherwise `<host_id>:disk:#<first 16 hex digits of sha256(path)>`. Titles show the mount with control characters replaced and cut to 64 characters with "…".
+   - Disk href: `/hosts/<id>?range=1h&disk=<url-escaped path>` (for a hashed subject, the path from the host's mounts of the last 24 h; without a match, no `disk`).
+   - Metrics `path`: more than 1024 characters or a control character → `bad_request` "invalid path"; ignored for other `m`.
+   - `GET /v1/hosts/{id}/disks`: anyone who can see the host, MCP-delegated too; at most 200 mounts, sorted by path.
+
+## v1.50 Deploybot on containers (2026-11-23, approved spec `docs/spec-deploybot-on-containers.md` rev 1; additive; migration 0034_deploy_task; ships with v1.49; implemented on bot-control-plane `dev` 58c52a6, merged 8e432ad)
+1. **ImageSpec `network`** (agent-protocol v1.21 item 3): optional, absent or `"host"`; any other value is `bad_request`. Stored and returned with the entry (REST and MCP `create_catalog_entry`, `update_catalog_entry`, `get_catalog_entry`). With `"host"`, `networks` must be empty (`bad_request`). A deploy, rollback or run of such an entry on a host whose hello lacks `programs.host_network: true` is refused `409 unsupported_agent` ("this host does not allow host networking (runner.toml host_network_projects)") before any task is sent; the agent's own `policy_denied` still applies per project.
+2. **Secrets as env values:** each of `BOT_SECRETS_KEY`, `BOT_API_MCP_CLIENT_SECRET`, `BOT_API_GITHUB_CLIENT_SECRET` and `BOT_MCP_CLIENT_SECRET` may be given as an env value instead of its `*_FILE`. Setting both forms is a start-up error naming the variable. The same length and format checks apply; the files keep their 0600 rule. Values are never logged.
+3. **Late deploy results:**
+   - A task result for an image deploy, rollback or run whose `image_deploys` row is still `in_flight`, or was settled `timeout`, settles it with the reported outcome (and v1.47 reason, final status and log tail), whichever API process receives it, including after an API restart. A row already settled otherwise is left alone. The API answers every such result with `task_result_ack {"task_id"}`.
+   - The settle is audited like an on-time result, with `"late": true`.
+   - A result for an unknown task id is acked and dropped (logged with the id only).
+4. **`deploybot-server health <url>`:** exits 0 when a GET answers 2xx within 3 s, else 1. Only `http://127.0.0.1:<port>/…` and `http://localhost:<port>/…` are accepted (else exit 2). For the image's Docker `healthcheck`, since the base image has no curl.
+5. **Images** (not a contract surface, recorded here for consumers): `ghcr.io/more-than-code/deploybot-server` (static binary, distroless nonroot) and `ghcr.io/more-than-code/deploybot-console` (node 24 slim, `NODE_OPTIONS=--max-old-space-size=160` in its `CMD`), public, built reproducibly from the release tag and deployed by digest.
+6. **`env_hash` on every image task (clarification, 2026-11-23):** to an agent whose hello has `programs.env_hash: true`, the API sends `env_hash` on every `image_deploy` and `image_rollback`, also for an entry with no env set (the hash of its empty env), so a changed host env file (agent-protocol v1.21 item 6) is never `unchanged`.
+7. **Ack on a store error (clarification, 2026-11-23):** the API withholds `task_result_ack` only when settling the result hits a store error, so the agent keeps its file and resends after the next hello. Every other result, including unknown task ids and rows already settled, is acked.
+8. **A dropped connection keeps the row (amends v1.47, 2026-11-23):** when the agent connection drops while the API waits for an image deploy or rollback result, and the task frame was already written to the agent, the `image_deploys` row stays `in_flight` (the caller still gets `unavailable`); a later result settles it (item 3), else a stateless sweep (every minute, any API process) settles `in_flight` rows whose `in_flight_until` has passed (task budget + 30 s result margin + 120 s grace, the v1.42 lock deadline) as `timeout`, audited with `"swept": true`. When the frame was never written, the row is recorded `refused` as in v1.47 (the host never ran it), so it is never left in flight. Late `image_start` (run) results have no row and are acked and dropped. Migration **0034_deploy_task** stores the task id and action on the row (`task_id uuid`, `task_action` deploy|rollback, partial unique index), so any API process can settle it.
+9. **Review changes (2026-11-23, before release):**
+   - `env_hash` (item 6) is sent when the API has a secrets key (`BOT_SECRETS_KEY[_FILE]`), as since v1.27; production always has one. Without a key, a changed host env file is not detected.
+   - The ack (item 7) for an image deploy or rollback, on time or late, is sent only after the row is written; on a store error the row stays `in_flight` (swept later) and no ack is sent.
+   - A `timeout` row is re-settled only by a different outcome; a repeated `timeout` result is acked and dropped without audit. A result settles only the same host's task (the live waiter checks the delivering connection too).
+   - A late result's log tail is redacted against the entry found by its id; when its secrets cannot be resolved, the tail is stored withheld. A late `refused` is audited as a denial with its error code.
+   - When the live waiter finds its row already settled by a late result, it answers from the stored row.
+   - `deploybot-server health` dials 127.0.0.1 for `localhost`. The server image has no baked HEALTHCHECK; each entry sets its own (e.g. `["/usr/local/bin/deploybot-server","health","http://127.0.0.1:8190/health"]`), so another process on a default port cannot mask a broken container.
+   - Readiness checks host networking for `network: "host"` entries; MCP `list_catalog` shows `network`; delegated deploy, rollback and run plans say "runs on the host network".
+
+## v1.51 host policy from the console (2026-11-23, spec `docs/spec-console-host-policy.md` rev 2 in bot-control-plane, as implemented; with agent-protocol v1.22; no migration; implemented on bot-control-plane `dev` 70de9e7, merged 408a811)
+Principle (DD `DEF-20261123-design-principle-privileged-steps-are-do-exut`): no MCP tool and no delegated session changes a host's policy. MCP hands the person a console link instead (item 6).
+1. **Hello fields read** (agent-protocol v1.22): `programs.console_policy` (bool, the host's root opted in with `console_policy = true`) and `programs.image_patterns` (the runner.toml `images`, sent only when `console_policy` is true). A host is **managed** when `console_policy` is true and the hello carries a `policy_hash`.
+2. **`GET /v1/orgs/{id}/hosts/{host_id}/policy`** (org owners and admins; console sessions only, a delegated session → 403) → `{"managed", "policy_hash", "edge", "images", "projects", "apply"}`.
+   - `edge` and `projects` come from hello; `images` only on a managed host (else `[]`).
+   - `apply` is the last apply this API process started, kept in memory (no migration), or `null`: `{"state","started_at","ends_by","started_by":{"id","name"},"change","finished_at"}`.
+   - `state` is `running`; `applied` (a hello carried the new hash); `rolled_back` (after 150 s the host is back on `base_hash`); or `unknown`. A settled apply is shown for 24 h.
+3. **`POST /v1/orgs/{id}/hosts/{host_id}/policy`** `{"base_hash","edge","images","projects"}` (org owners and admins; console only, `delegatedDeny`).
+   - It validates with the agent's rules (strict keys, valid patterns and slugs, no repeats, at most 64 images and 32 projects).
+   - Refusals: the host not online → `host_offline`; not managed → `409 unsupported_agent` ("this host's root has not let the console change its policy: add console_policy = true to /etc/bot-agent/runner.toml once and restart bot-agent (bot-agent 0.2.15 or later)"); `base_hash` differs from the host's → `conflict`; an apply already running → `conflict` with `started_at` and `ends_by`; nothing to change → `bad_request` `nothing to change`.
+   - It sends task `host_policy_apply` (60 s budget) and answers **`202`** with the apply (`state` `running`).
+   - Task refusals map to the same codes: `policy_denied` or `forbidden` → `unsupported_agent`; `conflict` → `conflict` (the policy changed since the page loaded); `busy` → `conflict` ("the host is busy with another change; try again in a minute"); `bad_spec` → `bad_request` ("the host refused this policy"); `helper_unavailable` → `unavailable`. No answer → `unavailable` ("the host did not answer; the change may still apply, so reload in a minute").
+4. **Audit:** `host.policy_apply` (the change: edge before and after, patterns and slugs added and removed; never the file) and `host.policy_result` (`{"host","outcome"}`, via `system`, once when the apply settles). No problem kind.
+5. **Readiness (`check_readiness`):** on a managed host the image check is exact, since the host's patterns are known. A `host_policy_snippet` fix carries `image_pattern`. New fix actions `allow_edge`, `turn_on_edge` and `verify_domain` (with `org_id`).
+6. **MCP deep links:** with `BOT_MCP_CONSOLE_ORIGIN` set on the MCP server, fixes whose step is a person's carry `fix.console_url`, and `host_policy_snippet`, `image_access`, `list_hosts`, `get_catalog_entry` and `list_problems` carry the page to open. The Policy tab link stages a change (`?tab=policy&policy.edge=on`, `&policy.add_image=<pattern>`, `&policy.add_project=<slug>`) and never applies it. Unset: no links, results as before. Tool descriptions tell the agent to post the `console_url` and not describe clicks.
+7. **Console:** host page tab **Policy** (`?tab=policy`, org owners and admins): Edge switch, Images and Projects lists, a diff of the change, Apply with a confirm, then the result, re-read every 5 s while it runs. A host that is not managed shows the snippet and the one line the root adds.
+
+## v1.52 assign one name of a domain (2026-11-23, spec `docs/spec-domain-assign-names.md` rev 1 in bot-control-plane; migration 0036; no agent-protocol change; implemented on bot-control-plane `dev`, merged b4335ce (PR 13))
+1. **Assignment `pattern` is relative to the domain name**, like a DNS zone file. Four shapes:
+   - `@`: the domain itself (unchanged);
+   - `*`: any one label below the domain (unchanged);
+   - a relative name of one or more labels, such as `marketingos` or `api.dev`: exactly `marketingos.<domain>`;
+   - `*.` and a relative name, such as `*.dev`: any one label below `dev.<domain>`.
+   - Labels are lowercase LDH (IDNA A-labels included), each at most 63 characters, and the name written out is at most 253 characters. `PUT …/domains/{id}/assignments` refuses anything else as `bad_request` with the shape message, which names all four forms. The same project and pattern twice in one body is still refused. At most 64 assignments per domain, unchanged.
+2. **A route is allowed** when a `verified` domain assigned to the project covers its hostname under one of its patterns. `*` matches exactly one label; `*.dev` exactly one label below `dev.<domain>`; a relative name only itself. No new DNS record is needed.
+3. **Domain delete** plans and removes the routes on the domain and one label below it, as before, and also the routes deeper below it that no more specific domain of the org holds (whatever that domain's status or assignments). It still leaves a route that another verified or lapsed domain assigned to the same project covers.
+4. **The Assign link.** The API sends ids; the MCP server builds `console_url` (v1.51 item 6).
+   - `PUT …/catalog/{name}/routes` refusing "<hostname> is not under a verified domain assigned to this project" carries a payload when the hostname is under a `verified` domain of the project's org (the most specific one): `{"hostname","domain","domain_id","org_id","pattern","name"}`. `pattern` is the narrowest pattern that assigns exactly that hostname, and `name` is it written out. The message is unchanged. A hostname under no verified domain of the org has no payload.
+   - The readiness `routes` warn for the same case has fix `{"action":"assign_domain","org_id","domain_id","pattern","name"}` instead of v1.51's `verify_domain`, which stays for a hostname under no verified domain and for a lapsed one.
+   - MCP has no assign tool (the API refuses delegated sessions on domain routes). The link is `<console>/orgs/<org>?tab=settings&domains.assign=<domain>&domains.project=<project>&domains.pattern=<pattern>`; `set_routes` appends one sentence to the refusal naming the domain and the name, with `Open: <link>`, and `check_readiness` puts it in the fix's `console_url`. Without a console origin the sentences stay and the link is left out.
+5. **Console:** the Assign dialog's pattern is a text field with a preview of the full name; a pasted full name, a trailing dot and upper case are tidied to a pattern. Assignment rows write the pattern out. The deep link opens that domain's Assign dialog once, with the row added for the admin to check and save.
+6. **Migration 0036** only relaxes `domain_assignments_pattern_chk`; no row changes. Its down script deletes the assignments that are not `@` or `*` and restores the old check. Roll the API back to v1.51 first.
+
+## v1.53 why ghcr.io refused the GitHub connection (2026-11-23, spec `docs/spec-registry-refusal-reason.md` rev 1 in bot-control-plane; no migration; implemented on bot-control-plane `dev`, merged c56ece1 (PR 14))
+1. **Diagnosis.** When an image-access lookup ends `login_failed` with the GitHub connection (`login` `github`, registry `ghcr.io`), the API asks the GitHub REST API with the same token ghcr.io refused (no second token read or refresh):
+   - `GET /user`: a 401, or a token without `read:packages` in `X-OAuth-Scopes`, is `github_sign_in`;
+   - when the image's owner (first path segment) is the connected login (case-insensitive), no refusal;
+   - otherwise `GET /orgs/{owner}/packages/container/{name}`: a 403 whose body names "OAuth App access restrictions" is `org_restricted`; a 404 is `no_package_access`; anything else, no refusal.
+   - No GitHub body is returned, logged or stored. A failed call means no refusal. The answer is cached with the access answer (60 s). Manual logins are never diagnosed. No new scope.
+2. **`ImageAccess.refusal`** (optional; only with `access` `login_failed` and `login` `github`, and only when GitHub told): `{"reason": "github_sign_in"|"org_restricted"|"no_package_access", "owner"?, "account"?, "url"?}`. `owner` is the image's owner, `account` the connected GitHub login, `url` (`org_restricted` only) `https://github.com/settings/connections/applications/<client_id>`, where an org owner clicks Grant and a member clicks Request.
+3. **Readiness:** new fix action `github_org_access` with `registry`, `owner` and `url`, for `org_restricted`; the `registry` check message names the organization and says reconnecting will not help. `no_package_access` keeps `connect_github` with a message naming the account and the package owner; `github_sign_in` says the sign-in expired, was revoked or lost `read:packages`.
+4. **Problems:** the `registry_login` detail (bell, `list_problems`) says the same, with the GitHub URL for `org_restricted`, within the 300-character limit. `github_sign_in` and an unknown reason keep the v1.43 detail.
+5. **Consumers:** MCP `image_access` passes `refusal` (allowlisted fields; `url` must be GitHub's application page) and, for `org_restricted`, `github_url` instead of a console link, telling the agent to send that link and not to ask for a reconnect; `check_readiness` keeps `owner` and `url` on the fix, with no `console_url`; `list_problems` says to send the GitHub link instead of `connect_registry`. The console shows which organization has not granted the app, with Grant on GitHub.
+
+## v1.54 regenerate a secret env value (2026-11-23, spec `docs/spec-env-regenerate.md` rev 1 in bot-control-plane; additive, no migration, no agent-protocol change; implemented on bot-control-plane `dev`, merged 1513661 (PR 15))
+1. **Routes:** `POST /v1/projects/{id}/env-sets/{set}/keys/{key}/regenerate` and `POST /v1/projects/{id}/catalog/{name}/private-keys/{key}/regenerate` (the entry's private set `@<name>`). Project owner or admin. **Console sessions only** (`delegatedDeny`).
+   - Body `{"generate": <v1.27 item 1 object>}`; no body or no `generate` → `bad_request` `send generate`; otherwise the v1.27 generate messages.
+2. **Checks:** the key must exist (`not_found`) and be secret (`bad_request` `{KEY} is not secret; edit it to change it`). Any secret key qualifies, generated or typed (a rotation), including a `needs_value` placeholder, which it fills.
+3. **Effect:** a new CSPRNG value is sealed and stored with `generated` and `reveal_pending` true, in one transaction with the set re-hash, like a key PUT. Running copies keep the old value until their next deploy or rollback; nothing is sent to an agent.
+4. **Answer:** the value is not returned. `200 {"key","is_secret":true,"preview":"••••","reveal_pending":true,"used_by":[entry names]}`; `used_by` is the set's consumers (v1.33 item 4), empty when that read fails. The v1.27 reveal route then shows the value once.
+5. **Audit:** `env_set.key_regenerate` with `set`, `key`, `kind` and `used_by`; never a value.
+6. **Console:** a Regenerate row action (`RotateCcw`) on every secret key with a value, for owners and admins, in Env sets and in an entry's private keys; the dialog regenerates, then reveals the value once. Deep link `/projects/<id>?tab=settings&env.set=<set>&env.key=<KEY>&env.do=reveal|regenerate#env-sets` focuses the row's Reveal once or Regenerate button and never opens the dialog or acts.
+7. **MCP:** no regenerate tool. `list_env_sets` carries `console_url` on each secret key with a value: the Reveal once link while `reveal_pending`, else the Regenerate link; a private set's key links to its entry. Empty without `BOT_MCP_CONSOLE_ORIGIN`.
+
+## v1.55 a refused deploy names the field and keeps its plan (2026-11-23, spec `docs/spec-refused-deploy.md` rev 1 in bot-control-plane; with agent-protocol v1.23; no migration; implemented on bot-control-plane `dev`, merged f96cfa9 (PR 17))
+1. **The field in the answer.** The API keeps a `task_reject` `field` (agent-protocol v1.23) only with `error_code` `bad_spec` and only when it has the v1.23 shape. A deploy or rollback refused with a field answers `400 bad_request` with
+   `the host's agent refused the task as malformed (bad_spec): field "<field>" did not pass the host's checks (the agent names the field, never its value).`
+   then a fixed hint for `spec.secret_env`, `env`, `registry_auth`, `files`, `spec.files` and `spec.volumes`, then `Check that the agent is up to date (upgrade_agent), then compare that field with the ImageSpec rules`.
+   - The field is quoted so key=value redaction leaves it alone. Without a field the v1.47 sentence stays.
+   - The refused row's `reason` (v1.47) is the same text, so `deploy_history` and the console's reason line show it too.
+2. **A refused confirm keeps its plan.** When `POST /v1/confirmations/{id}` performs an image deploy or rollback and the host refuses it (a `task_reject`, or the host unavailable before the frame was written; not when the frame may have reached the host), the confirmation's `used_at` is cleared and its `expires_at` becomes at least now + 5 minutes.
+   - The answer adds `. Nothing ran on the host, so this plan is kept: after fixing the cause outside the entry (for example upgrade_agent, the host's runner.toml or an env set), confirm it again with the same confirmation_id and idempotency_key until HH:MM UTC. A change to the entry itself needs a new plan`.
+   - This holds even when the plan's own 5 minutes ran out while the host was asked. It happens only when the refused row was written; if that write failed, the row stays in flight for the sweep (v1.50 item 8) and the plan stays used.
+   - Failures before the frame is built (a running operation, a bad `${KEY}` reference) still use up the plan.
+   - The idempotency key, owner and plan checks are unchanged; a changed entry still answers the v1.42 "Plan again" conflict. Console actions have no plan and get no such sentence. The stored reason and the audit row do not carry it.
+3. **MCP:** `confirm`'s description says a host-refused deploy or rollback keeps the plan. Messages pass through unchanged.
+
+## v1.56 regenerate only a generated value (2026-11-24, Defect Drainer DEF-20261123-regenerate-is-offered-on-hand-entered-se-c0hz and -1fw3, approved by Joe "Yes, file both in DD, then work here"; amends v1.54; additive field, no migration; implemented on bot-control-plane `dev`)
+
+1. **`generated` on env keys.** Every env key object carries `"generated": bool`: on `GET` env sets and the env set list (the delegated names-only reads MCP uses too), a key's `PUT` answer, `private_keys` on `GET /catalog/{name}`, and the regenerate answer. Only a secret can be generated; a plain key is always false. It is true while the stored value is one the API generated (v1.27). A typed write clears it (migration 0017). An older API sends no field, which a client reads as false.
+2. **Regenerate refuses a hand-entered value.** On both regenerate routes (v1.54 item 1), a secret key whose value was entered by hand (not generated, and not an empty `needs_value` placeholder, which Regenerate may still fill) answers `400 bad_request` with `<KEY> was entered by hand, so it cannot be regenerated; edit it to paste a new value`.
+   - Nothing is written and no `env_set.key_regenerate` is audited.
+   - A random value would destroy a provider-issued secret (an API key). Change such a value with the key PUT (Edit).
+   - Order of checks: a missing set or key is `not_found`; a plain key is the v1.54 "not secret" answer; a hand-entered one is this answer (`store.ErrNotGenerated`).
+3. **Console** (amends v1.54 item 6):
+   - **Where Regenerate shows:** only on a secret key with `generated` true. A hand-entered secret keeps Edit and Delete.
+   - **The confirm text** leads with the consequence: "Nothing changes in running services until you redeploy <used_by>.", then warns: "If this value was also set somewhere else (a database user, a first-start setting), change it there too, or the app will fail after the redeploy."
+   - **The line under the new value:** "Redeploy <used_by> now to use the new value; until then they keep the old one."
+4. **MCP** (amends v1.54 item 7):
+   - `list_env_sets` keys carry `generated`.
+   - The Regenerate `console_url` is given only for a generated value; a hand-entered secret gets no link.
+   - The tool description says nothing redeploys, and that a value also set elsewhere must be changed there too.
+
+
+## v1.57 release notices dated by when this server first served them (2026-11-24, approved spec `docs/spec-release-first-served.md` rev 1 (umbrella), Joe "Approve"; Defect Drainer DEF-20261124-bell-release-rows-sink-below-today-s-ite-0kny; amends v1.37 item 1; additive field; migration 0038; implemented on bot-control-plane `dev`)
+
+1. **Release `at`** on `GET /v1/me/notifications`: when this server first served the release, if it has a record; otherwise the release date at 00:00 UTC, as before. The 90-day window and the at-most-5 rule still use the CHANGELOG date. Sorting is unchanged (by `at`, newest first), so a recorded release sorts by its real time.
+2. **`date_only`** (release items only, `bool`): `true` when `at` is only the CHANGELOG date at 00:00 UTC, `false` when it is a recorded time. Other kinds carry no `date_only`. A client that receives no field (an older server) treats the release as dated.
+3. **Recording:** at startup the API records its own version (the newest entry of its embedded CHANGELOG) with the current time, unless the version already has a record; the first time is kept across restarts, redeploys and replicas. A version that is not `X.Y.Z` (1 to 4 digits each) is not recorded. A failed write logs one warning and the API starts anyway; a failed read dates every release by its CHANGELOG date.
+4. **Storage:** migration `0038_release_first_served.sql` creates `app.release_first_served (version text PRIMARY KEY, first_served_at timestamptz NOT NULL)` with a check on the `X.Y.Z` shape, and grants `deploybot_api` SELECT and INSERT only. `0038_release_first_served.down.sql` drops the table (hand-run).
+5. **Console:** a release row with `date_only` false shows its age ("1 h ago") and the full local time on hover; with `date_only` true it shows its date ("24 Nov", in UTC) and "Released 24 Nov 2026" on hover.
+6. MCP and `whats_new` are unchanged: they keep CHANGELOG dates.
+
+## v1.58 Deploybot checks its own metrics retention (2026-11-24, approved spec `docs/spec-retention-self-check.md` rev 2 (umbrella), Joe "Yes, update the spec and approve both"; new problem kind and config value; migration 0039; implemented on bot-control-plane `dev`)
+
+1. **Problem kind `metrics_retention`** (amends v1.41 item 1): one problem for the whole server, subject `metrics_retention:<org id>`, `host_id` the server host.
+   - **Audience:** owners and admins of the org that owns the host named by `BOT_API_SERVER_HOST`, read at each sweep.
+   - **`href`:** `/orgs/<org id>?tab=settings#metrics-retention`.
+   - **Title:** "Metrics retention isn't running on this server". When resolved: "Metrics retention is running again".
+2. **Rules** (the hourly problem sweep), over the retention policies on hypertables in schema `metrics`, from `timescaledb_information.jobs` and `job_stats`. A job is unhealthy when it is:
+   - **failing:** it has run, but has no success for more than 48 h;
+   - **not running:** `next_start` is null or more than 1 h past.
+   
+   Level is `heads_up`, then `needs_action` once a last success is 7 or more days old, or the problem has been open 7 days.
+   - **Detail:** up to two table names, then "(+N)"; the first unhealthy job's reason ("never succeeded, N failures", "last success 3 d ago, N failures", "not scheduled", "overdue 2 h"); then "Old metrics are not being deleted."
+   - No retention policies at all also opens it ("No retention policies found: old metrics are never deleted.").
+   - Error texts of `job_errors` are never shown.
+   - An unreadable view neither opens nor resolves; the log carries only its SQLSTATE.
+   - A job with no `job_stats` row yet (never started) reads as "not scheduled"; on a fresh install the scheduler starts new policies within the 5-minute sweep grace.
+   - A problem filed under another org (the host's org changed) is resolved with "No longer checked here: …", and one opens for the current org.
+3. **Config `BOT_API_SERVER_HOST`:** a host UUID; a malformed value is a start error.
+   - **Unset:** the check is off, and the API logs one line at start.
+   - **Unknown or revoked host:** the check is off with one warning per sweep, and any open `metrics_retention` problem is resolved. The API never guesses the host.
+4. **Storage:** migration `0039_problem_metrics_retention.sql` widens `problems_kind_chk`. `0039…down.sql` deletes those rows and restores the 0033 list. No grant is needed: `deploybot_api` reads the `timescaledb_information` views.
+5. **Console:** `problemKindOf` reads `#metrics-retention`, with the icon `DatabaseZap`. The org Settings tab has a "Metrics retention" card with `id="metrics-retention"` explaining the fix.
+6. **MCP:** the `list_problems` description and its fix hint name the kind.
+
+## v1.59 what fills a host's disk (2026-11-24, approved spec `docs/spec-disk-usage-breakdown.md` rev 1 (umbrella), Joe "Yes, update the spec and approve both"; additive fields and a new route; needs agent-protocol v1.25 (bot-agent 0.2.17) for item 2; no migration; implemented on bot-control-plane `dev`)
+
+1. **`GET /v1/hosts/{id}/disks`** (amends v1.49 item 4): each item gains `total` and `used` (bytes, integers), `used_percent` (number) and `at` (RFC 3339), from that path's newest `metrics.host_disk` row in the existing 24 h window. A size the row lacks is `null`. Auth, order and the cap are unchanged.
+2. **`POST /v1/hosts/{id}/docker-usage`** (no body): the host's Docker disk usage, read live through the task `docker_usage` (spec `{}`, `timeout_sec` 45). Nothing is stored.
+   - **Who:** owners and admins of the host's org (MCP-delegated sessions too). A project member with any access level gets `403 forbidden`; a caller who cannot see the host gets `404 not_found`. Audit action `host.docker_usage` (detail: `host`; `error_code` is the refusal or failure code).
+   - **Refusals, before any task:** a revoked host is `404 not_found`; an offline host is `503 host_offline` "host unavailable", as on every route; a host whose hello `agent_version` is before 0.2.17 (a dev build's fourth part is ignored; an unparseable version counts as older) is `409 agent_too_old` "Docker usage needs bot-agent 0.2.17 or later on this host." A second call for a host while one runs is `409 busy` "A Docker usage check is already running on this host; try again shortly." (one check per host at a time, held in the API process).
+   - **Waiting:** up to 50 s.
+   - **Success:** `200` with payload `{"totals":{"images"|"containers"|"volumes"|"build_cache":{"count","active","size","reclaimable"}},"images":[{"ref","id","size","containers"}],"volumes":[{"name","size","in_use"}],"containers":[{"name","state","size"}],"at"}`. Sizes are bytes; a list `size` Docker did not know is `null`. Each list holds the 10 largest (the API sorts again by size, largest first and unknown last, then by name, or ref then id), strings at most 200 characters; the API reads the agent's answer field by field, drops a null entry or one with a wrong-typed field, reads negative totals as 0 and drops anything else. `at` is when the API received the answer.
+   - **Failures** (fixed messages; agent text never reaches the caller): `docker_usage_disabled` → `409 docker_usage_disabled` "Docker usage needs images or edge turned on in this host's runner.toml"; `docker_unavailable` → `502 docker_unavailable` "Docker is not reachable on the host"; the agent's `timeout`, a `timed_out` result or no answer in 50 s → `504 timeout` "The host did not answer in time"; the agent's `busy` refusal → `409 busy` (the text above); the socket closing before an answer → `503 host_offline`; any other reason (including an error with no reason) or an unreadable answer → `502 bad_gateway` "The host could not report Docker usage".
+   - The agent may answer `task_result` `succeeded` with `{"outcome":"ok","summary":{…}}` or `{"outcome":"failed","reason":…}`, or `failed` with the reason as `error_code` (or as the payload's `reason`); the API reads all three.
+   - Sizes in the console card and MCP are shown in decimal units (1 GB = 1000³ bytes), as `docker system df` prints them.
+3. **MCP `host_disk_usage {host_id}`** (read-only, contacts the host): `{"disks":[…item 1 items], "docker": <item 2 payload, or {"error":"<the API message>"}>}`. The summary reads "/ 59% (12.4 of 21.0 GB); Docker 6.1 GB, 3.2 GB reclaimable" (decimal GB; up to three mounts, fullest first). A caller who is not an org owner or admin gets the disks and `docker: {"error":"forbidden"}`.
+4. **Console (host Overview):** a "Disk usage" card after the Snapshot card: a mounts table (Mount, Used, Size, %), highest % first, from item 1 ("No disk data" when empty). For org owners and admins, "Check Docker usage" posts the named action `dockerUsage`, which calls item 2 with a 55 s wait and shows the four totals (count, size, reclaimable), the three top-10 tables and the note "Reclaim on the host with `docker image prune`, `docker builder prune` and `docker container prune`. Check a volume before removing it: it may hold data." Errors show in the card as a `Notice`.

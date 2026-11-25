@@ -241,8 +241,11 @@ export type HostEdgePolicy = {
 /** Domain verification state (api-v1 v1.35 item 1). */
 export type DomainStatus = 'pending' | 'verified' | 'lapsed';
 
-/** `@` is the domain itself; `*` is one label below it. */
-export type DomainPattern = '@' | '*';
+/**
+ * Relative to the domain, like a DNS zone file (api-v1 v1.52): `@` is the domain itself, `*` is one label below it, a
+ * name such as `app` or `api.dev` is exactly that name below it, and `*.dev` is one label below `dev.<domain>`.
+ */
+export type DomainPattern = string;
 
 export type DomainAssignment = {
 	project_id: string;
@@ -267,6 +270,27 @@ export type OrgDomain = {
 export type EdgeStatus = 'off' | 'pending' | 'applied' | 'error';
 
 /** `GET /v1/hosts/{id}/edge` (api-v1 v1.35 item 2). Owners and admins of the host's org. */
+/** `GET /v1/hosts/{id}/alert-settings` (api-v1 v1.49 item 3). A null threshold uses the default. */
+export type HostAlertSettings = {
+	alerts_enabled: boolean;
+	mem_min_available_percent: number | null;
+	disk_max_used_percent: number | null;
+	cpu_max_busy_percent: number | null;
+};
+
+/**
+ * One mount of `GET /v1/hosts/{id}/disks` (api-v1 v1.49 item 4). Since v1.59 item 1 it carries its newest
+ * sample's sizes (bytes) and time; null when the API did not send them.
+ */
+export type HostDisk = {
+	path: string;
+	fstype: string;
+	total?: number | null;
+	used?: number | null;
+	used_percent?: number | null;
+	at?: string | null;
+};
+
 export type HostEdge = {
 	/** The host's hello reports `edge.enabled` (its root allowed the edge in runner.toml). */
 	available: boolean;
@@ -382,6 +406,8 @@ export type ImageSpec = {
 	health_policy: ImageHealthPolicy | null;
 	/** Shared networks the container also joins (api-v1 v1.25). Present only when set: 1–4 names. */
 	networks?: string[];
+	/** The container shares the host's network (api-v1 v1.50 item 1). Present only when set; set over MCP or the API. */
+	network?: 'host';
 };
 
 type CatalogEntryBase = {
@@ -466,6 +492,8 @@ export type EnvSetKey = {
 	reveal_pending: boolean;
 	/** A placeholder with no value yet (api-v1 v1.27). Missing on an older API is false. */
 	needs_value: boolean;
+	/** The value is one Deploybot generated, so it can be regenerated (api-v1 v1.56). Missing on an older API is false. */
+	generated?: boolean;
 };
 
 export type EnvSet = {
@@ -750,8 +778,8 @@ export type NotificationKind = 'release' | 'host_update' | 'problem';
 /** A problem's level (api-v1 v1.41 item 1). */
 export type ProblemLevel = 'needs_action' | 'heads_up';
 
-/** A problem's kind (api-v1 v1.41 item 1; `host_file` since v1.44 item 8; `agent_upgrade` since v1.48 item 6). */
-export type ProblemKind = 'host_offline' | 'registry_login' | 'deploy' | 'host_file' | 'agent_upgrade';
+/** A problem's kind (api-v1 v1.41 item 1; `host_file` since v1.44 item 8; `agent_upgrade` since v1.48 item 6; `host_resource` since v1.49 item 1; `metrics_retention` since v1.58). */
+export type ProblemKind = 'host_offline' | 'registry_login' | 'deploy' | 'host_file' | 'agent_upgrade' | 'host_resource' | 'metrics_retention';
 
 export type Notification = {
 	key: string;
@@ -767,6 +795,11 @@ export type Notification = {
 	level?: ProblemLevel;
 	/** Problem items only: `open` or `resolved`. A resolved problem is always read. */
 	state?: 'open' | 'resolved';
+	/**
+	 * Release items only (api-v1 v1.57): true when `at` is only the CHANGELOG date at 00:00 UTC, false when it is when
+	 * the server first served the release. The parser makes a missing or non-boolean value true.
+	 */
+	date_only?: boolean;
 };
 
 /** `GET /v1/orgs/{id}/problems` and `GET /v1/projects/{id}/problems` item (api-v1 v1.41 item 1). */

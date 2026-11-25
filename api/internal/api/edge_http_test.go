@@ -161,6 +161,12 @@ func TestDomainsFlow(t *testing.T) {
 
 	status, env = w.do(c.tok, http.MethodPost, c.org+"/domains/"+id+"/verify", "")
 	mustHTTP(t, status, env, http.StatusConflict, "conflict", "TXT record not found yet: add _deploybot.example.com = "+d["txt_value"].(string))
+	// The failed attempt shows as Last check; the domain stays pending.
+	status, env = w.do(c.tok, http.MethodGet, c.org+"/domains", "")
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+	if items := listItems(t, env); len(items) != 1 || items[0]["status"] != "pending" || items[0]["last_check_at"] == nil || items[0]["verified_at"] != nil {
+		t.Fatalf("after a failed verify %#v", items)
+	}
 	c.dns.set("_deploybot.example.com", "unrelated", d["txt_value"].(string))
 	status, env = w.do(c.tok, http.MethodPost, c.org+"/domains/"+id+"/verify", "")
 	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
@@ -488,11 +494,19 @@ func TestReadinessRoutesCheck(t *testing.T) {
 	}
 	c.planAndConfirm(t, c.tok, "web", `[{"hostname":"app.example.com","port":8788}]`, "r1")
 	row := routesRow()
-	if row["status"] != "warn" || !strings.Contains(row["message"].(string), "the edge is not available on pi4") {
+	hostID := c.sc.host.ID.String()
+	fixOf := func(row map[string]any) map[string]any { return row["fix"].(map[string]any) }
+	if row["status"] != "warn" || !strings.Contains(row["message"].(string), "the edge is not available on pi4") ||
+		fixOf(row)["action"] != "allow_edge" || fixOf(row)["host_id"] != hostID {
+		t.Fatalf("routes %#v", row)
+	}
+	// api-v1 v1.51: a console-managed host names its Policy tab.
+	setPrograms(t, w, c.sc.host.ID, &store.HostPrograms{Enabled: true, RunAs: []string{}, ConsolePolicy: true, ImagePatterns: []string{}})
+	if row = routesRow(); row["message"] != "the edge is not allowed on pi4; an org admin turns it on on the host's Policy tab" || fixOf(row)["action"] != "allow_edge" {
 		t.Fatalf("routes %#v", row)
 	}
 	setPrograms(t, w, c.sc.host.ID, &store.HostPrograms{Enabled: true, RunAs: []string{}, Edge: &store.HostEdgePolicy{Enabled: true}})
-	if row = routesRow(); row["message"] != "the edge is off on pi4; an org admin turns it on in the console" {
+	if row = routesRow(); row["message"] != "the edge is off on pi4; an org admin turns it on in the console" || fixOf(row)["action"] != "turn_on_edge" || fixOf(row)["host_id"] != hostID {
 		t.Fatalf("routes %#v", row)
 	}
 	if _, err := w.mem.SetHostEdgeEnabled(context.Background(), c.sc.host.ID, true, w.now); err != nil {

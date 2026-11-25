@@ -41,6 +41,7 @@ func Run(_ context.Context, _ []string) int {
 		logger.Error("config", "err", err)
 		return 1
 	}
+	api.SetConsoleOrigin(cfg.ConsoleOrigin)
 	handler, err := newHandler(cfg, api, logger)
 	if err != nil {
 		logger.Error("config", "err", err)

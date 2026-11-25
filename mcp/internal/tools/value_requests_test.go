@@ -97,18 +97,27 @@ func callVR(t *testing.T, cs *mcp.ClientSession, name string, args map[string]an
 	if err != nil {
 		t.Fatal(err)
 	}
+	return callVRResult(res)
+}
+
+// callVRResult splits a result into its text and structured content.
+func callVRResult(res *mcp.CallToolResult) (*mcp.CallToolResult, string, map[string]any) {
+	var structured map[string]any
+	if res.StructuredContent != nil {
+		raw, _ := json.Marshal(res.StructuredContent)
+		_ = json.Unmarshal(raw, &structured)
+	}
+	return res, textOfResult(res), structured
+}
+
+func textOfResult(res *mcp.CallToolResult) string {
 	text := ""
 	for _, c := range res.Content {
 		if tc, ok := c.(*mcp.TextContent); ok {
 			text += tc.Text
 		}
 	}
-	var structured map[string]any
-	if res.StructuredContent != nil {
-		raw, _ := json.Marshal(res.StructuredContent)
-		_ = json.Unmarshal(raw, &structured)
-	}
-	return res, text, structured
+	return text
 }
 
 var vrArgs = map[string]any{"project_id": vrProject, "set": "services", "key": "STRIPE_API_KEY", "reason": "Checkout needs it"}
@@ -165,39 +174,50 @@ func TestRequestEnvValueOldProtocol(t *testing.T) {
 	}
 }
 
-// TestRequestEnvValueInputRequest: a 2026-07-28 client that declares
-// elicitation.url gets a URL-mode input request (elicitationId = request
-// id); its retry reads the state, creates nothing, and returns the link.
-func TestRequestEnvValueInputRequest(t *testing.T) {
+// TestRequestEnvValueNoInputRequest: a 2026-07-28 client that declares elicitation.url
+// gets the link as text in the first answer, with no URL input request, so
+// a client that would wait for the person never blocks the call (DD 8hp8).
+func TestRequestEnvValueNoInputRequest(t *testing.T) {
+	var got *mcp.ElicitParams
+	cs, seen := vrSessionAt(t, "2026-07-28", urlClient("accept", &got), createdReply)
+	if v := cs.InitializeResult().ProtocolVersion; v != "2026-07-28" {
+		t.Fatalf("protocol %s", v)
+	}
+	res, text, out := callVR(t, cs, "request_env_value", vrArgs)
+	if res.IsError || got != nil {
+		t.Fatalf("error %v elicited %#v: %s", res.IsError, got, text)
+	}
+	if !strings.HasPrefix(text, vrURL+"\n") || out["elicitation"] != elicitNotSupported || out["url"] != vrURL || len(out) != 4 {
+		t.Fatalf("text %s structured %v", text, out)
+	}
+	if calls := seen(); len(calls) != 1 || calls[0].Method != http.MethodPost {
+		t.Fatalf("calls %#v", calls)
+	}
+}
+
+// TestRequestEnvValueLegacyRetry: a retry that carries the requestState and response of
+// an input request an older gateway sent reads the state, creates nothing,
+// and returns the link with the outcome.
+func TestRequestEnvValueLegacyRetry(t *testing.T) {
 	for action, want := range map[string]string{"accept": elicitAccepted, "decline": elicitDeclined, "cancel": elicitCancelled} {
 		t.Run(action, func(t *testing.T) {
-			var got *mcp.ElicitParams
-			cs, seen := vrSessionAt(t, newProtocol, urlClient(action, &got), createdReply)
-			if v := cs.InitializeResult().ProtocolVersion; v != newProtocol {
-				t.Fatalf("protocol %s", v)
+			cs, seen := vrSession(t, nil, createdReply)
+			res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:           "request_env_value",
+				Arguments:      vrArgs,
+				RequestState:   encodeRequestState(createdRequest{RequestID: vrID, URL: vrURL}),
+				InputResponses: mcp.InputResponseMap{fillInputID: &mcp.ElicitResult{Action: action}},
+			})
+			if err != nil || res.IsError {
+				t.Fatalf("%v %v", res, err)
 			}
-			res, text, out := callVR(t, cs, "request_env_value", vrArgs)
-			if res.IsError {
-				t.Fatalf("error %s", text)
-			}
-			if got == nil || got.Mode != "url" || got.URL != vrURL || got.ElicitationID != vrID || got.RequestedSchema != nil {
-				t.Fatalf("elicit params %#v", got)
-			}
-			if !strings.Contains(got.Message, "services.STRIPE_API_KEY") || !strings.Contains(got.Message, "never sees the value") {
-				t.Fatalf("message %q", got.Message)
-			}
+			_, text, out := callVRResult(res)
 			calls := seen()
-			if len(calls) != 2 || calls[0].Method != http.MethodPost || calls[1].Method != http.MethodGet || calls[1].Path != "/v1/value-requests/"+vrID {
+			if len(calls) != 1 || calls[0].Method != http.MethodGet || calls[0].Path != "/v1/value-requests/"+vrID {
 				t.Fatalf("calls %#v", calls)
 			}
-			if out["elicitation"] != want || out["state"] != "pending" || out["url"] != vrURL {
-				t.Fatalf("structured %v", out)
-			}
-			if !strings.Contains(text, vrURL) || !strings.Contains(text, valueRule) || !strings.Contains(text, "is pending; it can be filled until 2026-11-15T10:15:00Z") {
-				t.Fatalf("text %s", text)
-			}
-			if action != "accept" && !strings.Contains(text, "stays open until it expires") {
-				t.Fatalf("text %s", text)
+			if out["elicitation"] != want || out["state"] != "pending" || !strings.HasPrefix(text, vrURL+"\n") {
+				t.Fatalf("structured %v text %s", out, text)
 			}
 		})
 	}
