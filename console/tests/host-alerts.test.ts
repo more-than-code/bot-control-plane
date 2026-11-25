@@ -5,7 +5,7 @@ import { render } from 'svelte/server';
 import HostAlertsSection from '../src/routes/hosts/[id]/HostAlertsSection.svelte';
 import OverviewTab from '../src/routes/hosts/[id]/OverviewTab.svelte';
 import { actions as hostActions, load as hostLoad } from '../src/routes/hosts/[id]/+page.server.ts';
-import { alertSettingsFromForm, DEFAULT_ALERT_SETTINGS } from '../src/lib/host-alerts.ts';
+import { alertSettingsFromForm, alertsStagedFromUrl, DEFAULT_ALERT_SETTINGS } from '../src/lib/host-alerts.ts';
 import { METRIC_SPECS, overviewHref, parseDiskPath, withAvailablePercent } from '../src/lib/host-view.ts';
 import { problemKindOf } from '../src/lib/notifications.ts';
 import { parseAlertSettings, parseHostDisks } from '../src/lib/server/host-alerts.ts';
@@ -145,6 +145,62 @@ describe('Alerts card', () => {
 		const html = render(HostAlertsSection, { props: { settings: null, canEdit: true, loadMessage: 'The API is unavailable.' } }).body;
 		assert.match(html, /The API is unavailable\./);
 		assert.doesNotMatch(html, /<form/);
+	});
+});
+
+describe('alert deep link (api-v1 v1.60)', () => {
+	const base = { ...DEFAULT_ALERT_SETTINGS, disk_max_used_percent: 95 };
+	const staged = (q: string) => alertsStagedFromUrl(new URLSearchParams(q), base);
+
+	test('stages only the fields the link names, with default for null', () => {
+		const out = staged('alerts.enabled=off&alerts.disk=default&alerts.cpu=80');
+		assert.deepEqual(out.values, { alerts_enabled: false, mem_min_available_percent: null, disk_max_used_percent: null, cpu_max_busy_percent: 80 });
+		assert.deepEqual(out.changed, ['alerts_enabled', 'disk_max_used_percent', 'cpu_max_busy_percent']);
+		assert.deepEqual(out.changes, ['Alerts on → off', 'Disk used at or above 95 % → Default (90 %)', 'CPU busy at or above Default (90 %) → 80 %']);
+		assert.equal(out.dropped, 0);
+	});
+
+	test('drops out-of-range, unreadable and repeated values; a value equal to the stored one is no change', () => {
+		const out = staged('alerts.enabled=maybe&alerts.mem=4&alerts.cpu=8.5&alerts.disk=99&alerts.disk=98');
+		assert.deepEqual(out.values, base);
+		assert.equal(out.dropped, 4);
+		assert.deepEqual(out.changes, []);
+		assert.deepEqual(staged('alerts.disk=95').changed, []);
+		assert.deepEqual(staged('').values, base);
+	});
+
+	test('an admin sees the staged values, the notice and a Save that drops the link', () => {
+		setPageUrl(`http://console.example/hosts/${HOST_ID}?alerts.enabled=off&alerts.disk=99#alerts`);
+		const html = render(HostAlertsSection, { props: { settings: base, canEdit: true } }).body;
+		assert.match(html, /data-alerts-staged/);
+		assert.match(html, /A link filled in this change: Alerts on → off; Disk used at or above 95 % → 99 %\. Nothing is saved until you tap Save\./);
+		assert.match(html, /name="disk_max_used_percent"[^>]*value="99"|value="99"[^>]*name="disk_max_used_percent"/);
+		assert.match(html, /aria-checked="false"/);
+		assert.equal((html.match(/data-alerts-changed/g) ?? []).length, 2);
+		assert.match(html, /action="\?\/saveAlerts"/);
+		assert.doesNotMatch(html, /action="[^"]*alerts\.disk/);
+	});
+
+	test('a bad value in the link is reported and left out', () => {
+		setPageUrl(`http://console.example/hosts/${HOST_ID}?alerts.mem=1`);
+		const html = render(HostAlertsSection, { props: { settings: base, canEdit: true } }).body;
+		assert.match(html, /1 value in the link was not valid and was left out\./);
+		assert.doesNotMatch(html, /data-alerts-staged/);
+	});
+
+	test('someone who cannot save sees the stored values and one line, nothing staged', () => {
+		setPageUrl(`http://console.example/hosts/${HOST_ID}?alerts.enabled=off`);
+		const html = render(HostAlertsSection, { props: { settings: base, canEdit: false } }).body;
+		assert.doesNotMatch(html, /<form/);
+		assert.match(html, /This link proposes an alert change; an org owner or admin can apply it\./);
+		assert.match(html, /<dd>On<\/dd>/);
+		assert.doesNotMatch(html, /data-alerts-staged/);
+	});
+
+	test('without a link nothing is staged', () => {
+		setPageUrl(`http://console.example/hosts/${HOST_ID}`);
+		const html = render(HostAlertsSection, { props: { settings: base, canEdit: false } }).body;
+		assert.doesNotMatch(html, /data-alerts-link-readonly/);
 	});
 });
 

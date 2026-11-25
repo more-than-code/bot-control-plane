@@ -57,6 +57,30 @@ test('the confirm dialog posts the hidden fields', () => {
 	assert.equal(attr(fields[0] ?? '', 'value'), hidden[0]?.value);
 });
 
+test('the confirm dialog posts repeated hidden names, such as a host policy with two images and two projects', () => {
+	setPageUrl('http://console.example/hosts/1?tab=policy');
+	const policy = [
+		{ name: 'base_hash', value: 'abc' },
+		{ name: 'edge', value: '1' },
+		{ name: 'image', value: 'ghcr.io/acme/*' },
+		{ name: 'image', value: 'docker.io/library/nginx' },
+		{ name: 'project', value: 'lab' },
+		{ name: 'project', value: 'shop' }
+	];
+	const body = decode(
+		render(ConfirmForm, {
+			props: { id: 'apply-policy', action: '?tab=policy&/applyPolicy', confirmLabel: 'Apply', destructive: false, hidden: policy }
+		}).body
+	);
+	assert.deepEqual(
+		inputTags(body).map((tag) => ({ name: attr(tag, 'name'), value: attr(tag, 'value') })),
+		policy
+	);
+	// Svelte's client each block throws on a repeated key; server render does not check, so pin the key here.
+	const source = readFileSync(new URL('../src/lib/components/ConfirmForm.svelte', import.meta.url), 'utf8');
+	assert.equal(/\{#each hidden as field \(field\.name\)\}/.test(source), false);
+});
+
 test('type-to-confirm stays disabled until the text matches', () => {
 	assert.equal(typeToConfirmMatches('', 'Lab'), false);
 	assert.equal(typeToConfirmMatches('Lab', 'Lab'), true);

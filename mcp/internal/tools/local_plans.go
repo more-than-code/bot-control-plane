@@ -12,8 +12,7 @@ import (
 
 // localPlans holds confirmations this MCP server keeps itself, for writes
 // the API accepts directly from a delegated session: upgrade_agent (api-v1
-// v1.48, pendingUpgrades) and set_alert_settings (v1.49,
-// pendingAlertSettings). A plan is bound to the caller (the SHA-256 of the
+// v1.48, pendingUpgrades). A plan is bound to the caller (the SHA-256 of the
 // caller's token, from auth.CallerKeyFromContext) and the idempotency key,
 // waits the store's TTL for confirm, and is used once. A restart of the MCP
 // server drops pending plans; the API holds no state for them.

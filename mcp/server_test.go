@@ -178,6 +178,7 @@ func TestTools(t *testing.T) {
 		"list_problems":      true,
 		"deploy_history":     true,
 		"get_alert_settings": true,
+		"set_alert_settings": true,
 	}
 	live := map[string]bool{
 		"host_snapshot": true, "probe_service": true, "host_disk_usage": true,
@@ -206,10 +207,10 @@ func TestTools(t *testing.T) {
 				}
 			}
 		case tool.Name == "set_alert_settings":
-			if readOnly || open {
+			if !readOnly || open {
 				t.Errorf("%s readOnly=%v openWorld=%v", tool.Name, readOnly, open)
 			}
-			for _, phrase := range []string{"Nothing changes until confirm", "user agrees", "get_alert_settings", "Does not contact"} {
+			for _, phrase := range []string{"Only the person can change them, in the console", "changes nothing", "console_url", "no confirm step", "get_alert_settings", "Does not contact"} {
 				if !strings.Contains(tool.Description, phrase) {
 					t.Errorf("%s description %q missing %q", tool.Name, tool.Description, phrase)
 				}
