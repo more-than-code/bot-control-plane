@@ -139,37 +139,34 @@ func TestAlertSettingsValidationAndAudit(t *testing.T) {
 	mustHTTP(t, code, env, http.StatusConflict, "conflict", "the host is revoked")
 }
 
-// TestAlertSettingsDelegated: the API keeps no plan for alert settings (the
-// MCP server holds the confirm step), so an MCP-delegated org owner's PUT
-// stores at once and is audited via mcp; a delegated project admin is
-// refused; delegated reads are allowed; an idempotency_key is not part of
-// the body.
+// TestAlertSettingsDelegated (api-v1 v1.60): changing alert settings is
+// console only. An MCP-delegated org owner's PUT is refused before the
+// handler, stores nothing and is audited as delegated.denied; delegated
+// reads stay allowed.
 func TestAlertSettingsDelegated(t *testing.T) {
 	fx := newAccessFixture(t)
 	w := fx.w
 	path := fx.hostPath("/alert-settings")
-	tok := tokenKind(t, w, fx.users[actOwnerOwner].ID, store.KindDelegated)
-	code, env := w.do(tok, http.MethodPut, path, `{"alerts_enabled":true,"disk_max_used_percent":95,"idempotency_key":"k"}`)
-	mustHTTP(t, code, env, http.StatusBadRequest, "bad_request", "invalid json")
-	code, env = w.do(tok, http.MethodPut, path, `{"alerts_enabled":true,"mem_min_available_percent":null,"disk_max_used_percent":95,"cpu_max_busy_percent":null}`)
-	mustHTTP(t, code, env, http.StatusOK, "ok", "ok")
-	if p := objectPayload(t, env); p["disk_max_used_percent"] != float64(95) || p["alerts_enabled"] != true {
-		t.Fatalf("payload %v", p)
-	}
-	if s, _ := w.mem.GetHostAlertSettings(context.Background(), fx.sc.host.ID); s.DiskMaxUsedPercent == nil || *s.DiskMaxUsedPercent != 95 {
-		t.Fatalf("stored %+v", s)
-	}
-	rows := alertRows(w)
-	if len(rows) != 1 || rows[0].Via != audit.ViaMCP || rows[0].Decision != audit.DecisionAllowed {
-		t.Fatalf("audit %+v", rows)
-	}
-	deployAdmin := tokenKind(t, w, fx.users[actDeployAdmin].ID, store.KindDelegated)
-	code, env = w.do(deployAdmin, http.MethodPut, path, `{"alerts_enabled":false}`)
+	owner := fx.users[actOwnerOwner].ID
+	tok := tokenKind(t, w, owner, store.KindDelegated)
+	code, env := w.do(tok, http.MethodPut, path, `{"alerts_enabled":false,"mem_min_available_percent":null,"disk_max_used_percent":99,"cpu_max_busy_percent":null}`)
 	mustHTTP(t, code, env, http.StatusForbidden, "forbidden", "forbidden")
-	if s, _ := w.mem.GetHostAlertSettings(context.Background(), fx.sc.host.ID); !s.AlertsEnabled {
-		t.Fatal("refused delegated write stored")
+	if s, _ := w.mem.GetHostAlertSettings(context.Background(), fx.sc.host.ID); !s.AlertsEnabled || s.DiskMaxUsedPercent != nil {
+		t.Fatalf("refused delegated write stored %+v", s)
 	}
-	assertNoDelegatedDenied(t, w)
+	if rows := alertRows(w); len(rows) != 0 {
+		t.Fatalf("alert audit rows %+v", rows)
+	}
+	var denied []store.AuditEntry
+	for _, row := range w.mem.AllAudits() {
+		if row.Action == audit.ActionDelegatedDenied {
+			denied = append(denied, row)
+		}
+	}
+	if len(denied) != 1 {
+		t.Fatalf("delegated.denied rows %d", len(denied))
+	}
+	assertDelegatedDenied(t, denied[0], owner, "PUT /v1/hosts/{id}/alert-settings")
 	code, env = w.do(tok, http.MethodGet, path, "")
 	mustHTTP(t, code, env, http.StatusOK, "ok", "ok")
 	code, env = w.do(tok, http.MethodGet, fx.hostPath("/disks"), "")

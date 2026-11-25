@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { HostAlertSettings } from '$lib/api-types';
-	import { ALERT_FIELDS, alertValueText } from '$lib/host-alerts';
+	import { ALERT_FIELDS, ALERT_LINK_KEYS, alertsStagedFromUrl, alertValueText, hasAlertLink } from '$lib/host-alerts';
 	import { toastAlertsSaved } from '$lib/success-toast';
 	import { actionUrlFrom } from '$lib/url';
 	import { Button } from '$lib/components/ui/button';
@@ -14,6 +14,7 @@
 	/**
 	 * Resource alerts (api-v1 v1.49 item 3): org owners and admins edit; anyone else who sees the host reads them.
 	 * An empty number means the default. The API checks the ranges and the role again.
+	 * An MCP deep link (api-v1 v1.60) stages a change through `alerts.*`; nothing is saved until the person taps Save.
 	 */
 	let {
 		settings,
@@ -24,16 +25,20 @@
 
 	const ERROR_ID = 'alerts-error';
 	let saving = $state(false);
-	// The switch starts from the stored value and follows it only when that value changes (a save, another
-	// admin), so the 30 s Overview refresh, which hands in a new object, keeps an unsaved switch as it is.
+	const linked = $derived(hasAlertLink(page.url.searchParams));
+	// The stored values plus what a deep link stages; only for someone who can save them.
+	const staged = $derived(settings && canEdit && linked ? alertsStagedFromUrl(page.url.searchParams, settings) : null);
+	const shown = $derived(staged?.values ?? settings);
+	// The switch starts from the shown value and follows it only when that value changes (a save, another
+	// admin, a new link), so the 30 s Overview refresh, which hands in a new object, keeps an unsaved switch as it is.
 	// svelte-ignore state_referenced_locally
-	let enabled = $state(settings?.alerts_enabled ?? true);
+	let enabled = $state(shown?.alerts_enabled ?? true);
 	// svelte-ignore state_referenced_locally
-	let storedEnabled = settings?.alerts_enabled ?? true;
+	let shownEnabled = shown?.alerts_enabled ?? true;
 	$effect(() => {
-		const next = settings?.alerts_enabled ?? true;
-		if (next !== storedEnabled) {
-			storedEnabled = next;
+		const next = shown?.alerts_enabled ?? true;
+		if (next !== shownEnabled) {
+			shownEnabled = next;
 			enabled = next;
 		}
 	});
@@ -51,10 +56,18 @@
 	{/if}
 	{#if loadMessage}
 		<Notice kind="error">{loadMessage}</Notice>
-	{:else if settings && canEdit}
+	{:else if settings && canEdit && shown}
+		{#if staged && staged.changes.length > 0}
+			<div data-alerts-staged>
+				<Notice kind="info">A link filled in this change: {staged.changes.join('; ')}. Nothing is saved until you tap Save.</Notice>
+			</div>
+		{/if}
+		{#if staged && staged.dropped > 0}
+			<Notice kind="error">{staged.dropped === 1 ? '1 value in the link was not valid and was left out.' : `${staged.dropped} values in the link were not valid and were left out.`}</Notice>
+		{/if}
 		<form
 			method="POST"
-			action={actionUrlFrom(page.url, 'saveAlerts')}
+			action={actionUrlFrom(page.url, 'saveAlerts', ALERT_LINK_KEYS)}
 			class="grid max-w-md min-w-0 gap-3"
 			aria-describedby={actionMessage ? `alerts-help ${ERROR_ID}` : 'alerts-help'}
 			use:enhance={({ cancel }) => {
@@ -76,10 +89,14 @@
 			<div class="flex items-center gap-2">
 				<Switch id="alerts-enabled" name="alerts_enabled" value="1" bind:checked={enabled} aria-describedby="alerts-help" />
 				<Label for="alerts-enabled">Alerts</Label>
+				{#if staged?.changed.includes('alerts_enabled')}<span class="text-xs font-medium" data-alerts-changed>from the link</span>{/if}
 			</div>
 			{#each ALERT_FIELDS as field (field.name)}
 				<div class="grid gap-1">
-					<Label for="alerts-{field.name}">{field.label} (%)</Label>
+					<Label for="alerts-{field.name}">
+						{field.label} (%)
+						{#if staged?.changed.includes(field.name)}<span class="text-xs font-medium" data-alerts-changed>from the link</span>{/if}
+					</Label>
 					<Input
 						id="alerts-{field.name}"
 						name={field.name}
@@ -89,7 +106,7 @@
 						max={field.max}
 						step="1"
 						placeholder="Default ({field.fallback})"
-						value={settings[field.name] ?? ''}
+						value={shown[field.name] ?? ''}
 						aria-describedby="alerts-{field.name}-help"
 						aria-invalid={actionMessage && (actionMessage.startsWith(field.label) || actionMessage.startsWith(field.name)) ? 'true' : undefined}
 					/>
@@ -101,6 +118,9 @@
 			</div>
 		</form>
 	{:else if settings}
+		{#if linked}
+			<p class="text-muted-foreground text-sm" data-alerts-link-readonly>This link proposes an alert change; an org owner or admin can apply it.</p>
+		{/if}
 		<dl class="text-sm grid grid-cols-[auto_1fr] gap-x-3 gap-y-1" data-alerts-readonly>
 			<dt class="text-muted-foreground">Alerts</dt>
 			<dd>{settings.alerts_enabled ? 'On' : 'Off'}</dd>

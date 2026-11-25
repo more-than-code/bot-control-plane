@@ -303,9 +303,10 @@ func contractRoutes() []route {
 		// api-v1 v1.48: agent upgrades; the MCP server asks for confirm first.
 		{"POST /v1/hosts/{id}/agent-upgrade", false, (*Server).handleAgentUpgrade, delegatedAllow},
 		{"GET /v1/hosts/{id}/agent-upgrades", false, (*Server).handleAgentUpgrades, delegatedAllow},
-		// api-v1 v1.49 items 3 and 4: alert settings and mounts.
+		// api-v1 v1.49 items 3 and 4: alert settings and mounts. v1.60:
+		// changing them is console only; MCP sends a console link.
 		{"GET /v1/hosts/{id}/alert-settings", false, (*Server).handleAlertSettingsGet, delegatedAllow},
-		{"PUT /v1/hosts/{id}/alert-settings", false, (*Server).handleAlertSettingsPut, delegatedAllow},
+		{"PUT /v1/hosts/{id}/alert-settings", false, (*Server).handleAlertSettingsPut, delegatedDeny},
 		{"GET /v1/hosts/{id}/disks", false, (*Server).handleHostDisks, delegatedAllow},
 		// api-v1 v1.24 items 3 and 4: removed routes answer 410 for one release.
 		{"GET /v1/hosts/{id}/shares", false, (*Server).handleSharesGone, delegatedAllow},

@@ -1,6 +1,6 @@
 # Changing a host's alert settings needs the person's confirm in the console
 
-Status: rev 1, draft for Joe's approval (2026-11-25). api-v1 **v1.60**. No
+Status: rev 1, approved by Joe (merged as PR #30, "merge the PR", 2026-11-25); implemented on this branch. api-v1 **v1.60**. No
 migration, no agent-protocol change. Covers Defect Drainer
 DEF-20261123-upgrade-agent-and-set-alert-settings-let-wxv1, alert settings
 only. Follows the design principle

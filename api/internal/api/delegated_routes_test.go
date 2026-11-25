@@ -76,10 +76,10 @@ var delegatedDenyPatterns = []string{
 	"PUT /v1/orgs/{id}/hosts/{host_id}/files/{name}",
 	"POST /v1/orgs/{id}/hosts/{host_id}/files/{name}/apply",
 	"POST /v1/orgs/{id}/hosts/{host_id}/policy",
+	"PUT /v1/hosts/{id}/alert-settings",
 }
 
 var delegatedAllowPatterns = []string{
-	"PUT /v1/hosts/{id}/alert-settings",
 	"POST /v1/hosts/{id}/snapshot",
 	"POST /v1/hosts/{id}/docker-usage",
 	"POST /v1/services/{id}/probe",
@@ -322,6 +322,13 @@ func TestDelegatedWriteRoutesDenied(t *testing.T) {
 		}},
 		{"POST /v1/orgs/{id}/hosts/{host_id}/policy", http.MethodPost, org + "/hosts/" + host + "/policy", `{"base_hash":"` + strings.Repeat("a", 64) + `","edge":true,"images":[],"projects":[]}`, func(t *testing.T) string {
 			return hostFileSnap(t, w, sc.host.ID)
+		}},
+		{"PUT /v1/hosts/{id}/alert-settings", http.MethodPut, "/v1/hosts/" + host + "/alert-settings", `{"alerts_enabled":false}`, func(t *testing.T) string {
+			s, err := w.mem.GetHostAlertSettings(ctx, sc.host.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return fmt.Sprintf("%v %v", s.AlertsEnabled, s.DiskMaxUsedPercent)
 		}},
 	}
 	if len(cases) != len(delegatedDenyPatterns) {

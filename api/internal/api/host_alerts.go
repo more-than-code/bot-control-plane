@@ -72,10 +72,9 @@ func alertSettingsProblem(in store.HostAlertSettings) string {
 }
 
 // handleAlertSettingsPut is PUT /v1/hosts/{id}/alert-settings: org owners
-// and admins, console sessions and MCP-delegated tokens alike (the route is
-// delegatedAllow). The MCP server keeps the user's confirmation step itself
-// (set_alert_settings, then confirm) and sends this PUT only after it, so
-// the API holds no plan state.
+// and admins in a console session. The route is delegatedDeny (api-v1
+// v1.60): MCP's set_alert_settings returns a console link that stages the
+// change, and the person saves it here.
 func (s *Server) handleAlertSettingsPut(w http.ResponseWriter, r *http.Request) {
 	p, host, ok := s.fetchHost(w, r)
 	if !ok {

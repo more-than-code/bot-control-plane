@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-// api-v1 v1.49 item 6: get_alert_settings, set_alert_settings through
-// confirm, query_metrics path, and the list_problems text.
+// api-v1 v1.49 item 6 and v1.60: get_alert_settings, set_alert_settings as
+// a console link (no confirm), query_metrics path, and the list_problems
+// text.
 
 const asHost = "22222222-2222-4222-8222-222222222222"
 
@@ -34,7 +35,7 @@ var metricsQuery atomic.Value
 
 var asSet = map[string]any{
 	"host_id": asHost, "alerts_enabled": true, "mem_min_available_percent": 10,
-	"disk_max_used_percent": nil, "cpu_max_busy_percent": nil, "idempotency_key": "as-1",
+	"disk_max_used_percent": nil, "cpu_max_busy_percent": nil,
 }
 
 func TestAlertSettingsTools(t *testing.T) {
@@ -43,52 +44,47 @@ func TestAlertSettingsTools(t *testing.T) {
 	if res.IsError || text != "Alerts on: memory available under 15 % (default), disk at 95 %, CPU at 90 % (default)." || out["disk_max_used_percent"] != float64(95) {
 		t.Fatalf("get %v %q %v", res.IsError, text, out)
 	}
-	// set: a plan kept by this server; the API only gets a host read.
+	// set: reads the host and its settings, proposes, never writes, and
+	// gives no confirmation_id. Without a console origin there is no link.
 	before := len(seen())
 	res, text, out = callVR(t, cs, "set_alert_settings", asSet)
-	id, _ := out["confirmation_id"].(string)
-	if res.IsError || len(id) != 43 || !strings.Contains(text, "Set resource alerts on pi1: memory available under 10 %, disk at 90 % (default), CPU at 90 % (default)") {
+	want := "Proposed for pi1: memory available under 15 % (default) → 10 %; disk at 95 % → 90 % (default). Nothing has changed: ask the person to open this host's Alerts card in the console and make the change there."
+	if res.IsError || text != want || out["confirmation_id"] != nil || out["console_url"] != "" || out["host"] != "pi1" {
 		t.Fatalf("set %v %q %v", res.IsError, text, out)
 	}
+	if ch, _ := out["changes"].([]any); len(ch) != 2 {
+		t.Fatalf("changes %v", out["changes"])
+	}
 	calls := seen()[before:]
-	if len(calls) != 1 || calls[0].Method != http.MethodGet || calls[0].Path != "/v1/hosts/"+asHost {
+	if len(calls) != 2 || calls[0].Path != "/v1/hosts/"+asHost || calls[1].Path != "/v1/hosts/"+asHost+"/alert-settings" {
 		t.Fatalf("set calls %#v", calls)
 	}
-	// A wrong key keeps the plan and sends nothing.
-	before = len(seen())
-	if res, text, _ := callVR(t, cs, "confirm", map[string]any{"confirmation_id": id, "idempotency_key": "other"}); !res.IsError || !strings.Contains(text, "idempotency_key does not match") {
-		t.Fatalf("wrong key %q", text)
+	for _, c := range calls {
+		if c.Method != http.MethodGet {
+			t.Fatalf("set sent %s %s", c.Method, c.Path)
+		}
 	}
-	if len(seen()) != before {
-		t.Fatal("wrong key reached the API")
+	// An agent that still sends idempotency_key is not refused.
+	withKey := map[string]any{"idempotency_key": "as-1"}
+	for k, v := range asSet {
+		withKey[k] = v
 	}
-	// confirm sends the PUT with the four fields only.
-	res, text, out = callVR(t, cs, "confirm", map[string]any{"confirmation_id": id, "idempotency_key": "as-1"})
-	if res.IsError || text != "Alerts on: memory available under 10 %, disk at 90 % (default), CPU at 90 % (default)." || out["mem_min_available_percent"] != float64(10) {
-		t.Fatalf("confirm %v %q %v", res.IsError, text, out)
+	if res, _, _ := callVR(t, cs, "set_alert_settings", withKey); res.IsError {
+		t.Fatal("idempotency_key refused")
 	}
-	calls = seen()
-	put := calls[len(calls)-1]
-	var body map[string]any
-	if err := json.Unmarshal([]byte(put.Body), &body); err != nil || put.Method != http.MethodPut || put.Path != "/v1/hosts/"+asHost+"/alert-settings" ||
-		body["mem_min_available_percent"] != float64(10) || body["alerts_enabled"] != true || body["disk_max_used_percent"] != nil || len(body) != 4 {
-		t.Fatalf("put %#v", put)
-	}
-	// Used once: a second confirm is not this server's plan any more and goes to the API.
-	res, _, _ = callVR(t, cs, "confirm", map[string]any{"confirmation_id": id, "idempotency_key": "as-1"})
-	if !res.IsError {
-		t.Fatal("second confirm succeeded")
-	}
-	if last := seen()[len(seen())-1]; last.Method != http.MethodPost || !strings.HasPrefix(last.Path, "/v1/confirmations/") {
-		t.Fatalf("second confirm %#v", last)
+	// The same settings: nothing to change, no link.
+	same := map[string]any{"host_id": asHost, "alerts_enabled": true, "disk_max_used_percent": 95}
+	res, text, out = callVR(t, cs, "set_alert_settings", same)
+	if res.IsError || !strings.HasPrefix(text, "Nothing to change on pi1") || out["console_url"] != nil {
+		t.Fatalf("same %v %q %v", res.IsError, text, out)
 	}
 	// Out of range and missing fields are refused before the API.
 	before = len(seen())
 	for _, args := range []map[string]any{
-		{"host_id": asHost, "alerts_enabled": true, "mem_min_available_percent": 4, "idempotency_key": "as-2"},
-		{"host_id": asHost, "alerts_enabled": true, "cpu_max_busy_percent": 101, "idempotency_key": "as-2"},
-		{"host_id": asHost, "mem_min_available_percent": 10, "idempotency_key": "as-2"},
-		{"host_id": asHost, "alerts_enabled": true},
+		{"host_id": asHost, "alerts_enabled": true, "mem_min_available_percent": 4},
+		{"host_id": asHost, "alerts_enabled": true, "cpu_max_busy_percent": 101},
+		{"host_id": asHost, "mem_min_available_percent": 10},
+		{"host_id": "not-a-uuid", "alerts_enabled": true},
 	} {
 		if res, _, _ := callVR(t, cs, "set_alert_settings", args); !res.IsError {
 			t.Fatalf("accepted %v", args)
@@ -111,29 +107,6 @@ func TestAlertSettingsTools(t *testing.T) {
 	}
 	if res, _, _ := callVR(t, cs, "query_metrics", map[string]any{"host_id": asHost, "metric": "cpu", "path": "/data"}); !res.IsError {
 		t.Fatal("path accepted for cpu")
-	}
-}
-
-// TestAlertSettingsPlanCaller: another caller cannot confirm the plan (it
-// falls through to the API, which does not know the id).
-func TestAlertSettingsPlanCaller(t *testing.T) {
-	owner, ownerSeen := vrSessionCaller(t, "", "owner-token", nil, alertReply)
-	_, _, out := callVR(t, owner, "set_alert_settings", asSet)
-	id, _ := out["confirmation_id"].(string)
-	other, otherSeen := vrSessionCaller(t, "", "other-token", nil, alertReply)
-	if res, _, _ := callVR(t, other, "confirm", map[string]any{"confirmation_id": id, "idempotency_key": "as-1"}); !res.IsError {
-		t.Fatal("another caller confirmed")
-	}
-	for _, c := range otherSeen() {
-		if c.Method == http.MethodPut {
-			t.Fatal("another caller's confirm sent the PUT")
-		}
-	}
-	if res, _, _ := callVR(t, owner, "confirm", map[string]any{"confirmation_id": id, "idempotency_key": "as-1"}); res.IsError {
-		t.Fatal("owner confirm after the other caller failed")
-	}
-	if last := ownerSeen()[len(ownerSeen())-1]; last.Method != http.MethodPut {
-		t.Fatalf("owner confirm %#v", last)
 	}
 }
 
@@ -182,56 +155,81 @@ func TestSummarizeHostResourceProblem(t *testing.T) {
 	}
 }
 
-// TestAlertSettingsOffAndFailures (review items 12 and 14): alerts off keeps
-// the thresholds in the plan and the read summary; a refused or unexpected
-// PUT at confirm is an error, and the plan is used up.
-func TestAlertSettingsOffAndFailures(t *testing.T) {
+// TestAlertSettingsOff: alerts off keeps the thresholds in the read
+// summary; turning them off is a proposal like any other, and a refused
+// settings read is an error with no link.
+func TestAlertSettingsOff(t *testing.T) {
 	off := `{"code":"ok","msg":"ok","payload":{"alerts_enabled":false,"mem_min_available_percent":10,"disk_max_used_percent":null,"cpu_max_busy_percent":null}}`
-	var putStatusCode atomic.Int32
-	putStatusCode.Store(http.StatusOK)
+	var settingsStatus atomic.Int32
+	settingsStatus.Store(http.StatusOK)
 	reply := func(r *http.Request) (int, string) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/hosts/"+asHost:
 			return http.StatusOK, `{"code":"ok","msg":"ok","payload":{"id":"` + asHost + `","name":"pi1"}}`
+		case r.Method == http.MethodGet && settingsStatus.Load() == http.StatusForbidden:
+			return http.StatusForbidden, `{"code":"forbidden","msg":"forbidden","payload":null}`
 		case r.Method == http.MethodGet:
-			return http.StatusOK, off
-		case r.Method == http.MethodPut:
-			switch putStatusCode.Load() {
-			case http.StatusForbidden:
-				return http.StatusForbidden, `{"code":"forbidden","msg":"forbidden","payload":null}`
-			case http.StatusAccepted:
-				return http.StatusAccepted, `{"code":"ok","msg":"ok","payload":{"confirmation_id":"x"}}`
-			}
 			return http.StatusOK, off
 		}
 		return http.StatusNotFound, `{"code":"not_found","msg":"not found","payload":null}`
 	}
-	cs, _ := vrSession(t, nil, reply)
+	cs, seen := vrSession(t, nil, reply)
 	if _, text, _ := callVR(t, cs, "get_alert_settings", map[string]any{"host_id": asHost}); text != "Alerts off for this host; thresholds kept: memory available under 10 %, disk at 90 % (default), CPU at 90 % (default)." {
 		t.Fatalf("off summary %q", text)
 	}
-	args := map[string]any{"host_id": asHost, "alerts_enabled": false, "mem_min_available_percent": 10, "idempotency_key": "off-1"}
-	_, text, out := callVR(t, cs, "set_alert_settings", args)
-	if !strings.Contains(text, "Turn resource alerts off on pi1; thresholds kept: memory available under 10 %, disk at 90 % (default), CPU at 90 % (default)") {
-		t.Fatalf("off plan %q", text)
+	_, text, _ := callVR(t, cs, "set_alert_settings", map[string]any{"host_id": asHost, "alerts_enabled": true, "mem_min_available_percent": 10})
+	if !strings.HasPrefix(text, "Proposed for pi1: alerts off → on.") {
+		t.Fatalf("on plan %q", text)
 	}
-	for _, code := range []int32{http.StatusForbidden, http.StatusAccepted} {
-		putStatusCode.Store(code)
-		_, _, out = callVR(t, cs, "set_alert_settings", args)
-		id, _ := out["confirmation_id"].(string)
-		res, text, _ := callVR(t, cs, "confirm", map[string]any{"confirmation_id": id, "idempotency_key": "off-1"})
-		if !res.IsError {
-			t.Fatalf("status %d: confirm succeeded: %q", code, text)
+	settingsStatus.Store(http.StatusForbidden)
+	if res, text, out := callVR(t, cs, "set_alert_settings", map[string]any{"host_id": asHost, "alerts_enabled": true}); !res.IsError || out["console_url"] != nil {
+		t.Fatalf("refused read %v %q %v", res.IsError, text, out)
+	}
+	for _, c := range seen() {
+		if c.Method != http.MethodGet {
+			t.Fatalf("sent %s %s", c.Method, c.Path)
 		}
-		if code == http.StatusForbidden && !strings.Contains(text, "forbidden") {
-			t.Fatalf("403 text %q", text)
+	}
+	// An alert-settings confirmation id is not this server's plan any more:
+	// confirm asks the API.
+	before := len(seen())
+	if res, _, _ := callVR(t, cs, "confirm", map[string]any{"confirmation_id": strings.Repeat("a", 43), "idempotency_key": "as-1"}); !res.IsError {
+		t.Fatal("unknown confirmation succeeded")
+	}
+	if calls := seen()[before:]; len(calls) != 1 || !strings.HasPrefix(calls[0].Path, "/v1/confirmations/") {
+		t.Fatalf("confirm calls %#v", calls)
+	}
+}
+
+// TestHostAlertsURL: only the fields that change, null as default, and no
+// link without an origin, a host id or a change.
+func TestHostAlertsURL(t *testing.T) {
+	api := linkClient(t, "https://console.example/")
+	n := func(v int) *int { return &v }
+	cur := alertSettings{AlertsEnabled: true, DiskMaxUsedPercent: n(95)}
+	for _, tc := range []struct {
+		to   alertSettings
+		want string
+	}{
+		{alertSettings{AlertsEnabled: false, DiskMaxUsedPercent: n(95)}, "?alerts.enabled=off#alerts"},
+		{alertSettings{AlertsEnabled: true, DiskMaxUsedPercent: n(99)}, "?alerts.disk=99#alerts"},
+		{alertSettings{AlertsEnabled: true}, "?alerts.disk=default#alerts"},
+		{alertSettings{AlertsEnabled: false, MemMinAvailablePercent: n(5), DiskMaxUsedPercent: n(95), CPUMaxBusyPercent: n(100)}, "?alerts.enabled=off&alerts.mem=5&alerts.cpu=100#alerts"},
+		{cur, ""},
+	} {
+		want := tc.want
+		if want != "" {
+			want = "https://console.example/hosts/" + lnHost + want
 		}
-		if code == http.StatusAccepted && !strings.Contains(text, "alert settings response was not usable") {
-			t.Fatalf("202 text %q", text)
+		if got := hostAlertsURL(api, lnHost, cur, tc.to); got != want {
+			t.Errorf("%+v: %q, want %q", tc.to, got, want)
 		}
-		// Used once: the same id now goes to the API, which does not know it.
-		if res, _, _ := callVR(t, cs, "confirm", map[string]any{"confirmation_id": id, "idempotency_key": "off-1"}); !res.IsError {
-			t.Fatal("plan reused")
-		}
+	}
+	off := alertSettings{AlertsEnabled: false}
+	if got := hostAlertsURL(api, "not-a-uuid", cur, off); got != "" {
+		t.Fatalf("bad id %q", got)
+	}
+	if got := hostAlertsURL(linkClient(t, ""), lnHost, cur, off); got != "" {
+		t.Fatalf("no origin %q", got)
 	}
 }
