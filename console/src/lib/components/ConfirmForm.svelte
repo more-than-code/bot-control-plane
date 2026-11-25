@@ -59,7 +59,7 @@
 		};
 	}}
 >
-	{#each hidden as field (field.name)}
+	{#each hidden as field, index (index)}
 		<Input type="hidden" name={field.name} value={field.value} />
 	{/each}
 	{#if typeToConfirm}
