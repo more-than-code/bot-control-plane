@@ -52,3 +52,64 @@ export function alertSettingsFromForm(form: FormData): { ok: true; settings: Hos
 	}
 	return { ok: true, settings };
 }
+
+/** The deep-link parameter of each threshold (api-v1 v1.60); `alerts.enabled` is `on` or `off`. */
+export const ALERT_LINK_PARAMS: Readonly<Record<AlertField, string>> = {
+	mem_min_available_percent: 'alerts.mem',
+	disk_max_used_percent: 'alerts.disk',
+	cpu_max_busy_percent: 'alerts.cpu'
+};
+
+/** Every alert deep-link parameter, dropped from the URL on Save so a reload does not stage again. */
+export const ALERT_LINK_KEYS: readonly string[] = ['alerts.enabled', ...Object.values(ALERT_LINK_PARAMS)];
+
+/** Whether the URL carries any alert deep-link parameter. */
+export function hasAlertLink(params: URLSearchParams): boolean {
+	return ALERT_LINK_KEYS.some((key) => params.has(key));
+}
+
+function onOff(on: boolean): string {
+	return on ? 'on' : 'off';
+}
+
+/**
+ * The change an MCP deep link stages on the Alerts card (api-v1 v1.60): `alerts.enabled=on|off`, and `alerts.mem`,
+ * `alerts.disk`, `alerts.cpu` as a whole number in range or `default`. A missing parameter keeps the stored value; a
+ * repeated, out-of-range or unreadable one is dropped and counted. `changed` names the fields that differ from `base`,
+ * and `changes` says each one as "old → new". The link never saves anything.
+ */
+export function alertsStagedFromUrl(
+	params: URLSearchParams,
+	base: HostAlertSettings
+): { values: HostAlertSettings; changed: Array<AlertField | 'alerts_enabled'>; changes: string[]; dropped: number } {
+	const values: HostAlertSettings = { ...base };
+	const changed: Array<AlertField | 'alerts_enabled'> = [];
+	const changes: string[] = [];
+	let dropped = 0;
+	const enabled = params.getAll('alerts.enabled');
+	if (enabled.length === 1 && (enabled[0] === 'on' || enabled[0] === 'off')) {
+		values.alerts_enabled = enabled[0] === 'on';
+	} else if (enabled.length > 0) {
+		dropped++;
+	}
+	if (values.alerts_enabled !== base.alerts_enabled) {
+		changed.push('alerts_enabled');
+		changes.push(`Alerts ${onOff(base.alerts_enabled)} → ${onOff(values.alerts_enabled)}`);
+	}
+	for (const field of ALERT_FIELDS) {
+		const raw = params.getAll(ALERT_LINK_PARAMS[field.name]);
+		if (raw.length === 0) continue;
+		const text = raw.length === 1 ? raw[0].trim() : '';
+		const value = text === 'default' ? null : /^\d{1,3}$/.test(text) ? Number(text) : NaN;
+		if (!alertFieldValid(field, value)) {
+			dropped++;
+			continue;
+		}
+		values[field.name] = value;
+		if (value !== base[field.name]) {
+			changed.push(field.name);
+			changes.push(`${field.label} ${alertValueText(base, field)} → ${alertValueText(values, field)}`);
+		}
+	}
+	return { values, changed, changes, dropped };
+}
