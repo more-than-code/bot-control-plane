@@ -55,7 +55,7 @@ Before: `on_unhealthy` other than `none` requires `spec.healthcheck` → `bad_sp
 After:
 
 1. That rule is removed (the `keep` rule stays). Labels at create (v1.9 item 3) and the supervisor (item 4) are unchanged: they already act on Docker's health, whichever check produced it.
-2. **No-check failure.** In `image_deploy` and in `image_rollback` by pull, for a service with `on_unhealthy` ≠ `none` and no `spec.healthcheck`: after `container_deploy`, the first `container_list` that lists the new container with `health` `null` fails the health wait with reason `the container has no Docker health check, so on_unhealthy can never act: set a healthcheck on the entry or use an image with a HEALTHCHECK`. The failed wait is handled by `on_deploy_failure` exactly as any other (v1.9 item 2, v1.16). Any non-null `health` (`starting`, `healthy`, `unhealthy`) passes this check, and the v1.5 wait continues unchanged.
+2. **No-check failure.** In `image_deploy` and in `image_rollback` by pull, for a service with `on_unhealthy` ≠ `none` and no `spec.healthcheck`: after `container_deploy`, the first `container_list` that lists the new container `running` with `health` `null` fails the health wait (the agent polls until it is listed or the wait ends; a listed container that is not running is left to the normal wait, which names its state, because Docker reports health only for a running container) with reason `the container has no Docker health check, so on_unhealthy can never act: set a healthcheck on the entry or use an image with a HEALTHCHECK`. The failed wait is handled by `on_deploy_failure` exactly as any other (v1.9 item 2, v1.16). Any non-null `health` (`starting`, `healthy`, `unhealthy`) passes this check, and the v1.5 wait continues unchanged.
 3. **Gate:** `hello.programs` gains `"image_healthcheck_policy": true`.
 4. No new helper verb or privilege; `runner.toml` unchanged.
 
@@ -84,13 +84,19 @@ bot-agent:
 ## 6. Rollout and rollback
 
 1. Merge both PRs into dev; release server v0.2.51 and bot-agent v0.2.20.
-2. **Deploy the server first, then `upgrade_agent` on the hosts.** (Amendment 1a, found while implementing: the API reads hello `programs` with unknown fields refused, so an API before v1.63 would store a v0.2.20 agent's programs as disabled and stop its deploys until the API is upgraded. The gate still keeps an old agent safe on a new API.)
+2. **Deploy the server first, then `upgrade_agent` on the hosts.** (Amendment 1a, found while implementing: the API reads hello `programs` with unknown fields refused, and the agent always sends the new key, so an API before v1.63 stores a v0.2.20 agent's programs as disabled. On such a host the old API then refuses deploys and `upgrade_agent`, drops Docker health samples, and leaves `auto_action` frames unacknowledged until the API is upgraded. This is the same constraint `programs.agent_upgrade` (v1.20) had. The gate still keeps an old agent safe on a new API.)
+3. **Never run an API older than v1.63 while any v0.2.20 agent is connected.** Downgrading agents is a host-side step for the Ops session, since `upgrade_agent` only offers the latest version.
 3. On Joe's yes: set us1 `console` back to `on_unhealthy = restart` and redeploy.
 
-Rollback: revert either release, agents first (an older API refuses the new hello key, 1a). An entry saved with restart and no healthcheck then fails the old API's validation on its next save and the old agent's on its next deploy (`bad_spec`), which is the behaviour before this change; running containers keep their labels and the supervisor keeps acting.
+Rollback: revert the agents first, on the hosts (1a), then the API. An entry saved with restart and no healthcheck then fails the old API's validation on its next save and the old agent's on its next deploy (`bad_spec`), which is the behaviour before this change; running containers keep their labels and the supervisor keeps acting.
 
 ## 7. Acceptance
 
 - us1 `console` with no `spec.healthcheck` and `on_unhealthy = restart` saves, deploys, and the supervisor restarts it after it stays `unhealthy` for `unhealthy_after_sec`.
 - An entry on an image with no HEALTHCHECK and no `spec.healthcheck` and `on_unhealthy = restart` fails its deploy with the reason in §3 and keeps the previous container (default `on_deploy_failure = rollback`).
 - A host on bot-agent ≤ v0.2.19 gets `409 unsupported_agent` for such a deploy.
+
+## 8. Notes from implementation (rev 1, amendment 1a)
+
+- The flag is also kept off every Host answer, like `programs.host_network` (v1.50); the 409 itself tells a deployer whether the agent has it.
+- Out of scope, noted for a follow-up: readiness (`check_readiness`) does not report this gate yet; an automatic rollback of an entry with a host env file can bring back `-prev` with env from before a file rotation (already true for a pinned healthcheck before this change).

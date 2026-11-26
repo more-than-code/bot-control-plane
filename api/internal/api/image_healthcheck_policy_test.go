@@ -94,6 +94,21 @@ func TestImageHealthcheckPolicyHTTP(t *testing.T) {
 		t.Fatalf("task health_policy %#v", spec["health_policy"])
 	}
 
+	status, env, _ = postImage(t, w, tok, project, "console", "rollback", host, "c-4", map[string]any{"digest": shaDigest(2)})
+	mustHTTP(t, status, env, http.StatusOK, "ok", "ok")
+
+	// Delegated rollback: confirm re-checks the gate too.
+	status, env, _ = postImage(t, w, delegated, project, "console", "rollback", host, "c-del-rb", map[string]any{"digest": shaDigest(2)})
+	mustHTTP(t, status, env, http.StatusAccepted, "ok", "ok")
+	id, _ = objectPayload(t, env)["confirmation_id"].(string)
+	setPrograms(t, w, sc.host.ID, imageHCPrograms(false))
+	before = log.count()
+	status, env, _ = mustCall(t, w, delegated, http.MethodPost, "/v1/confirmations/"+id, confirmBody("c-del-rb"))
+	mustHTTP(t, status, env, http.StatusConflict, "unsupported_agent", imageHCReason)
+	if log.count() != before {
+		t.Fatal("refused rollback confirm sent a task")
+	}
+
 	// The Host answer never carries the flag.
 	_, _, raw := mustCall(t, w, tok, http.MethodGet, "/v1/hosts/"+host, "")
 	if strings.Contains(raw, "image_healthcheck_policy") {

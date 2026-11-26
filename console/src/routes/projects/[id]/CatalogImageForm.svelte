@@ -804,7 +804,7 @@
 				</Label>
 				{#if draft.healthOnUnhealthy !== 'none'}
 					<p id="{fieldId}-unhealthy-hint" class="text-muted-foreground text-sm">
-						{draft.healthTest.trim() === ''
+						{draft.healthTest.split('\n').every((line) => line === '')
 							? "Uses the image's own HEALTHCHECK. If the image has none, the deploy fails."
 							: 'Uses the Docker health check command above.'}
 					</p>
