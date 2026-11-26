@@ -83,7 +83,7 @@ var policyKeyRe = regexp.MustCompile(`^[a-z_]{1,64}$`)
 // inspects the object. A non-object names health_policy. An unknown key is
 // named when it matches policyKeyRe (rev 2).
 // A bad value names the key. A key whose value is null counts as omitted.
-func decodeHealthPolicy(raw json.RawMessage, kind string, hc *Healthcheck) (*HealthPolicy, error) {
+func decodeHealthPolicy(raw json.RawMessage, kind string) (*HealthPolicy, error) {
 	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
 		return nil, nil
 	}
@@ -123,10 +123,10 @@ func decodeHealthPolicy(raw json.RawMessage, kind string, hc *Healthcheck) (*Hea
 	if p.MaxActionsPerHour, err = decodePolicyInt(obj["max_actions_per_hour"], "health_policy.max_actions_per_hour", minActionsPerHour, maxActionsPerHour); err != nil {
 		return nil, err
 	}
+	// api-v1 v1.63: on_unhealthy acts on Docker's health, from the entry's
+	// healthcheck or else the image's own HEALTHCHECK, so it no longer
+	// needs a healthcheck here. The agent fails a deploy that has neither.
 	eff := p.Effective()
-	if eff.OnUnhealthy != DefaultOnUnhealthy && hc == nil {
-		return nil, fieldErr("health_policy.on_unhealthy needs a healthcheck")
-	}
 	if eff.OnUnhealthy != DefaultOnUnhealthy && eff.OnDeployFailure == "keep" {
 		return nil, fieldErr("health_policy.on_unhealthy cannot be combined with keep")
 	}

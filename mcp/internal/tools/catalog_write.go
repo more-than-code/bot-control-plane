@@ -418,7 +418,8 @@ func validateNetworks(raw json.RawMessage) error {
 
 // validateHealthPolicy checks the local shape of spec.health_policy (api-v1
 // v1.15 item 1). Null means all defaults. All four keys are optional. A job
-// is refused, and on_unhealthy other than none needs a healthcheck object.
+// is refused. on_unhealthy other than none no longer needs a healthcheck
+// object (api-v1 v1.63): the image's own HEALTHCHECK is enough.
 // The spec bytes are still forwarded unchanged when this returns nil.
 func validateHealthPolicy(raw json.RawMessage, spec map[string]json.RawMessage) error {
 	trimmed := bytes.TrimSpace(raw)
@@ -477,9 +478,6 @@ func validateHealthPolicy(raw json.RawMessage, spec map[string]json.RawMessage) 
 			return err
 		}
 	}
-	if unhealthy != "none" && !specHasHealthcheck(spec) {
-		return errors.New("health_policy.on_unhealthy needs a healthcheck")
-	}
 	if keep && unhealthy != "none" {
 		return errors.New("health_policy.on_unhealthy cannot be combined with keep")
 	}
@@ -498,15 +496,6 @@ func safePolicyKey(key string) bool {
 		}
 	}
 	return true
-}
-
-func specHasHealthcheck(spec map[string]json.RawMessage) bool {
-	hc, ok := spec["healthcheck"]
-	if !ok {
-		return false
-	}
-	trimmed := bytes.TrimSpace(hc)
-	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 // validateEnum accepts a JSON string equal to one of the allowed values. The

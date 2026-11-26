@@ -50,16 +50,17 @@ func TestHealthPolicyShape(t *testing.T) {
 		{`{"kind":"service","image":"nginx","health_policy":{"on_deploy_failure":"stop","on_unhealthy":"none"}}`, ""},
 		{`{"image":"nginx","health_policy":{"on_unhealthy":"restart","unhealthy_after_sec":15,"max_actions_per_hour":10}` + hc + `}`, ""},
 		{`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"rollback","unhealthy_after_sec":600,"max_actions_per_hour":1}` + hc + `}`, ""},
-		{`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"restart"}}`, "health_policy.on_unhealthy needs a healthcheck"},
-		{`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"restart"},"healthcheck":null}`, "health_policy.on_unhealthy needs a healthcheck"},
+		// api-v1 v1.63: the image's own HEALTHCHECK is enough.
+		{`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"restart"}}`, ""},
+		{`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"rollback"},"healthcheck":null}`, ""},
 		{`{"kind":"job","image":"nginx","health_policy":{"on_deploy_failure":"keep"}}`, "health_policy applies to services"},
 		// The job rule comes before every other check, as in the API's
 		// decodeHealthPolicy (internal/catalog/health_policy.go:90-92).
 		{`{"kind":"job","image":"nginx","health_policy":{"mode":1}}`, "health_policy applies to services"},
 		{`{"kind":"job","image":"nginx","health_policy":"` + sentinel + `"}`, "health_policy applies to services"},
 		{`{"kind":"job","image":"nginx","health_policy":{"` + sentinel + `":1}}`, "health_policy applies to services"},
-		// keep + on_unhealthy without a healthcheck: the healthcheck rule wins, as in the API (lines 130-135).
-		{`{"kind":"service","image":"nginx","health_policy":{"on_deploy_failure":"keep","on_unhealthy":"restart"}}`, "health_policy.on_unhealthy needs a healthcheck"},
+		// keep + on_unhealthy without a healthcheck is still the keep rule.
+		{`{"kind":"service","image":"nginx","health_policy":{"on_deploy_failure":"keep","on_unhealthy":"restart"}}`, "health_policy.on_unhealthy cannot be combined with keep"},
 		{`{"kind":"service","image":"nginx","health_policy":{"on_deploy_failure":"` + sentinel + `"}}`, "health_policy.on_deploy_failure must be one of rollback, stop, keep"},
 		{`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"reboot"}}`, "health_policy.on_unhealthy must be one of none, restart, rollback"},
 		{`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":null}}`, "health_policy.on_unhealthy must be one of none, restart, rollback"},

@@ -36,6 +36,10 @@ const (
 	// unsupported_agent) for network "host" on a host without
 	// programs.host_network.
 	reasonNoHostNetwork = "this host does not allow host networking (runner.toml host_network_projects)"
+	// reasonNoImageHealthcheck is the api-v1 v1.63 item 2 refusal (409
+	// unsupported_agent) for an agent without
+	// programs.image_healthcheck_policy.
+	reasonNoImageHealthcheck = "this host's agent must be upgraded to use on_unhealthy with the image's own health check"
 	// msgPlanKept is added to a deploy or rollback refusal when its
 	// confirmation was reopened (api-v1 v1.55 item 2). It takes the
 	// plan's expiry as HH:MM UTC.
@@ -255,6 +259,10 @@ func (s *Server) imageMutate(w http.ResponseWriter, r *http.Request, action stri
 		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "unsupported_agent", reasonNoHostNetwork)
 		return
 	}
+	if !imageHealthcheckReady(host, img, action) {
+		s.imageDeny(w, r, p, projectID, host.ID, host.Name, entry.Name, action, "unsupported_agent", reasonNoImageHealthcheck)
+		return
+	}
 	if action == "rollback" && !s.digestAllowed(w, r, entry.ID, host.ID, body.Digest) {
 		return
 	}
@@ -421,6 +429,10 @@ func (s *Server) confirmImage(w http.ResponseWriter, r *http.Request, p principa
 	}
 	if !hostNetworkReady(host, img, c.Action) {
 		s.imageDeny(w, r, p, c.ProjectID, host.ID, host.Name, entry.Name, c.Action, "unsupported_agent", reasonNoHostNetwork)
+		return
+	}
+	if !imageHealthcheckReady(host, img, c.Action) {
+		s.imageDeny(w, r, p, c.ProjectID, host.ID, host.Name, entry.Name, c.Action, "unsupported_agent", reasonNoImageHealthcheck)
 		return
 	}
 	if c.Action == "rollback" && !s.digestAllowed(w, r, entry.ID, host.ID, digest) {
@@ -1403,6 +1415,20 @@ func hostNetworkReady(host store.Host, img catalog.Image, action string) bool {
 		return true
 	}
 	return host.Programs != nil && host.Programs.HostNetwork
+}
+
+// imageHealthcheckReady is the api-v1 v1.63 item 2 gate: a deploy or
+// rollback of a service whose on_unhealthy acts and that has no healthcheck
+// of its own needs the host's hello programs.image_healthcheck_policy (older
+// agents refuse such a spec). Other actions and entries pass.
+func imageHealthcheckReady(host store.Host, img catalog.Image, action string) bool {
+	if action != "deploy" && action != "rollback" {
+		return true
+	}
+	if img.Healthcheck != nil || img.HealthPolicy.Effective().OnUnhealthy == catalog.DefaultOnUnhealthy {
+		return true
+	}
+	return host.Programs != nil && host.Programs.ImageHealthcheckPolicy
 }
 
 func policySupported(host store.Host) bool {

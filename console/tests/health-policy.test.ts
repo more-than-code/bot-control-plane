@@ -303,15 +303,18 @@ describe('health failure policy: form and payload', () => {
 		if (!enumBad.ok) assert.equal(enumBad.field, 'health_policy.on_deploy_failure');
 	});
 
-	test('Restart or Roll back without the Docker health check is a field error', () => {
+	test('Restart or Roll back without the entry health check is accepted (api-v1 v1.63)', () => {
 		for (const action of ['restart', 'rollback'] as const) {
 			const check = imageSpecFromDraft(serviceDraft({ healthOnUnhealthy: action }), undefined, false);
-			assert.equal(check.ok, false, action);
-			if (!check.ok) {
-				assert.equal(check.field, 'health_policy.on_unhealthy');
-				assert.equal(check.message, 'Restart and Roll back need a Docker health check command. Fill in the Command field above.');
+			assert.equal(check.ok, true, action);
+			if (check.ok) {
+				assert.equal(check.spec.healthcheck ?? null, null, action);
+				assert.equal(check.spec.health_policy?.on_unhealthy, action);
 			}
 		}
+		const keepNoCheck = imageSpecFromDraft(serviceDraft({ healthOnDeployFailure: 'keep', healthOnUnhealthy: 'restart' }), undefined, false);
+		assert.equal(keepNoCheck.ok, false);
+		if (!keepNoCheck.ok) assert.equal(keepNoCheck.message, 'Keep running cannot be combined with an automatic action.');
 		const keep = imageSpecFromDraft(withCheck({ healthOnDeployFailure: 'keep', healthOnUnhealthy: 'restart' }), undefined, false);
 		assert.equal(keep.ok, false);
 		if (!keep.ok) {
@@ -654,7 +657,15 @@ describe('health failure policy: edit round trip', { concurrency: false }, () =>
 		assert.deepEqual(fields.health_keep_key, ['on_unhealthy']);
 		// The hint comes before the error slot and describes the select.
 		assert.match(openTagWithId(html, 'catalog-image-web-on-unhealthy'), /aria-describedby="catalog-image-web-unhealthy-hint"/);
-		assert.match(html, /id="catalog-image-web-unhealthy-hint"[^>]*>Needs the Docker health check command above\.</);
+		assert.match(html, /id="catalog-image-web-unhealthy-hint"[^>]*>\s*Uses the Docker health check command above\.\s*</);
+	});
+
+	test('without a Command the hint names the image HEALTHCHECK (api-v1 v1.63)', () => {
+		const draft = serviceDraft({ healthOnUnhealthy: 'restart' });
+		const html = render(CatalogImageForm, {
+			props: { mode: 'create', saveAction: '?/catalogCreate', sets: [], editor: { mode: 'create', name: null, draft, field: null, message: null } }
+		}).body;
+		assert.match(html, /id="catalog-image-new-unhealthy-hint"[^>]*>\s*Uses the image's own HEALTHCHECK\. If the image has none, the deploy fails\.\s*</);
 	});
 
 	test('saving an unchanged edit sends the stored policy', async () => {
@@ -764,8 +775,8 @@ describe('health failure policy: edit round trip', { concurrency: false }, () =>
 	});
 
 	test('the hint precedes the error notice on a refused save', () => {
-		const message = 'Restart and Roll back need a Docker health check command. Fill in the Command field above.';
-		const draft = serviceDraft({ healthOnUnhealthy: 'restart' });
+		const message = 'Keep running cannot be combined with an automatic action.';
+		const draft = serviceDraft({ healthOnDeployFailure: 'keep', healthOnUnhealthy: 'restart' });
 		const html = render(CatalogImageForm, {
 			props: { mode: 'create', saveAction: '?/catalogCreate', sets: [], editor: { mode: 'create', name: null, draft, field: 'health_policy.on_unhealthy', message } }
 		}).body;

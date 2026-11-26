@@ -9,7 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const healthPolicySentence = "spec.health_policy is optional and for services only: on_deploy_failure rollback (default), stop or keep; on_unhealthy none (default), restart or rollback, which needs spec.healthcheck and cannot be combined with on_deploy_failure keep; unhealthy_after_sec (15–600, default 45) and max_actions_per_hour (1–10, default 3)."
+const healthPolicySentence = "spec.health_policy is optional and for services only: on_deploy_failure rollback (default), stop or keep; on_unhealthy none (default), restart or rollback, which acts when Docker reports the container unhealthy (from spec.healthcheck, or else the image's own HEALTHCHECK; a deploy fails if neither exists, and a host whose agent is too old refuses it without spec.healthcheck) and cannot be combined with on_deploy_failure keep; unhealthy_after_sec (15–600, default 45) and max_actions_per_hour (1–10, default 3)."
 
 func TestHealthPolicyCatalogWrite(t *testing.T) {
 	fake := &fakeAPI{token: userToken}
@@ -24,7 +24,6 @@ func TestHealthPolicyCatalogWrite(t *testing.T) {
 		want string
 	}{
 		{"job", map[string]any{"kind": "job", "image": "nginx", "health_policy": map[string]any{}}, "bad_request: health_policy applies to services"},
-		{"no healthcheck", map[string]any{"kind": "service", "image": "nginx", "health_policy": map[string]any{"on_unhealthy": "restart"}}, "bad_request: health_policy.on_unhealthy needs a healthcheck"},
 		{"keep", map[string]any{"kind": "service", "image": "nginx", "healthcheck": hc, "health_policy": map[string]any{"on_deploy_failure": "keep", "on_unhealthy": "rollback"}}, "bad_request: health_policy.on_unhealthy cannot be combined with keep"},
 		{"enum", map[string]any{"kind": "service", "image": "nginx", "health_policy": map[string]any{"on_deploy_failure": sentinel}}, "bad_request: health_policy.on_deploy_failure must be one of rollback, stop, keep"},
 		{"after low", map[string]any{"kind": "service", "image": "nginx", "health_policy": map[string]any{"unhealthy_after_sec": 14}}, "bad_request: health_policy.unhealthy_after_sec must be an integer from 15 to 600"},
@@ -89,6 +88,18 @@ func TestHealthPolicyCatalogWrite(t *testing.T) {
 	})
 	if res.IsError || !strings.Contains(fake.last().Body, `"health_policy":`+string(policyJSON)) {
 		t.Fatalf("update error=%v body %s", res.IsError, fake.last().Body)
+	}
+
+	// api-v1 v1.63: no healthcheck of the entry's own; forwarded as written.
+	imageOwn := map[string]any{"kind": "service", "image": "nginx", "health_policy": map[string]any{"on_unhealthy": "restart"}}
+	res = mustCall(t, cs, "update_catalog_entry", map[string]any{
+		"project_id": projectID, "name": imageEntry, "spec": imageOwn, "idempotency_key": "hp-image",
+	})
+	assertCatalogCall(t, fake, "PUT", "/v1/projects/"+projectID+"/catalog/"+imageEntry, map[string]any{
+		"kind": "image", "spec": imageOwn, "idempotency_key": "hp-image",
+	})
+	if res.IsError {
+		t.Fatalf("image healthcheck update error %q", textOf(t, res))
 	}
 }
 

@@ -163,7 +163,7 @@ func BuildImage(name string, raw []byte, sets SetKeys, files map[string]struct{}
 	if err != nil {
 		return Image{}, err
 	}
-	policy, err := decodeHealthPolicy(fields["health_policy"], kind, hc)
+	policy, err := decodeHealthPolicy(fields["health_policy"], kind)
 	if err != nil {
 		return Image{}, err
 	}

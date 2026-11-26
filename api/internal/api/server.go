@@ -724,13 +724,14 @@ func (s *Server) withUpdateHintAt(h store.Host, last *store.AgentUpgrade, latest
 	allowed := agentUpgradeAllowed(h)
 	// api-v1 v1.44: host files are listed by their own route, never on a
 	// Host; v1.48: nor is programs.agent_upgrade; v1.50: nor is
-	// programs.host_network. Every Host answer goes through here
-	// (hostViews, hostRead).
-	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.HostNetwork || h.Programs.ImagePatterns != nil) {
+	// programs.host_network; v1.63: nor is programs.image_healthcheck_policy.
+	// Every Host answer goes through here (hostViews, hostRead).
+	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.HostNetwork || h.Programs.ImageHealthcheckPolicy || h.Programs.ImagePatterns != nil) {
 		cp := *h.Programs
 		cp.HostFiles = nil
 		cp.AgentUpgrade = false
 		cp.HostNetwork = false
+		cp.ImageHealthcheckPolicy = false
 		// api-v1 v1.51: image patterns only through the policy route.
 		cp.ImagePatterns = nil
 		h.Programs = &cp

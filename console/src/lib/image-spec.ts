@@ -435,21 +435,15 @@ export function isUnhealthyAction(value: unknown): value is HealthUnhealthyActio
  * An enum key is sent when it differs from its default or the stored entry had it, so editing keeps what was stored.
  * With an action, a number is sent when its field is filled in. With Do nothing the numbers are hidden and do
  * nothing, so one is sent only when the stored entry kept it under Do nothing; otherwise sending it would change
- * spec_hash for no change in behaviour. An action needs the Docker health check and cannot be combined with
- * Keep running (api-v1 v1.15 rev 2).
+ * spec_hash for no change in behaviour. An action cannot be combined with Keep running (api-v1 v1.15 rev 2); it
+ * acts on the entry's Docker health check, or else the image's own HEALTHCHECK (api-v1 v1.63).
  */
-function cleanHealthPolicy(
-	draft: ImageDraft,
-	healthcheck: ImageHealthcheck | null
-): { ok: true; policy: ImageHealthPolicy | null } | { ok: false; field: string; message: string } {
+function cleanHealthPolicy(draft: ImageDraft): { ok: true; policy: ImageHealthPolicy | null } | { ok: false; field: string; message: string } {
 	if (!isDeployFailureAction(draft.healthOnDeployFailure)) return fail('health_policy.on_deploy_failure', 'Choose what happens when a deploy fails.');
 	if (!isUnhealthyAction(draft.healthOnUnhealthy)) return fail('health_policy.on_unhealthy', 'Choose what happens when the service turns unhealthy.');
 	const acting = draft.healthOnUnhealthy !== 'none';
 	if (acting && draft.healthOnDeployFailure === 'keep') {
 		return fail('health_policy.on_unhealthy', 'Keep running cannot be combined with an automatic action.');
-	}
-	if (acting && healthcheck == null) {
-		return fail('health_policy.on_unhealthy', 'Restart and Roll back need a Docker health check command. Fill in the Command field above.');
 	}
 	const kept = new Set(draft.healthKeepKeys);
 	let after: number | null | undefined = null;
@@ -650,7 +644,7 @@ export function imageSpecFromDraft(
 	}
 	let healthPolicy: ImageHealthPolicy | null = null;
 	if (workload === 'service') {
-		const policy = cleanHealthPolicy(draft, healthcheck);
+		const policy = cleanHealthPolicy(draft);
 		if (!policy.ok) return policy;
 		healthPolicy = policy.policy;
 	}
