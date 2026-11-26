@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	changelog "github.com/more-than-code/bot-control-plane"
+	"github.com/more-than-code/bot-control-plane/api/internal/agentrelease"
 	"github.com/more-than-code/bot-control-plane/api/internal/agentws"
 	"github.com/more-than-code/bot-control-plane/api/internal/api"
 	"github.com/more-than-code/bot-control-plane/api/internal/audit"
@@ -110,6 +111,17 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	if err != nil {
 		return err
 	}
+	// api-v1 v1.62: the newest verified bot-agent release and its webhook.
+	// A set secret is checked even with the check off, so a bad one is
+	// found before it is turned on.
+	hookSecret, err := config.LoadAgentReleaseWebhookSecret(cfg.AgentReleaseWebhookSecret, cfg.AgentReleaseWebhookSecretFile)
+	if err != nil {
+		return err
+	}
+	var releases *api.AgentReleases
+	if !cfg.AgentReleaseCheckOff {
+		releases = api.NewAgentReleases(agentrelease.New().Check, hookSecret)
+	}
 	pool, err := d.open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -140,6 +152,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		Registry:      registry.NewService(registry.Options{AllowPrivate: cfg.RegistryAllowPrivate}),
 		// api-v1 v1.34: the agent update hint on host reads.
 		LatestAgentVersion: cfg.LatestAgentVersion,
+		AgentReleases:      releases,
 		EdgeTLSIssuer:      cfg.EdgeTLSIssuer,
 		ProblemsOff:        cfg.ProblemsOff,
 		ServerHostID:       cfg.ServerHost,
@@ -175,6 +188,14 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 	// api-v1 v1.50: a deploy result no waiter took settles its row from Postgres.
 	hub.SetLateHook(srv.LateResultHook)
 	go srv.RunAgentUpgrades(ctx)
+	if releases == nil {
+		log.Info("agent release check is off (BOT_API_AGENT_RELEASE_CHECK=off)")
+	} else {
+		if len(releases.WebhookSecret) == 0 {
+			log.Info("agent release webhook is off: BOT_API_AGENT_RELEASE_WEBHOOK_SECRET is not set")
+		}
+		go srv.RunAgentReleaseCheck(ctx)
+	}
 	// api-v1 v1.50: in-flight deploy rows past their deadline become timeout.
 	go srv.RunImageOpSweep(ctx)
 	go srv.RunDomainChecks(ctx)

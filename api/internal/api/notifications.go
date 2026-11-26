@@ -109,7 +109,8 @@ func (s *Server) dateReleasesByFirstServed(ctx context.Context, items []notifica
 // host behind the latest version (migration 0035), so a host checking in
 // does not move its notice back to the top of the bell.
 func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]notification, error) {
-	if s.LatestAgentVersion == "" {
+	latestAll := s.latestAgentVersion()
+	if latestAll == "" {
 		return nil, nil
 	}
 	orgs, err := s.Store.ListUserOrgs(ctx, userID)
@@ -127,7 +128,7 @@ func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]not
 			return nil, err
 		}
 		for _, h := range hosts {
-			v := s.withUpdateHint(h, nil)
+			v := s.withUpdateHintAt(h, nil, latestAll)
 			if !v.UpdateAvailable {
 				continue
 			}
@@ -145,7 +146,7 @@ func (s *Server) hostUpdateNotices(ctx context.Context, userID uuid.UUID) ([]not
 	if len(ids) == 0 {
 		return out, nil
 	}
-	noticed, err := s.Store.NoticeHostUpdates(ctx, ids, s.LatestAgentVersion, s.now())
+	noticed, err := s.Store.NoticeHostUpdates(ctx, ids, latestAll, s.now())
 	if err != nil {
 		return nil, err
 	}
