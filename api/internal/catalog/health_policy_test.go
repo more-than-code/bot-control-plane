@@ -36,8 +36,7 @@ func TestHealthPolicyRules(t *testing.T) {
 		{"low actions", `{"kind":"service","image":"nginx","health_policy":{"max_actions_per_hour":0}}`, "invalid health_policy.max_actions_per_hour"},
 		{"high actions", `{"kind":"service","image":"nginx","health_policy":{"max_actions_per_hour":11}}`, "invalid health_policy.max_actions_per_hour"},
 		{"bool actions", `{"kind":"service","image":"nginx","health_policy":{"max_actions_per_hour":true}}`, "invalid health_policy.max_actions_per_hour"},
-		{"restart without healthcheck", `{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"restart"}}`, "health_policy.on_unhealthy needs a healthcheck"},
-		{"rollback without healthcheck", `{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"rollback"}}`, "health_policy.on_unhealthy needs a healthcheck"},
+		{"keep with restart, no healthcheck", `{"kind":"service","image":"nginx","health_policy":{"on_deploy_failure":"keep","on_unhealthy":"restart"}}`, "health_policy.on_unhealthy cannot be combined with keep"},
 	}
 	for _, tc := range cases {
 		_, err := BuildImage("web", []byte(tc.spec), nil, nil)
@@ -60,6 +59,9 @@ func TestHealthPolicyRules(t *testing.T) {
 		`{"kind":"service","image":"nginx",` + policyHC + `,"health_policy":{"on_unhealthy":"restart","on_deploy_failure":"stop"}}`,
 		`{"kind":"service","image":"nginx",` + policyHC + `,"health_policy":{"on_unhealthy":"none","on_deploy_failure":"keep"}}`,
 		`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":null}}`,
+		// api-v1 v1.63: the image's own HEALTHCHECK is enough.
+		`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"restart"}}`,
+		`{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"rollback"}}`,
 	}
 	for _, spec := range ok {
 		if _, err := BuildImage("web", []byte(spec), nil, nil); err != nil {

@@ -67,6 +67,11 @@ type HostPrograms struct {
 	// 2); absent = false. It gates ImageSpec network "host" (api-v1 v1.50
 	// item 1). The API never puts it on a Host answer.
 	HostNetwork bool `json:"host_network,omitempty"`
+	// ImageHealthcheckPolicy is hello.programs.image_healthcheck_policy
+	// (agent-protocol v1.28 item 3); absent = false. It gates a service whose
+	// on_unhealthy acts and that has no healthcheck of its own (api-v1 v1.63
+	// item 2). The API never puts it on a Host answer.
+	ImageHealthcheckPolicy bool `json:"image_healthcheck_policy,omitempty"`
 	// ConsolePolicy is hello.programs.console_policy (agent-protocol v1.22
 	// item 1, api-v1 v1.51); absent = false. The host's root lets org owners
 	// and admins change edge, images and projects from the console.

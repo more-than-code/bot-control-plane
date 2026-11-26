@@ -1,6 +1,6 @@
 # Spec: restart or roll back on unhealthy with the image's own HEALTHCHECK
 
-Status: rev 1, draft, waiting for Joe's approval. Tier 3 (api-v1 input rule, agent-protocol rule, user-visible editor flow).
+Status: rev 1, approved by Joe on 2026-11-26 ("Approve as written"); amendment 1a (rollout order, §6) waits for Joe's OK. Tier 3 (api-v1 input rule, agent-protocol rule, user-visible editor flow).
 Contracts: **api-v1 v1.63** and **agent-protocol v1.28** (next free numbers on 2026-11-26: api-v1 v1.61 is claimed by open PR #37, v1.62 merged in #44; agent-protocol v1.27 is in bot-agent v0.2.19).
 Defect: Defect Drainer `DEF-20261126-on-unhealthy-restart-refused-when-an-ent-srsy`.
 Repos: bot-control-plane (API, MCP, console) and bot-agent (validation, deploy check, hello gate). One PR per repo, paired.
@@ -83,11 +83,11 @@ bot-agent:
 
 ## 6. Rollout and rollback
 
-1. Merge both PRs into dev; release bot-agent v0.2.20 and server v0.2.51 (order free: the gate keeps an old agent safe, and an old API keeps refusing at save).
-2. `upgrade_agent` on the hosts; deploy the server.
+1. Merge both PRs into dev; release server v0.2.51 and bot-agent v0.2.20.
+2. **Deploy the server first, then `upgrade_agent` on the hosts.** (Amendment 1a, found while implementing: the API reads hello `programs` with unknown fields refused, so an API before v1.63 would store a v0.2.20 agent's programs as disabled and stop its deploys until the API is upgraded. The gate still keeps an old agent safe on a new API.)
 3. On Joe's yes: set us1 `console` back to `on_unhealthy = restart` and redeploy.
 
-Rollback: revert either release. An entry saved with restart and no healthcheck then fails the old API's validation on its next save and the old agent's on its next deploy (`bad_spec`), which is the behaviour before this change; running containers keep their labels and the supervisor keeps acting.
+Rollback: revert either release, agents first (an older API refuses the new hello key, 1a). An entry saved with restart and no healthcheck then fails the old API's validation on its next save and the old agent's on its next deploy (`bad_spec`), which is the behaviour before this change; running containers keep their labels and the supervisor keeps acting.
 
 ## 7. Acceptance
 
