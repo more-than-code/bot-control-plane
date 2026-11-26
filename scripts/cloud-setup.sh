@@ -181,8 +181,10 @@ fi
 enc=$(psql_pg -d postgres -tAc "SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname = '$TEST_DB'")
 [ "$enc" = UTF8 ] || die "database $TEST_DB has encoding $enc, not UTF8; drop it and rerun"
 # roles.sql.example is idempotent and must be the first command of its own
-# session (CREATE EXTENSION timescaledb); psql -f opens a new session.
-run psql_pg -d "$TEST_DB" -f "$ROLES_SQL"
+# session (CREATE EXTENSION timescaledb); psql opens a new session. The file
+# goes in on stdin: postgres may not be able to read the checkout (a GitHub
+# runner's home is mode 750).
+run psql_pg -d "$TEST_DB" -f - <"$ROLES_SQL"
 # The example file sets placeholder passwords; clear them so the only way in
 # is the local trust line above.
 run psql_pg -d "$TEST_DB" -c 'ALTER ROLE deploybot_migrator PASSWORD NULL' -c 'ALTER ROLE deploybot_api PASSWORD NULL'
@@ -242,6 +244,12 @@ GO_BIN=$(command -v go || true)
 if [ -n "$GO_BIN" ]; then
 	for dir in "$REPO" "$(dirname "$REPO")/bot-agent"; do
 		[ -f "$dir/go.mod" ] || continue
+		# A GitHub runner's checkout is not readable by the test user; the
+		# workflow runs the tests as the runner user instead.
+		if ! runuser -u "$TEST_USER" -- test -r "$dir/go.mod"; then
+			say "skipped the Go module download in $dir: $TEST_USER cannot read it"
+			continue
+		fi
 		run runuser -u "$TEST_USER" -- env HOME="$TEST_HOME" PATH="$(dirname "$GO_BIN"):/usr/bin:/bin" \
 			bash -c 'cd "$1" && go mod download' _ "$dir"
 		say "Go modules ready for $TEST_USER in $dir"
