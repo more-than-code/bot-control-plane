@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { createDraftFollower } from '$lib/draft-field';
+	import { untrack } from 'svelte';
 	import { ORG_ERROR_ID } from '$lib/org-view';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
@@ -12,6 +14,14 @@
 	import { Label } from '$lib/components/ui/label';
 
 	let { org, canOwner, message }: { org: Org; canOwner: boolean; message: string | null } = $props();
+
+	// The rename field keeps what was typed across Refresh; it follows the name only when the name changes.
+	let renameDraft = $state(untrack(() => org.name));
+	const followName = createDraftFollower(untrack(() => org.name));
+	$effect(() => {
+		const next = followName(org.name, untrack(() => renameDraft));
+		if (next !== untrack(() => renameDraft)) renameDraft = next;
+	});
 </script>
 
 {#if message}
@@ -27,7 +37,7 @@
 		<form method="POST" action={actionUrlFrom(page.url, 'rename')} class="grid gap-3" use:enhance>
 			<Label class="grid gap-1.5" for="org-rename">
 				Organization name
-				<Input id="org-rename" name="name" value={org.name} required maxlength={80} autocomplete="off" />
+				<Input id="org-rename" name="name" bind:value={renameDraft} required maxlength={80} autocomplete="off" />
 			</Label>
 			<div>
 				<Button type="submit">Rename organization</Button>

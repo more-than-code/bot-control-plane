@@ -50,3 +50,23 @@ test('the project, host and org pages show the Refresh button in their header', 
 		assert.match(source, /<RefreshButton \/>/, file);
 	}
 });
+
+test('a rename draft survives a reload of the same name and follows a changed name', async () => {
+	const { createDraftFollower } = await import('../src/lib/draft-field.ts');
+	const follow = createDraftFollower('daikou');
+	// Refresh loads the same name again: what was typed stays.
+	assert.equal(follow('daikou', 'daikou-prod'), 'daikou-prod');
+	assert.equal(follow('daikou', 'daikou-prod'), 'daikou-prod');
+	// The name changed (a save, someone else's rename): the field shows it.
+	assert.equal(follow('daikou-2', 'daikou-prod'), 'daikou-2');
+	assert.equal(follow('daikou-2', 'typed again'), 'typed again');
+});
+
+test('the project and org rename fields keep their draft across Refresh', () => {
+	for (const file of ['projects/[id]/SettingsSection.svelte', 'orgs/[id]/OrgSettingsSection.svelte']) {
+		const source = readFileSync(new URL(`../src/routes/${file}`, import.meta.url), 'utf8');
+		assert.match(source, /name="name" bind:value=\{renameDraft\}/, file);
+		assert.doesNotMatch(source, /name="name" value=\{(project|org)\.name\}/, file);
+		assert.match(source, /createDraftFollower\(/, file);
+	}
+});
