@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.51 — 2026-11-26
+- On unhealthy, Restart or Roll back now works with the image's own HEALTHCHECK when the entry has no health check command. If the image has none either, the deploy fails and says why. Such a deploy needs bot-agent 0.2.20 on the host.
+- Deploybot finds the latest signed bot-agent release on GitHub by itself, so "Update available" follows new releases with no settings change. `BOT_API_LATEST_AGENT_VERSION` is now a floor. An optional GitHub webhook makes the check immediate; otherwise it runs every 15 minutes.
+- The release workflow now checks each image as the manual build did: same server binary as the release, non-root user, console HEALTHCHECK kept, and the pushed digest is the one that was built.
+- Goes with bot-agent v0.2.20. Deploy this server before upgrading any host to v0.2.20, and do not roll it back below v0.2.51 while hosts run v0.2.20.
+
 ## v0.2.50 — 2026-11-26
 - Changing a host's alert settings needs your confirm in the console. MCP `set_alert_settings` no longer changes anything: it shows the proposed change and a console link that opens the host's Alerts card with the change filled in, and nothing is saved until you tap Save.
 - A deploy the host refused keeps its plan again, so you can confirm it once more after fixing the cause (the database grant it needed was missing).
