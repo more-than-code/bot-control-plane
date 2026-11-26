@@ -35,7 +35,7 @@ A new route, a schema change or a migration is Tier 3 in this Project: write `do
 
 - Add `api/migrations/NNNN_<name>.sql` and its hand-run `NNNN_<name>.down.sql`. `--migrate` applies only the up file. The down file ends by deleting its `app.schema_migrations` row, or says how to.
 - Comments in migration files contain no semicolon and no apostrophe, because `splitSQL` does not skip comments.
-- Grants: the API runs as `deploybot_api`, and the test login owns every table, so a missing grant never fails an ordinary test. Grant explicitly what the API does: `SELECT … FOR UPDATE` needs UPDATE, and `ON CONFLICT DO UPDATE` needs UPDATE on the columns it sets. A newly written column on an older table needs its own column grant (0037 and 0040 fixed two misses).
+- Grants: the API runs as `deploybot_api`, and the test login owns every table, so a missing grant never fails an ordinary test. Grant explicitly what the API does: `SELECT … FOR UPDATE` needs UPDATE, and `ON CONFLICT DO UPDATE` needs UPDATE on the columns it sets. A newly written column on an older table needs its own column grant (0037 fixed a missing UPDATE for `FOR UPDATE`, 0040 a missing column grant).
 - Add a test that runs the new store code as `deploybot_api` through `DEPLOYBOT_TEST_API_DATABASE_URL` (pattern: `TestReopenConfirmationAsAPIRole`, `TestValueRequestsAsAPIRole`).
 - A migration that changes a table an older migration created goes into the down-and-forget helpers (`dropEdgeSchema`, `forgetEdgeMigrations`, `dropProblemsSchema`, `restoreEdgeMigration`).
 - Never apply SQL to pi4, us1 or any shared database. Production migrations are deployed on Joe's yes.

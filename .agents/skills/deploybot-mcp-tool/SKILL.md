@@ -12,7 +12,7 @@ MCP tools act as the signed-in user, through the delegated token only, and call 
 - Privileged steps are the person's, never the agent's: secret values and files, host policy and `runner.toml`, registry and GitHub logins, host access, domains and alert settings. The tool does not do them. It returns `console_url`, a deep link to the exact console page with the change filled in where the page supports it.
 - Build every link in `mcp/internal/tools/links.go` from ids already checked as UUIDs and from query-escaped names. With no `BOT_MCP_CONSOLE_ORIGIN`, a link is "".
 - Do not add tools for org, membership, join-token or host-access writes. The API refuses delegated sessions on those routes.
-- A change that deploys, runs or edits the catalog is a plan first: the tool returns the plan, and `confirm` applies it (`POST /v1/confirmations/{id}`). Include an `idempotency_key` where the API takes one.
+- A change that deploys, runs or edits the catalog is a plan first: the tool returns the plan, and `confirm` applies it: catalog plans through `POST /v1/confirmations/{id}`, plans the MCP server keeps itself (`local_plans.go`, for example `upgrade_agent`) through their own route. Include an `idempotency_key` where the API takes one.
 
 ## Definition
 
