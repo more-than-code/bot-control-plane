@@ -21,9 +21,7 @@ func TestHealthPolicyHTTP(t *testing.T) {
 	tok := w.token(owner.ID)
 	project := sc.project.ID.String()
 
-	status, env, _ := mustCall(t, w, tok, http.MethodPost, "/v1/projects/"+project+"/catalog", `{"name":"bad","kind":"image","spec":{"kind":"service","image":"nginx","health_policy":{"on_unhealthy":"restart"}}}`)
-	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "health_policy.on_unhealthy needs a healthcheck")
-	status, env, _ = mustCall(t, w, tok, http.MethodPost, "/v1/projects/"+project+"/catalog", `{"name":"bad","kind":"image","spec":{"kind":"job","image":"nginx","health_policy":{}}}`)
+	status, env, _ := mustCall(t, w, tok, http.MethodPost, "/v1/projects/"+project+"/catalog", `{"name":"bad","kind":"image","spec":{"kind":"job","image":"nginx","health_policy":{}}}`)
 	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "health_policy applies to services")
 	status, env, _ = mustCall(t, w, tok, http.MethodPost, "/v1/projects/"+project+"/catalog", `{"name":"bad","kind":"image","spec":{"kind":"service","image":"nginx","health_policy":{"max_actions_per_hour":11}}}`)
 	mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", "invalid health_policy.max_actions_per_hour")
@@ -274,7 +272,7 @@ func TestHealthPolicyUpdateHTTP(t *testing.T) {
 		{`{"kind":"image","spec":{"kind":"service","image":"redis",` + policyHealthcheck + `,"health_policy":{"on_unhealthy":"stop"}}}`, "invalid health_policy.on_unhealthy"},
 		{`{"kind":"image","spec":{"kind":"service","image":"redis",` + policyHealthcheck + `,"health_policy":{"on_sick":"restart"}}}`, "unknown field health_policy.on_sick"},
 		{`{"kind":"image","spec":{"kind":"service","image":"redis",` + policyHealthcheck + `,"health_policy":{"on_deploy_failure":"keep","on_unhealthy":"restart"}}}`, "health_policy.on_unhealthy cannot be combined with keep"},
-		{`{"kind":"image","spec":{"kind":"service","image":"redis","health_policy":{"on_unhealthy":"restart"}}}`, "health_policy.on_unhealthy needs a healthcheck"},
+		{`{"kind":"image","spec":{"kind":"service","image":"redis","health_policy":{"on_deploy_failure":"keep","on_unhealthy":"restart"}}}`, "health_policy.on_unhealthy cannot be combined with keep"},
 	} {
 		status, env, _ := mustCall(t, w, tok, http.MethodPut, put, tc.body)
 		mustHTTP(t, status, env, http.StatusBadRequest, "bad_request", tc.msg)

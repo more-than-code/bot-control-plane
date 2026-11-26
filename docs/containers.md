@@ -60,7 +60,7 @@ Targets: `linux/amd64` for us1; `linux/arm64` builds the same way for the Pis.
 
 ## Publish and deploy
 
-The release workflow (`.github/workflows/release.yml`) builds both images for `linux/amd64` and `linux/arm64` twice from the release commit, compares them, pushes them by tag and writes the pushed digests into the release notes. A manual push (the build above, then `podman push --digestfile`) is only a fallback, on Joe's yes. Catalog entries reference `ghcr.io/more-than-code/deploybot-server@sha256:…`, never a tag. The images are public, so hosts need no registry login.
+The release workflow (`.github/workflows/release.yml`) builds both images for `linux/amd64` and `linux/arm64` twice from the release commit and compares them. Before pushing it checks them as the manual build did (`docs/spec-release-image-checks.md`): `scripts/check-images.sh` fails unless every image runs as a user other than root, the console keeps its HEALTHCHECK and the server binary in each platform's image is byte for byte the release binary; then the smoke checks below run on the amd64 server image. It pushes them by tag, checks each pushed digest is the one it built, and writes the digests into the release notes. A manual push (the build above, then `podman push --digestfile`) is only a fallback, on Joe's yes. Catalog entries reference `ghcr.io/more-than-code/deploybot-server@sha256:…`, never a tag. The images are public, so hosts need no registry login.
 
 ## Smoke checks
 

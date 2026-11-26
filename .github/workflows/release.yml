@@ -10,9 +10,11 @@
 #            TimescaleDB test database with 0 skipped, the db package twice
 #            more, console install, check, test (non-root runner user)
 #   build    scripts/release-bundle.sh twice and the two images twice, each
-#            compared byte for byte
+#            compared byte for byte; then scripts/check-images.sh (not root,
+#            console HEALTHCHECK, server binary equal to the bundle's) and
+#            the server smoke checks (--help, health)
 #   publish  creates tag vX.Y.Z on the commit, pushes the images to ghcr.io
-#            by tag, and publishes the GitHub release with the bundle; the
+#            by tag (each pushed digest must be the built one), and publishes the GitHub release with the bundle; the
 #            release text is RELEASE.md plus the pushed image digests, and
 #            the RELEASE.md asset stays as hashed into SHA256SUMS.
 #            Deploying stays Joe's step.
@@ -173,6 +175,27 @@ jobs:
             cmp "$RUNNER_TEMP/$img-a.index.json" "$RUNNER_TEMP/$img-b.index.json"
             mv "$RUNNER_TEMP/$img-a.tar" "images/$img.tar"
           done
+      - name: Check images
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Not root, the console's HEALTHCHECK, and the server binary in each
+          # platform's image equal to the bundle binary (docs/spec-release-image-checks.md).
+          scripts/check-images.sh "v$VERSION" images dist
+          # The smoke checks in docs/containers.md, on the amd64 server image.
+          img=deploybot-server-check:amd64
+          skopeo copy --quiet --override-os linux --override-arch amd64 \
+            oci-archive:images/server.tar "docker-daemon:$img"
+          docker run --rm --network none "$img" --help >/dev/null
+          set +e
+          docker run --rm --network none "$img" health http://127.0.0.1:1/; h1=$?
+          docker run --rm --network none "$img" health http://example.com/; h2=$?
+          set -e
+          if [ "$h1" != 1 ] || [ "$h2" != 2 ]; then
+            echo "::error::health smoke checks exited $h1 and $h2, want 1 and 2"; exit 1
+          fi
+          docker image rm "$img" >/dev/null
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bundle
@@ -226,6 +249,10 @@ jobs:
             ref=$IMAGE_SERVER; [ "$img" = console ] && ref=$IMAGE_CONSOLE
             skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/$img.digest" \
               "oci-archive:images/$img.tar" "docker://$ref:v$VERSION"
+            # The pushed digest is the one the build compared.
+            want=$(tar -xOf "images/$img.tar" index.json | jq -r '.manifests[0].digest')
+            got=$(cat "$RUNNER_TEMP/$img.digest")
+            [ "$got" = "$want" ] || { echo "::error::$img pushed as $got, built as $want"; exit 1; }
             echo "- \`$ref@$(cat "$RUNNER_TEMP/$img.digest")\` (linux/amd64, linux/arm64)" >> "$RUNNER_TEMP/notes.md"
           done
           skopeo logout ghcr.io

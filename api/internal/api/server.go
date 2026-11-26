@@ -50,8 +50,12 @@ type Server struct {
 	// memory (api-v1 v1.39 item 2). Nil records and shows none.
 	GitHubFailures *github.Failures
 	// LatestAgentVersion is BOT_API_LATEST_AGENT_VERSION (X.Y.Z, checked at
-	// start), or empty for no update hint (api-v1 v1.34).
+	// start), or empty. Since api-v1 v1.62 it is the floor under the
+	// verified GitHub release; read latestAgentVersion, not this field.
 	LatestAgentVersion string
+	// AgentReleases is the verified newest bot-agent release and its
+	// webhook (api-v1 v1.62); nil when BOT_API_AGENT_RELEASE_CHECK=off.
+	AgentReleases *AgentReleases
 	// Resolver looks up domain TXT records (api-v1 v1.35 item 1). Nil uses
 	// net.DefaultResolver.
 	Resolver TXTResolver
@@ -134,6 +138,8 @@ type route struct {
 func contractRoutes() []route {
 	return []route{
 		{"GET /health", true, (*Server).handleHealth, delegatedAllow},
+		// api-v1 v1.62: GitHub's signed release events; HMAC, no session.
+		{"POST /hooks/github/agent-release", true, (*Server).handleAgentReleaseWebhook, delegatedAllow},
 		{"GET /.well-known/oauth-authorization-server", true, (*Server).handleOAuthMetadata, delegatedAllow},
 		{"POST /oauth/register", true, (*Server).handleOAuthRegister, delegatedAllow},
 		{"GET /oauth/authorize", true, (*Server).handleOAuthAuthorize, delegatedAllow},
@@ -709,16 +715,23 @@ type hostView struct {
 // false for a revoked host), agent_upgrade_allowed and agent_upgrade, the
 // host's newest upgrade row (last; nil for none).
 func (s *Server) withUpdateHint(h store.Host, last *store.AgentUpgrade) hostView {
+	return s.withUpdateHintAt(h, last, s.latestAgentVersion())
+}
+
+// withUpdateHintAt is withUpdateHint against a latest version the caller
+// read once (api-v1 v1.62).
+func (s *Server) withUpdateHintAt(h store.Host, last *store.AgentUpgrade, latest string) hostView {
 	allowed := agentUpgradeAllowed(h)
 	// api-v1 v1.44: host files are listed by their own route, never on a
 	// Host; v1.48: nor is programs.agent_upgrade; v1.50: nor is
-	// programs.host_network. Every Host answer goes through here
-	// (hostViews, hostRead).
-	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.HostNetwork || h.Programs.ImagePatterns != nil) {
+	// programs.host_network; v1.63: nor is programs.image_healthcheck_policy.
+	// Every Host answer goes through here (hostViews, hostRead).
+	if h.Programs != nil && (h.Programs.HostFiles != nil || h.Programs.AgentUpgrade || h.Programs.HostNetwork || h.Programs.ImageHealthcheckPolicy || h.Programs.ImagePatterns != nil) {
 		cp := *h.Programs
 		cp.HostFiles = nil
 		cp.AgentUpgrade = false
 		cp.HostNetwork = false
+		cp.ImageHealthcheckPolicy = false
 		// api-v1 v1.51: image patterns only through the policy route.
 		cp.ImagePatterns = nil
 		h.Programs = &cp
@@ -728,8 +741,7 @@ func (s *Server) withUpdateHint(h store.Host, last *store.AgentUpgrade) hostView
 		view := upgradeView(*last)
 		v.AgentUpgrade = &view
 	}
-	if s.LatestAgentVersion != "" {
-		latest := s.LatestAgentVersion
+	if latest != "" {
 		v.LatestAgentVersion = &latest
 		v.UpdateAvailable = h.RevokedAt == nil && agentversion.Older(h.AgentVersion, latest)
 	}
@@ -746,12 +758,14 @@ func (s *Server) hostViews(ctx context.Context, hosts []store.Host) ([]hostView,
 		return nil, err
 	}
 	out := make([]hostView, len(hosts))
+	// api-v1 v1.62: one latest version for the whole list.
+	latestAgent := s.latestAgentVersion()
 	for i, h := range hosts {
 		var last *store.AgentUpgrade
 		if row, ok := latest[h.ID]; ok {
 			last = &row
 		}
-		out[i] = s.withUpdateHint(h, last)
+		out[i] = s.withUpdateHintAt(h, last, latestAgent)
 	}
 	return out, nil
 }
