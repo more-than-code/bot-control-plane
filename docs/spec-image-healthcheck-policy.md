@@ -1,6 +1,6 @@
 # Spec: restart or roll back on unhealthy with the image's own HEALTHCHECK
 
-Status: rev 1, approved by Joe on 2026-11-26 ("Approve as written"); amendment 1a (rollout order, §6) waits for Joe's OK. Tier 3 (api-v1 input rule, agent-protocol rule, user-visible editor flow).
+Status: rev 1, approved by Joe on 2026-11-26 ("Approve as written"); amendment 1a (rollout order, §6) approved by Joe on 2026-11-26 ("Yes, API first"). Tier 3 (api-v1 input rule, agent-protocol rule, user-visible editor flow).
 Contracts: **api-v1 v1.63** and **agent-protocol v1.28** (next free numbers on 2026-11-26: api-v1 v1.61 is claimed by open PR #37, v1.62 merged in #44; agent-protocol v1.27 is in bot-agent v0.2.19).
 Defect: Defect Drainer `DEF-20261126-on-unhealthy-restart-refused-when-an-ent-srsy`.
 Repos: bot-control-plane (API, MCP, console) and bot-agent (validation, deploy check, hello gate). One PR per repo, paired.
