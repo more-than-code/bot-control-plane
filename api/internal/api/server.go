@@ -757,12 +757,14 @@ func (s *Server) hostViews(ctx context.Context, hosts []store.Host) ([]hostView,
 		return nil, err
 	}
 	out := make([]hostView, len(hosts))
+	// api-v1 v1.62: one latest version for the whole list.
+	latestAgent := s.latestAgentVersion()
 	for i, h := range hosts {
 		var last *store.AgentUpgrade
 		if row, ok := latest[h.ID]; ok {
 			last = &row
 		}
-		out[i] = s.withUpdateHint(h, last)
+		out[i] = s.withUpdateHintAt(h, last, latestAgent)
 	}
 	return out, nil
 }

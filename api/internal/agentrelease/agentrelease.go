@@ -183,7 +183,8 @@ func (c *Checker) get(ctx context.Context, rawURL string, max int64, accept stri
 
 // Verify checks sigFile (one base64 line of a 64-byte Ed25519 signature,
 // optional trailing newline) over the exact sums bytes under any of keys.
-// An empty key list, or the all-zero placeholder key, verifies nothing.
+// As the helper's VerifyAny does, an empty list, or a list holding the
+// all-zero placeholder or a key of the wrong size, verifies nothing.
 func Verify(keys []ed25519.PublicKey, sums, sigFile []byte) error {
 	line := bytes.TrimSuffix(sigFile, []byte("\n"))
 	line = bytes.TrimSuffix(line, []byte("\r"))
@@ -197,8 +198,10 @@ func Verify(keys []ed25519.PublicKey, sums, sigFile []byte) error {
 	zero := make([]byte, ed25519.PublicKeySize)
 	for _, k := range keys {
 		if len(k) != ed25519.PublicKeySize || bytes.Equal(k, zero) {
-			continue
+			return ErrBadSignature
 		}
+	}
+	for _, k := range keys {
 		if ed25519.Verify(k, sums, sig) {
 			return nil
 		}
@@ -206,10 +209,16 @@ func Verify(keys []ed25519.PublicKey, sums, sigFile []byte) error {
 	return ErrBadSignature
 }
 
-// NamesVersion reports whether sums has the line for
-// bot-agent-v<version>-linux-amd64 (64 lowercase hex characters, two
-// spaces, the name). It binds a signed SHA256SUMS to its tag.
+// NamesVersion reports whether sums has the lines for
+// bot-agent-v<version>-linux-amd64 and -linux-arm64 (64 lowercase hex
+// characters, two spaces, the name). It binds a signed SHA256SUMS to its
+// tag, and to a release that serves both host architectures.
 func NamesVersion(sums []byte, version string) bool {
-	re := regexp.MustCompile(fmt.Sprintf(`(?m)^[0-9a-f]{64}  %s$`, regexp.QuoteMeta("bot-agent-v"+version+"-linux-amd64")))
-	return re.Match(sums)
+	for _, arch := range []string{"amd64", "arm64"} {
+		re := regexp.MustCompile(fmt.Sprintf(`(?m)^[0-9a-f]{64}  %s$`, regexp.QuoteMeta("bot-agent-v"+version+"-linux-"+arch)))
+		if !re.Match(sums) {
+			return false
+		}
+	}
+	return true
 }

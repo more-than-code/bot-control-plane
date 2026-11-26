@@ -110,7 +110,7 @@ func (s *Server) handleAgentUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 	latest := s.latestAgentVersion()
 	refuse := func(code, msg string) {
-		s.auditUpgradeRefused(r.Context(), p, host, code)
+		s.auditUpgradeRefused(r.Context(), p, host, code, latest)
 		writeCode(w, code, msg)
 	}
 	switch {
@@ -206,11 +206,11 @@ func upgradeTaskReason(err error) (reason string, refused bool) {
 }
 
 // auditUpgradeRefused records a refused start after the host gate.
-func (s *Server) auditUpgradeRefused(ctx context.Context, p principal, host store.Host, code string) {
+func (s *Server) auditUpgradeRefused(ctx context.Context, p principal, host store.Host, code, latest string) {
 	row := hostAuditRow(host, nil, audit.ActionHostAgentUpgrade)
 	row.Decision = audit.DecisionDenied
 	row.ErrorCode = &code
-	row.Detail = map[string]any{"host": host.Name, "from": host.AgentVersion, "to": s.latestAgentVersion()}
+	row.Detail = map[string]any{"host": host.Name, "from": host.AgentVersion, "to": latest}
 	s.auditOK(ctx, p, row)
 }
 
@@ -300,15 +300,14 @@ func (s *Server) upgradeCaughtUp(ctx context.Context, hostID uuid.UUID, agentVer
 		s.settleUpgrade(ctx, host, row, []string{store.AgentUpgradeUnknown}, store.AgentUpgradeSucceeded, "", audit.ViaAgent, true)
 		return
 	}
-	if agentVersion == row.To || s.agentCurrent(agentVersion) {
+	if agentVersion == row.To || agentCurrent(agentVersion, s.latestAgentVersion()) {
 		s.resolveProblem(ctx, store.ProblemAgentUpgrade, hostID.String(), "bot-agent on "+host.Name+" is up to date", "bot-agent "+agentVersion+" is running.")
 	}
 }
 
-// agentCurrent reports whether version is the latest release or newer.
-// False when the latest release is not set.
-func (s *Server) agentCurrent(version string) bool {
-	latest := s.latestAgentVersion()
+// agentCurrent reports whether version is latest or newer. False when
+// latest is not a release version.
+func agentCurrent(version, latest string) bool {
 	return agentversion.ValidRelease(latest) && agentversion.Valid(version) && !agentversion.Older(version, latest)
 }
 
@@ -415,6 +414,7 @@ func (s *Server) SweepAgentUpgrades(ctx context.Context) {
 		s.logger().Error("agent upgrade sweep failed")
 		return
 	}
+	latestAgent := s.latestAgentVersion() // api-v1 v1.62: once per sweep
 	for _, p := range open {
 		if p.ResolvedAt != nil || p.HostID == nil {
 			continue
@@ -424,7 +424,7 @@ func (s *Server) SweepAgentUpgrades(ctx context.Context) {
 		switch {
 		case gone:
 			s.resolveProblem(ctx, store.ProblemAgentUpgrade, p.Subject, "", "No longer checked: the host was revoked.")
-		case err == nil && s.agentCurrent(host.AgentVersion):
+		case err == nil && agentCurrent(host.AgentVersion, latestAgent):
 			// Review M1 b: the host caught up, by Deploybot or by hand.
 			s.resolveProblem(ctx, store.ProblemAgentUpgrade, p.Subject, "bot-agent on "+host.Name+" is up to date", "bot-agent "+host.AgentVersion+" is running.")
 		}

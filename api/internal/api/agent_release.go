@@ -40,6 +40,9 @@ type AgentReleases struct {
 
 	checked atomic.Pointer[string]
 	ring    chan struct{}
+	// minGap is the least time between two checks; 0 is
+	// agentReleaseMinGap. Tests shorten it.
+	minGap time.Duration
 
 	mu        sync.Mutex
 	failing   bool
@@ -84,6 +87,9 @@ func (a *AgentReleases) Ring() {
 func (s *Server) latestAgentVersion() string {
 	floor := s.LatestAgentVersion
 	checked := s.AgentReleases.Checked()
+	if !agentversion.ValidRelease(floor) {
+		floor = ""
+	}
 	switch {
 	case !agentversion.ValidRelease(checked):
 		return floor
@@ -96,6 +102,14 @@ func (s *Server) latestAgentVersion() string {
 	}
 }
 
+// pollInterval is 15 minutes, or 60 with a webhook secret.
+func (a *AgentReleases) pollInterval() time.Duration {
+	if len(a.WebhookSecret) > 0 {
+		return agentReleasePollWebhook
+	}
+	return agentReleasePoll
+}
+
 // RunAgentReleaseCheck checks at start, then every 15 minutes (hourly with
 // a webhook secret) with up to 60 s of jitter, and when the webhook rings,
 // at most once per 30 s. It returns when ctx ends.
@@ -104,13 +118,14 @@ func (s *Server) RunAgentReleaseCheck(ctx context.Context) {
 	if a == nil {
 		return
 	}
-	interval := agentReleasePoll
-	if len(a.WebhookSecret) > 0 {
-		interval = agentReleasePollWebhook
+	interval := a.pollInterval()
+	gap := a.minGap
+	if gap == 0 {
+		gap = agentReleaseMinGap
 	}
 	var last time.Time
 	for {
-		if wait := agentReleaseMinGap - time.Since(last); !last.IsZero() && wait > 0 {
+		if wait := gap - time.Since(last); !last.IsZero() && wait > 0 {
 			select {
 			case <-ctx.Done():
 				return
@@ -170,6 +185,14 @@ func (s *Server) handleAgentReleaseWebhook(w http.ResponseWriter, r *http.Reques
 		s.handleNotFound(w, r)
 		return
 	}
+	// A delivery with no well-formed signature header is refused before
+	// the body is read.
+	sigHeader := r.Header.Get("X-Hub-Signature-256")
+	if !hubSignatureForm(sigHeader) {
+		s.countBadWebhook()
+		writeCode(w, "unauthorized", "unauthorized")
+		return
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, agentReleaseWebhookMax+1))
 	if err != nil {
 		writeCode(w, "bad_request", "unreadable body")
@@ -179,7 +202,7 @@ func (s *Server) handleAgentReleaseWebhook(w http.ResponseWriter, r *http.Reques
 		write(w, http.StatusRequestEntityTooLarge, "bad_request", "body too large", nil)
 		return
 	}
-	if !validHubSignature(a.WebhookSecret, body, r.Header.Get("X-Hub-Signature-256")) {
+	if !validHubSignature(a.WebhookSecret, body, sigHeader) {
 		s.countBadWebhook()
 		writeCode(w, "unauthorized", "unauthorized")
 		return
@@ -199,6 +222,12 @@ func (s *Server) handleAgentReleaseWebhook(w http.ResponseWriter, r *http.Reques
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
+
+var hubSigRe = regexp.MustCompile(`^sha256=[0-9a-f]{64}$`)
+
+// hubSignatureForm reports whether header looks like GitHub's
+// X-Hub-Signature-256 (lowercase hex), before any body is read.
+func hubSignatureForm(header string) bool { return hubSigRe.MatchString(header) }
 
 // validHubSignature checks GitHub's X-Hub-Signature-256: "sha256=" and the
 // hex HMAC-SHA256 of body under secret, compared in constant time.

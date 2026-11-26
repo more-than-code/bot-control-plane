@@ -115,8 +115,9 @@ The rest of this spec assumes the ★ options.
    bot-agent `internal/release.PublicKeys`: Joe's offline key and the CI key,
    same order, same comment). An empty list or the all-zero key refuses
    everything.
-4. `SHA256SUMS` must have a line for `bot-agent-v<V>-linux-amd64` (64 hex
-   characters, two spaces, the name). This binds the signed file to the tag,
+4. `SHA256SUMS` must have the lines for `bot-agent-v<V>-linux-amd64` and
+   `bot-agent-v<V>-linux-arm64` (64 hex characters, two spaces, the name;
+   both architectures, review finding S3). This binds the signed file to the tag,
    so a signed `SHA256SUMS` of an older release uploaded under a newer tag is
    refused.
 
@@ -166,7 +167,9 @@ itself.
   Never logged, never in an answer. Empty, or `BOT_API_AGENT_RELEASE_CHECK=off`:
   the route answers `404 not_found` as if it did not exist.
 - **Route:** `POST /hooks/github/agent-release`, outside `/v1` and outside
-  session auth (GitHub has no Deploybot login). Body read up to 1 MiB, else
+  session auth (GitHub has no Deploybot login). A missing or malformed
+  `X-Hub-Signature-256` (not `sha256=` and 64 lowercase hex) is `401`
+  before the body is read (review finding S2). Body read up to 1 MiB, else
   `413`. The `X-Hub-Signature-256` header must be `sha256=` and the
   HMAC-SHA256 of the exact body under the secret, compared in constant
   time; a missing or wrong signature answers `401` and is counted, not
@@ -244,7 +247,13 @@ every bundle itself.
   holds no state, reads no payload field, answers before the check runs,
   and refuses an unsigned body before parsing it.
 - Downgrade by D3 only lowers what is offered; the helper never installs a
-  version that is not newer than the installed one.
+  version that is not newer than the installed one. Review finding S1 noted
+  that someone with write access to the bot-agent repository but no signing
+  key could mark an older signed release latest, so hosts below it would be
+  offered that older (still signed, still newer for them) release and the
+  newest would stop being offered. Kept as approved in D3: it is the
+  phone-friendly hold-back, the same person could delete releases anyway,
+  and no host moves backwards.
 
 ## 7. Alternatives considered
 

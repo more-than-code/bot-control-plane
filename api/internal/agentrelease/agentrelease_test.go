@@ -64,6 +64,7 @@ func sumsFor(version string) string {
 	h := strings.Repeat("ab", 32)
 	return h + "  bot-agent-runner-v" + version + "-linux-amd64\n" +
 		h + "  bot-agent-v" + version + "-linux-amd64\n" +
+		h + "  bot-agent-v" + version + "-linux-arm64\n" +
 		h + "  install.sh\n"
 }
 
@@ -169,6 +170,14 @@ func TestVerifyNoKeysOrPlaceholder(t *testing.T) {
 	if Verify([]ed25519.PublicKey{make([]byte, ed25519.PublicKeySize)}, sums, sig) == nil {
 		t.Fatal("placeholder verified")
 	}
+	// As the helper: a placeholder or a bad key anywhere refuses the list.
+	pub := priv.Public().(ed25519.PublicKey)
+	if Verify([]ed25519.PublicKey{make([]byte, ed25519.PublicKeySize), pub}, sums, sig) == nil {
+		t.Fatal("list with a placeholder verified")
+	}
+	if Verify([]ed25519.PublicKey{pub[:31], pub}, sums, sig) == nil {
+		t.Fatal("list with a short key verified")
+	}
 	if Verify([]ed25519.PublicKey{priv.Public().(ed25519.PublicKey)}, sums, []byte(strings.TrimSuffix(string(sig), "\n")+"\r\n")) != nil {
 		t.Fatal("CRLF sig refused")
 	}
@@ -183,6 +192,10 @@ func TestNamesVersion(t *testing.T) {
 		if NamesVersion(sums, v) {
 			t.Fatalf("named %s", v)
 		}
+	}
+	noArm := strings.ReplaceAll(string(sums), "bot-agent-v0.2.19-linux-arm64", "other")
+	if NamesVersion([]byte(noArm), "0.2.19") {
+		t.Fatal("named without the arm64 binary")
 	}
 }
 
@@ -212,5 +225,57 @@ func TestCheckErrorsCarryNoBody(t *testing.T) {
 	_, err := checker(srv).Check(context.Background())
 	if err == nil || strings.Contains(err.Error(), "MARKER") {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestCheckOversizeAndMissingAssets(t *testing.T) {
+	pub, priv := newKey(t)
+	good := sumsFor("0.2.19")
+	big := good + strings.Repeat("#", maxSums)
+	cases := map[string]fake{
+		"sums over 4 KiB": {tag: "v0.2.19", sums: big, sig: sign(priv, big)},
+		"sig over 128 B":  {tag: "v0.2.19", sums: good, sig: strings.Repeat("A", maxSig+1)},
+		"sums missing":    {tag: "v0.2.19", sums: "", sig: sign(priv, good)},
+	}
+	for name, f := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := f
+			srv := f.server(t)
+			if name == "sums missing" {
+				// The fake answers 200 with an empty body; make it a 404.
+				c := checker(srv, pub)
+				c.DownloadBase = srv.URL + "/nowhere/"
+				if _, err := c.Check(context.Background()); !errors.Is(err, ErrUnavailable) {
+					t.Fatalf("err %v", err)
+				}
+				return
+			}
+			if _, err := checker(srv, pub).Check(context.Background()); !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("err %v", err)
+			}
+		})
+	}
+}
+
+func TestAllowedRedirects(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"https://objects.githubusercontent.com/x":        true,
+		"https://release-assets.githubusercontent.com/x": true,
+		"https://github.com/x":                           true,
+		"https://api.github.com/x":                       true,
+		"http://github.com/x":                            false,
+		"https://github.com:8443/x":                      false,
+		"https://user@github.com/x":                      false,
+		"https://example.com/x":                          false,
+		"https://github.com.example.com/x":               false,
+	} {
+		req, _ := http.NewRequest(http.MethodGet, raw, nil)
+		if got := checkRedirect(req, nil) == nil; got != want {
+			t.Fatalf("%s: %v", raw, got)
+		}
+	}
+	req, _ := http.NewRequest(http.MethodGet, "https://github.com/x", nil)
+	if checkRedirect(req, make([]*http.Request, maxRedirects)) == nil {
+		t.Fatal("redirect cap")
 	}
 }

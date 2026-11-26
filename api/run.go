@@ -112,12 +112,14 @@ func run(ctx context.Context, args []string, getenv func(string) string, d deps)
 		return err
 	}
 	// api-v1 v1.62: the newest verified bot-agent release and its webhook.
+	// A set secret is checked even with the check off, so a bad one is
+	// found before it is turned on.
+	hookSecret, err := config.LoadAgentReleaseWebhookSecret(cfg.AgentReleaseWebhookSecret, cfg.AgentReleaseWebhookSecretFile)
+	if err != nil {
+		return err
+	}
 	var releases *api.AgentReleases
 	if !cfg.AgentReleaseCheckOff {
-		hookSecret, err := config.LoadAgentReleaseWebhookSecret(cfg.AgentReleaseWebhookSecret, cfg.AgentReleaseWebhookSecretFile)
-		if err != nil {
-			return err
-		}
 		releases = api.NewAgentReleases(agentrelease.New().Check, hookSecret)
 	}
 	pool, err := d.open(ctx, cfg.DatabaseURL)

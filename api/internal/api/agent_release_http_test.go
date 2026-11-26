@@ -9,10 +9,14 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/more-than-code/bot-control-plane/api/internal/agentrelease"
 )
 
 // api-v1 v1.62: the API learns the latest bot-agent release by itself.
@@ -28,6 +32,8 @@ func TestLatestAgentVersionFloor(t *testing.T) {
 		{"0.2.20", "0.2.19", "0.2.20"},
 		{"0.2.19", "0.2.19", "0.2.19"},
 		{"0.10.0", "0.9.9", "0.10.0"},
+		{"12345.0.0", "", ""},
+		{"bad", "0.2.19", "0.2.19"},
 	}
 	for _, tc := range cases {
 		s := &Server{LatestAgentVersion: tc.floor}
@@ -51,9 +57,14 @@ func TestLatestAgentVersionFloor(t *testing.T) {
 type fakeCheck struct {
 	answers []string
 	calls   atomic.Int32
+	mu      sync.Mutex
+	at      []time.Time
 }
 
 func (f *fakeCheck) check(context.Context) (string, error) {
+	f.mu.Lock()
+	f.at = append(f.at, time.Now())
+	f.mu.Unlock()
 	n := int(f.calls.Add(1)) - 1
 	if n >= len(f.answers) {
 		n = len(f.answers) - 1
@@ -177,6 +188,7 @@ func TestAgentReleaseWebhook(t *testing.T) {
 		{"wrong signature", "release", signHook(body + " "), body, http.StatusUnauthorized, false},
 		{"sha1 form", "release", "sha1=" + strings.Repeat("0", 40), body, http.StatusUnauthorized, false},
 		{"not hex", "release", "sha256=zz", body, http.StatusUnauthorized, false},
+		{"uppercase hex", "release", "sha256=" + strings.ToUpper(strings.TrimPrefix(signHook(body), "sha256=")), body, http.StatusUnauthorized, false},
 	}
 	for _, tc := range cases {
 		if code := w.hook(tc.event, tc.sig, tc.body); code != tc.want {
@@ -185,6 +197,10 @@ func TestAgentReleaseWebhook(t *testing.T) {
 		if got := rung(a); got != tc.ring {
 			t.Fatalf("%s: rung %v", tc.name, got)
 		}
+	}
+	// An unsigned large body is refused before it is read.
+	if code := w.hook("release", "", strings.Repeat("x", agentReleaseWebhookMax+1)); code != http.StatusUnauthorized {
+		t.Fatalf("unsigned big: %d", code)
 	}
 	big := strings.Repeat("x", agentReleaseWebhookMax+1)
 	if code := w.hook("release", signHook(big), big); code != http.StatusRequestEntityTooLarge {
@@ -236,5 +252,100 @@ func TestValidHubSignature(t *testing.T) {
 	}
 	if validHubSignature([]byte(hookSecret), body, strings.ToUpper(signHook(`{}`))) {
 		t.Fatal("prefix is case sensitive")
+	}
+}
+
+func TestAgentReleasePollInterval(t *testing.T) {
+	if got := NewAgentReleases(nil, "").pollInterval(); got != 15*time.Minute {
+		t.Fatalf("no secret %v", got)
+	}
+	if got := NewAgentReleases(nil, hookSecret).pollInterval(); got != 60*time.Minute {
+		t.Fatalf("secret %v", got)
+	}
+}
+
+// TestWebhookRingStartsCheck runs the whole path: a signed release delivery
+// rings the running checker, which checks again; a burst after that waits
+// for the gap and folds into one more check.
+func TestWebhookRingStartsCheck(t *testing.T) {
+	w := newWorld(t)
+	f := &fakeCheck{answers: []string{"0.2.18", "0.2.19"}}
+	a := NewAgentReleases(f.check, hookSecret)
+	a.minGap = 50 * time.Millisecond
+	w.srv.AgentReleases = a
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.srv.RunAgentReleaseCheck(ctx)
+	waitFor(t, func() bool { return f.calls.Load() == 1 })
+	body := `{"action":"published"}`
+	if code := w.hook("release", signHook(body), body); code != http.StatusAccepted {
+		t.Fatalf("hook %d", code)
+	}
+	waitFor(t, func() bool { return w.srv.latestAgentVersion() == "0.2.19" })
+	for i := 0; i < 10; i++ {
+		if code := w.hook("release", signHook(body), body); code != http.StatusAccepted {
+			t.Fatalf("hook %d", code)
+		}
+	}
+	waitFor(t, func() bool { return f.calls.Load() >= 3 })
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	// Ten rings start at most a couple more checks (a ring that lands while
+	// a check waits for the gap queues one more), never one per ring, and
+	// checks are always at least the gap apart.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if n := len(f.at); n > 4 {
+		t.Fatalf("%d checks after a burst of 10", n)
+	}
+	for i := 1; i < len(f.at); i++ {
+		if d := f.at[i].Sub(f.at[i-1]); d < a.minGap-5*time.Millisecond {
+			t.Fatalf("checks %d and %d only %v apart", i-1, i, d)
+		}
+	}
+}
+
+// TestCheckedReleaseReachesEveryReader: the host list, the bell's
+// host_update items and notices, and the problem resolve all use the
+// checked version above the floor.
+func TestCheckedReleaseReachesEveryReader(t *testing.T) {
+	sc := newNotificationScene(t)
+	w := sc.w
+	w.srv.LatestAgentVersion = "0.2.0" // the floor, below every host
+	w.srv.AgentReleases = NewAgentReleases(nil, "")
+	w.srv.AgentReleases.setChecked("0.3.0")
+	got := getNotifications(t, w, w.token(sc.owner.ID))
+	keys := strings.Join(wireKeys(got), ",")
+	if !strings.Contains(keys, "host_update:"+sc.old.ID.String()+":0.3.0") || strings.Contains(keys, sc.current.ID.String()) {
+		t.Fatalf("bell keys %s", keys)
+	}
+	code, env := w.do(w.token(sc.owner.ID), http.MethodGet, "/v1/projects/"+sc.project.ID.String()+"/hosts", "")
+	if code != http.StatusOK {
+		t.Fatalf("hosts %d", code)
+	}
+	hints := decodeHints(t, env.Payload)
+	if h := hints["old"]; h.Latest != `"0.3.0"` || h.UpdateAvailable == nil || !*h.UpdateAvailable {
+		t.Fatalf("old hint %+v", h)
+	}
+	if !agentCurrent("0.3.0", w.srv.latestAgentVersion()) || agentCurrent("0.2.9", w.srv.latestAgentVersion()) {
+		t.Fatal("agentCurrent")
+	}
+}
+
+// TestRealCheckerIntoServer wires agentrelease.Checker to the Server and
+// checks that a response body never reaches the log.
+func TestRealCheckerIntoServer(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"MARKER-body-text"}`))
+	}))
+	defer gh.Close()
+	c := agentrelease.New()
+	c.LatestURL = gh.URL + "/latest"
+	c.DownloadBase = gh.URL + "/download/"
+	var logs bytes.Buffer
+	s := &Server{Log: slog.New(slog.NewTextHandler(&logs, nil)), AgentReleases: NewAgentReleases(c.Check, "")}
+	s.checkAgentRelease(context.Background())
+	if s.latestAgentVersion() != "" || !strings.Contains(logs.String(), "agent release check failed") || strings.Contains(logs.String(), "MARKER") {
+		t.Fatalf("latest %q logs:\n%s", s.latestAgentVersion(), logs.String())
 	}
 }
