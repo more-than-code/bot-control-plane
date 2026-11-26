@@ -1,9 +1,12 @@
 # Changelog
 
-## v0.2.49 — 2026-11-25
+## v0.2.50 — 2026-11-26
 - Changing a host's alert settings needs your confirm in the console. MCP `set_alert_settings` no longer changes anything: it shows the proposed change and a console link that opens the host's Alerts card with the change filled in, and nothing is saved until you tap Save.
 - A deploy the host refused keeps its plan again, so you can confirm it once more after fixing the cause (the database grant it needed was missing).
 - Applying host settings from the Policy tab works again with two or more images or projects.
+- v0.2.49 was never published; its changes are the first three above.
+- Releases are now tagged, built and published by a GitHub workflow. Each release lists its server and console images on ghcr.io by digest (linux/amd64 and linux/arm64), and the build is reproducible.
+- Goes with bot-agent v0.2.19, whose helper also trusts the new CI release key. Upgrade every host to v0.2.19: hosts on older versions refuse the agent releases after it.
 
 ## v0.2.48 — 2026-11-24
 - See what fills a host's disk: the host page lists each mount's used and total size, and org owners and admins can check what Docker uses there and what can be reclaimed, as `docker system df` shows it. The Docker check needs bot-agent 0.2.17; MCP has a new `host_disk_usage` tool.
