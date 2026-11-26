@@ -14,7 +14,11 @@
     },
     "shims": [
       "claude-code"
-    ]
+    ],
+    "local": {
+      "deploybot-api-change": ".agents/skills/deploybot-api-change",
+      "deploybot-mcp-tool": ".agents/skills/deploybot-mcp-tool"
+    }
   },
   "instructions": {
     "role": "repo"
