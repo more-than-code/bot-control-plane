@@ -4,6 +4,7 @@
 	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import RefreshButton from '$lib/components/RefreshButton.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { METRIC_REFRESH_MS } from '$lib/host-view';
 	import HostAccessEditor from '$lib/components/HostAccessEditor.svelte';
@@ -76,6 +77,9 @@
 
 <PageHeader title={data.host ? data.host.name : 'Host'} breadcrumbs={crumbs}>
 	{#snippet actions()}
+		{#if data.host}
+			<RefreshButton />
+		{/if}
 		{#if data.host && data.canManageAccess}
 			<a class={buttonVariants({ variant: 'outline' })} href="#access"><ShieldCheck class="size-4" />Manage access</a>
 		{/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Notice from '$lib/components/Notice.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import RefreshButton from '$lib/components/RefreshButton.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { servicesHealthView } from '$lib/health-checks';
 	import { servicesRenameView, type ProjectActionData, type ProjectScope } from '$lib/project-action';
@@ -100,6 +101,7 @@
 		subtitle="{data.project.slug} · your role {data.project.role}{data.project.via === 'org' ? ' (organization admin)' : ''}"
 	>
 		{#snippet actions()}
+			<RefreshButton />
 			{#if scope === 'catalog' && data.canOwner}
 				<CatalogEntryDialog
 					mode="create"

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { createDraftFollower } from '$lib/draft-field';
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
@@ -87,6 +88,14 @@
 		hostsIncomplete?: boolean;
 	} = $props();
 
+	// The rename field keeps what was typed across Refresh; it follows the name only when the name changes.
+	let renameDraft = $state(untrack(() => project.name));
+	const followName = createDraftFollower(untrack(() => project.name));
+	$effect(() => {
+		const next = followName(project.name, untrack(() => renameDraft));
+		if (next !== untrack(() => renameDraft)) renameDraft = next;
+	});
+
 	const githubRow = $derived(registries.find((row) => row.host === GITHUB_REGISTRY && row.source === 'github') ?? null);
 	const manualGhcr = $derived(registries.find((row) => row.host === GITHUB_REGISTRY && row.source !== 'github') ?? null);
 	const connectAction = $derived(actionUrlFrom(page.url, 'connectGitHub'));
@@ -153,7 +162,7 @@
 			<form method="POST" action={actionUrlFrom(page.url, 'rename')} class="grid gap-3" use:enhance>
 				<Label class="grid gap-1.5" for="project-rename">
 					Project name
-					<Input id="project-rename" name="name" value={project.name} required maxlength={80} autocomplete="off" />
+					<Input id="project-rename" name="name" bind:value={renameDraft} required maxlength={80} autocomplete="off" />
 				</Label>
 				<div>
 					<Button type="submit">Rename project</Button>
