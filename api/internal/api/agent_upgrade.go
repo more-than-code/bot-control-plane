@@ -108,7 +108,7 @@ func (s *Server) handleAgentUpgrade(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	latest := s.LatestAgentVersion
+	latest := s.latestAgentVersion()
 	refuse := func(code, msg string) {
 		s.auditUpgradeRefused(r.Context(), p, host, code)
 		writeCode(w, code, msg)
@@ -210,7 +210,7 @@ func (s *Server) auditUpgradeRefused(ctx context.Context, p principal, host stor
 	row := hostAuditRow(host, nil, audit.ActionHostAgentUpgrade)
 	row.Decision = audit.DecisionDenied
 	row.ErrorCode = &code
-	row.Detail = map[string]any{"host": host.Name, "from": host.AgentVersion, "to": s.LatestAgentVersion}
+	row.Detail = map[string]any{"host": host.Name, "from": host.AgentVersion, "to": s.latestAgentVersion()}
 	s.auditOK(ctx, p, row)
 }
 
@@ -308,7 +308,8 @@ func (s *Server) upgradeCaughtUp(ctx context.Context, hostID uuid.UUID, agentVer
 // agentCurrent reports whether version is the latest release or newer.
 // False when the latest release is not set.
 func (s *Server) agentCurrent(version string) bool {
-	return agentversion.ValidRelease(s.LatestAgentVersion) && agentversion.Valid(version) && !agentversion.Older(version, s.LatestAgentVersion)
+	latest := s.latestAgentVersion()
+	return agentversion.ValidRelease(latest) && agentversion.Valid(version) && !agentversion.Older(version, latest)
 }
 
 // settleUpgrade moves the row from one of the states in from to a settled

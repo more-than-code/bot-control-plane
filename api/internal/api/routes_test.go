@@ -20,6 +20,7 @@ import (
 func TestRouteTable(t *testing.T) {
 	want := []string{
 		"GET /health",
+		"POST /hooks/github/agent-release",
 		"GET /.well-known/oauth-authorization-server",
 		"POST /oauth/register",
 		"GET /oauth/authorize",
@@ -215,6 +216,14 @@ func TestRouteTable(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(method, path, bytes.NewReader(body))
 		h.ServeHTTP(rec, req)
+		// api-v1 v1.62: with no webhook secret (as here) the release
+		// webhook answers 404 by design; TestAgentReleaseWebhook covers it.
+		if pattern == "POST /hooks/github/agent-release" {
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("%s without a secret: %d", pattern, rec.Code)
+			}
+			continue
+		}
 		if rec.Code == http.StatusNotFound {
 			t.Fatalf("%s -> 404", pattern)
 		}
@@ -257,6 +266,8 @@ func TestHandlersCallAuthorize(t *testing.T) {
 		"handleOAuthAuthorize": true,
 		"handleOAuthToken":     true,
 		"handleOAuthRevoke":    true,
+		// api-v1 v1.62: authenticated by the GitHub webhook signature.
+		"handleAgentReleaseWebhook": true,
 	}
 	// The removed v1.24 routes answer 410 to any signed-in caller.
 	gone := map[string]bool{"handleSharesGone": true, "handleApprovalsGone": true}

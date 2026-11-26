@@ -1,8 +1,9 @@
 # The API learns the latest bot-agent release by itself
 
-Status: rev 2 (adds the GitHub webhook, Joe 2026-11-26: "I'm also thinking
-of something like a webhook could be used to get the notification"), draft,
-waiting for Joe's approval. api-v1 **v1.62** (v1.61 is
+Status: rev 2, approved by Joe 2026-11-26 ("Webhook + hourly poll" on the
+decision card; D2–D4 as recommended). Rev 2 adds the GitHub webhook (Joe: "I'm also thinking
+of something like a webhook could be used to get the notification").
+api-v1 **v1.62** (v1.61 is
 claimed by PR #37, the secrets key in AWS KMS). No migration, no
 agent-protocol change, no bot-agent change. Covers Defect Drainer
 DEF-20261126-server-should-learn-the-latest-bot-agent-wzh9.
@@ -128,11 +129,12 @@ carries a response body. Tests point the two base URLs at a fake.
 
 ### 4.2 The latest version in the API
 
-- `Server.LatestAgentVersion string` is replaced by `Server.LatestAgent`, a
-  small type holding the floor (the setting) and the checked version in an
-  `atomic.Pointer`. `Latest()` returns the higher of the two that parse as
-  `X.Y.Z`, or `""` when neither does. Every reader listed in §1 calls
-  `Latest()` once per request or sweep, so one request never sees two values.
+- `Server.LatestAgentVersion` stays and holds the floor (the setting);
+  the new `Server.AgentReleases` (nil when the check is off) holds the
+  checked version in an `atomic.Pointer`. `Server.latestAgentVersion()`
+  returns the higher of the two that parse as `X.Y.Z`, or `""` when neither
+  does. Every reader listed in §1 calls it once per request or sweep, so one
+  request never sees two values.
 - `RunAgentReleaseCheck(ctx)` (started from `api/run.go` next to
   `RunAgentUpgrades`): one check at start, then every 15 minutes, or every
   60 minutes when the webhook secret is set (§4.3), with up to 60 s of
@@ -200,7 +202,7 @@ itself.
 
 `api/README.md` (the v1.34 and v1.48 setting paragraphs, the env table),
 `api/docs/design.md` (one decision entry), `docs/contract-status.md` (one
-sentence), `CHANGELOG.md` (one line). bot-agent `docs/spec-release-workflow.md`
+sentence). The `CHANGELOG.md` line is written by the release that ships it. bot-agent `docs/spec-release-workflow.md`
 gains one sentence in its key-rotation paragraph: a change to `PublicKeys`
 needs the same change in bot-control-plane `api/internal/agentrelease`, or
 the API stops offering releases signed only by the new key (the floor still

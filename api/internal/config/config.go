@@ -43,6 +43,13 @@ type Config struct {
 	// LatestAgentVersion is BOT_API_LATEST_AGENT_VERSION: the newest
 	// bot-agent release (X.Y.Z), or empty for no update hint (api-v1 v1.34).
 	LatestAgentVersion string
+	// AgentReleaseCheckOff is BOT_API_AGENT_RELEASE_CHECK=off (api-v1
+	// v1.62): no GitHub release check and no webhook route.
+	AgentReleaseCheckOff bool
+	// AgentReleaseWebhookSecret and AgentReleaseWebhookSecretFile are
+	// BOT_API_AGENT_RELEASE_WEBHOOK_SECRET and its _FILE form (v1.62).
+	AgentReleaseWebhookSecret     string
+	AgentReleaseWebhookSecretFile string
 	// EdgeTLSIssuer is BOT_API_EDGE_TLS_ISSUER: "" (ACME) or "internal"
 	// (Caddy's internal CA, for dev and test hosts that the internet cannot
 	// reach on 80 and 443; api-v1 v1.35 acceptance 3).
@@ -78,35 +85,38 @@ const EdgeIssuerInternal = "internal"
 // server needs and requires only BOT_API_MIGRATE_DATABASE_URL.
 func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	cfg := Config{
-		Listen:                 strings.TrimSpace(getenv("BOT_API_LISTEN")),
-		DatabaseURL:            strings.TrimSpace(getenv("DATABASE_URL")),
-		MigrateDatabaseURL:     strings.TrimSpace(getenv("BOT_API_MIGRATE_DATABASE_URL")),
-		OrgMappingFile:         strings.TrimSpace(getenv("BOT_API_ORG_MAPPING_FILE")),
-		GoogleClientID:         strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_ID")),
-		GoogleClientSecret:     strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_SECRET")),
-		GoogleIssuer:           strings.TrimSpace(getenv("BOT_API_GOOGLE_ISSUER")),
-		DeviceVerificationURI:  strings.TrimSpace(getenv("BOT_API_DEVICE_VERIFICATION_URI")),
-		AgentWSURL:             strings.TrimSpace(getenv("BOT_API_AGENT_WS_URL")),
-		PublicOrigin:           strings.TrimSpace(getenv("BOT_API_PUBLIC_ORIGIN")),
-		TrustedProxy:           strings.TrimSpace(getenv("BOT_API_TRUSTED_PROXY")),
-		MCPResource:            strings.TrimSpace(getenv("BOT_API_MCP_RESOURCE")),
-		ConsoleOrigin:          strings.TrimSpace(getenv("BOT_API_CONSOLE_ORIGIN")),
-		MCPClientSecretFile:    strings.TrimSpace(getenv("BOT_API_MCP_CLIENT_SECRET_FILE")),
-		SecretsKeyFile:         strings.TrimSpace(getenv("BOT_SECRETS_KEY_FILE")),
-		RegistryAllowPrivate:   strings.TrimSpace(getenv("BOT_API_REGISTRY_ALLOW_PRIVATE")) == "1",
-		GitHubClientID:         strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_ID")),
-		GitHubClientSecretFile: strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET_FILE")),
-		LatestAgentVersion:     strings.TrimSpace(getenv("BOT_API_LATEST_AGENT_VERSION")),
-		EdgeTLSIssuer:          strings.TrimSpace(getenv("BOT_API_EDGE_TLS_ISSUER")),
-		SecretsKey:             strings.TrimSpace(getenv("BOT_SECRETS_KEY")),
-		MCPClientSecret:        strings.TrimSpace(getenv("BOT_API_MCP_CLIENT_SECRET")),
-		GitHubClientSecret:     strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET")),
+		Listen:                        strings.TrimSpace(getenv("BOT_API_LISTEN")),
+		DatabaseURL:                   strings.TrimSpace(getenv("DATABASE_URL")),
+		MigrateDatabaseURL:            strings.TrimSpace(getenv("BOT_API_MIGRATE_DATABASE_URL")),
+		OrgMappingFile:                strings.TrimSpace(getenv("BOT_API_ORG_MAPPING_FILE")),
+		GoogleClientID:                strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_ID")),
+		GoogleClientSecret:            strings.TrimSpace(getenv("BOT_API_GOOGLE_CLIENT_SECRET")),
+		GoogleIssuer:                  strings.TrimSpace(getenv("BOT_API_GOOGLE_ISSUER")),
+		DeviceVerificationURI:         strings.TrimSpace(getenv("BOT_API_DEVICE_VERIFICATION_URI")),
+		AgentWSURL:                    strings.TrimSpace(getenv("BOT_API_AGENT_WS_URL")),
+		PublicOrigin:                  strings.TrimSpace(getenv("BOT_API_PUBLIC_ORIGIN")),
+		TrustedProxy:                  strings.TrimSpace(getenv("BOT_API_TRUSTED_PROXY")),
+		MCPResource:                   strings.TrimSpace(getenv("BOT_API_MCP_RESOURCE")),
+		ConsoleOrigin:                 strings.TrimSpace(getenv("BOT_API_CONSOLE_ORIGIN")),
+		MCPClientSecretFile:           strings.TrimSpace(getenv("BOT_API_MCP_CLIENT_SECRET_FILE")),
+		SecretsKeyFile:                strings.TrimSpace(getenv("BOT_SECRETS_KEY_FILE")),
+		RegistryAllowPrivate:          strings.TrimSpace(getenv("BOT_API_REGISTRY_ALLOW_PRIVATE")) == "1",
+		GitHubClientID:                strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_ID")),
+		GitHubClientSecretFile:        strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET_FILE")),
+		LatestAgentVersion:            strings.TrimSpace(getenv("BOT_API_LATEST_AGENT_VERSION")),
+		EdgeTLSIssuer:                 strings.TrimSpace(getenv("BOT_API_EDGE_TLS_ISSUER")),
+		SecretsKey:                    strings.TrimSpace(getenv("BOT_SECRETS_KEY")),
+		MCPClientSecret:               strings.TrimSpace(getenv("BOT_API_MCP_CLIENT_SECRET")),
+		GitHubClientSecret:            strings.TrimSpace(getenv("BOT_API_GITHUB_CLIENT_SECRET")),
+		AgentReleaseWebhookSecret:     strings.TrimSpace(getenv("BOT_API_AGENT_RELEASE_WEBHOOK_SECRET")),
+		AgentReleaseWebhookSecretFile: strings.TrimSpace(getenv("BOT_API_AGENT_RELEASE_WEBHOOK_SECRET_FILE")),
 	}
 	// api-v1 v1.50 item 2: a secret is an env value or a file, never both.
 	for _, pair := range []struct{ name, value, file string }{
 		{"BOT_SECRETS_KEY", cfg.SecretsKey, cfg.SecretsKeyFile},
 		{"BOT_API_MCP_CLIENT_SECRET", cfg.MCPClientSecret, cfg.MCPClientSecretFile},
 		{"BOT_API_GITHUB_CLIENT_SECRET", cfg.GitHubClientSecret, cfg.GitHubClientSecretFile},
+		{"BOT_API_AGENT_RELEASE_WEBHOOK_SECRET", cfg.AgentReleaseWebhookSecret, cfg.AgentReleaseWebhookSecretFile},
 	} {
 		if pair.value != "" && pair.file != "" {
 			return Config{}, fmt.Errorf("%s and %s_FILE are both set; set only one", pair.name, pair.name)
@@ -116,6 +126,8 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	cfg.ProblemsOff = problems == "off"
 	githubRefresh := strings.TrimSpace(getenv("BOT_API_GITHUB_REFRESH"))
 	cfg.GitHubRefreshOff = githubRefresh == "off"
+	releaseCheck := strings.TrimSpace(getenv("BOT_API_AGENT_RELEASE_CHECK"))
+	cfg.AgentReleaseCheckOff = releaseCheck == "off"
 	if cfg.GoogleIssuer == "" {
 		cfg.GoogleIssuer = defaultIssuer
 	}
@@ -171,6 +183,10 @@ func FromEnv(getenv func(string) string, migrateOnly bool) (Config, error) {
 	}
 	if githubRefresh != "" && githubRefresh != "on" && githubRefresh != "off" {
 		return Config{}, fmt.Errorf("BOT_API_GITHUB_REFRESH must be empty, on or off")
+	}
+	// api-v1 v1.62.
+	if releaseCheck != "" && releaseCheck != "on" && releaseCheck != "off" {
+		return Config{}, fmt.Errorf("BOT_API_AGENT_RELEASE_CHECK must be on or off")
 	}
 	return cfg, nil
 }
