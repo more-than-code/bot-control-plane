@@ -1,6 +1,8 @@
 # The API learns the latest bot-agent release by itself
 
-Status: rev 1, draft, waiting for Joe's approval. api-v1 **v1.62** (v1.61 is
+Status: rev 2 (adds the GitHub webhook, Joe 2026-11-26: "I'm also thinking
+of something like a webhook could be used to get the notification"), draft,
+waiting for Joe's approval. api-v1 **v1.62** (v1.61 is
 claimed by PR #37, the secrets key in AWS KMS). No migration, no
 agent-protocol change, no bot-agent change. Covers Defect Drainer
 DEF-20261126-server-should-learn-the-latest-bot-agent-wzh9.
@@ -38,22 +40,36 @@ Joe's offline key for a bridge release).
 
 ## 2. Goal
 
-Within 15 minutes of a bot-agent release going live on GitHub, with nobody
-touching the Deploybot host, the API offers it: hosts show "update
+Within seconds of a bot-agent release going live on GitHub (within an hour
+when a webhook delivery is missed, 15 minutes without the webhook), with
+nobody touching the Deploybot host, the API offers it: hosts show "update
 available", the bell says so, and `upgrade_agent` accepts it. The API offers
 only a release whose signature verifies with a key the hosts trust, so it
 never offers a version the hosts' helper would refuse.
 
 ## 3. Decisions for Joe (recommended marked ★)
 
-- **D1, where the version comes from.**
-  ★ A: the API polls GitHub's latest bot-agent release (at start, then every
-  15 minutes) and verifies its signature.
-  B: the release workflow calls a new API route after publishing.
-  C: both.
-  B needs a new authenticated inbound route and a credential for it in the
-  `release` environment, and a missed call (API down, deploy in progress)
-  needs polling anyway. A has no secret and no new route.
+- **D1, what tells the API to look.** In every option the API learns the
+  version the same way (§4.1: ask GitHub, verify the signature); only the
+  trigger differs. Nothing in a notification is trusted.
+  A: polling only, at start and every 15 minutes. No secret, no new route;
+  up to 15 minutes late.
+  ★ B: a GitHub webhook as the doorbell, plus a slow poll as the fallback.
+  The `bot-agent` repository sends its `release` events to a new API route
+  (§4.3), signed with a shared secret; a valid delivery starts a check at
+  once, so a release is offered within seconds. The poll drops to hourly
+  while the webhook is configured, because GitHub does not redeliver a
+  failed delivery by itself (API restarting, deploy in progress), and stays
+  at 15 minutes while it is not.
+  C: the release workflow calls the API after publishing. Same speed as B,
+  but the credential lives in the `release` environment and the workflow
+  needs a new step (a Tier 3 workflow change); B is set up on github.com
+  alone (Settings → Webhooks, works from the phone).
+  D: webhook only, no poll. A missed delivery leaves the API behind until
+  the next release or a manual redelivery.
+  B costs one server setting: the webhook secret must reach the API's
+  environment once, which today is a root step on the Deploybot host (Ops,
+  best done with the next server deploy). Until then B behaves like A.
 - **D2, what `BOT_API_LATEST_AGENT_VERSION` becomes.**
   ★ A: a floor. The latest version is the higher of the setting and the
   verified GitHub release. Production keeps working without a host change
@@ -118,8 +134,11 @@ carries a response body. Tests point the two base URLs at a fake.
   `X.Y.Z`, or `""` when neither does. Every reader listed in §1 calls
   `Latest()` once per request or sweep, so one request never sees two values.
 - `RunAgentReleaseCheck(ctx)` (started from `api/run.go` next to
-  `RunAgentUpgrades`): one check at start, then every 15 minutes with up to
-  60 s of jitter. A successful check stores its version, even if it is lower
+  `RunAgentUpgrades`): one check at start, then every 15 minutes, or every
+  60 minutes when the webhook secret is set (§4.3), with up to 60 s of
+  jitter. It also runs a check when the webhook rings: a one-slot channel,
+  so rings that arrive while a check runs or waits fold into one, and at
+  most one check starts per 30 s whatever rings. A successful check stores its version, even if it is lower
   than the last one (D3). A failed check keeps the last good version. Logs:
   one Info line when the checked version changes (`agent release check:
   latest bot-agent is X.Y.Z`), one Warn line when checks start failing (the
@@ -135,7 +154,49 @@ Nothing else changes: the upgrade route still accepts only `Latest()`, the
 notices still key on the version, the helper still verifies the release
 itself.
 
-### 4.3 Docs
+### 4.3 The webhook (D1 B)
+
+- **Setting:** `BOT_API_AGENT_RELEASE_WEBHOOK_SECRET` or
+  `BOT_API_AGENT_RELEASE_WEBHOOK_SECRET_FILE` (the v1.50 `_FILE` pattern;
+  both set stops the API at start). At least 32 bytes after trimming, else
+  the API stops at start with
+  `BOT_API_AGENT_RELEASE_WEBHOOK_SECRET must be at least 32 characters`.
+  Never logged, never in an answer. Empty, or `BOT_API_AGENT_RELEASE_CHECK=off`:
+  the route answers `404 not_found` as if it did not exist.
+- **Route:** `POST /hooks/github/agent-release`, outside `/v1` and outside
+  session auth (GitHub has no Deploybot login). Body read up to 1 MiB, else
+  `413`. The `X-Hub-Signature-256` header must be `sha256=` and the
+  HMAC-SHA256 of the exact body under the secret, compared in constant
+  time; a missing or wrong signature answers `401` and is counted, not
+  logged per request (one Warn line a minute at most, with the count). Then:
+  - `X-GitHub-Event: ping` answers `200` (GitHub sends it when the webhook
+    is created, so the green tick on github.com proves the secret);
+  - `X-GitHub-Event: release` rings the checker (§4.2) and answers `202`
+    straight away, whatever the action (`published`, `released`, `edited`
+    when another release is marked latest, `deleted`): the check asks GitHub
+    which release is latest, so the action does not matter;
+  - any other event answers `204` and does nothing.
+  The payload's repository, tag and assets are never read; the check
+  fetches them itself, so a valid signature can at most start a check.
+- **Audit and logs:** no audit row (no user acts). One Info line per ring
+  that starts a check (`agent release webhook: checking`), with the
+  `X-GitHub-Delivery` id when it is a UUID.
+- **Set-up (Joe, on github.com):** bot-agent repository → Settings →
+  Webhooks → Add: payload URL `https://<api-host>/hooks/github/agent-release`,
+  content type `application/json`, the secret, SSL verification on, "Let
+  me select individual events" → Releases only. GitHub shows each delivery
+  and its answer there, and has a Redeliver button. A reverse proxy in front
+  of the API must pass `/hooks/` through as it passes `/v1/`.
+- **Secret handling:** a random 32-byte value (for example
+  `openssl rand -hex 32`, or the password manager's generator) kept in the
+  password manager, entered once on github.com and once in the API's
+  environment (as root on the Deploybot host, or as a container secret
+  file). It guards only "start a check now"; a leak lets someone make the
+  API ask GitHub sooner, at most twice a minute, and nothing more. Rotation:
+  change it on github.com and in the environment, then restart; deliveries
+  in between fail and the hourly poll covers them.
+
+### 4.4 Docs
 
 `api/README.md` (the v1.34 and v1.48 setting paragraphs, the env table),
 `api/docs/design.md` (one decision entry), `docs/contract-status.md` (one
@@ -153,7 +214,9 @@ works).
 | `BOT_API_AGENT_RELEASE_CHECK` | absent | `on` (default) or `off`; other values stop the API at start |
 | Host `latest_agent_version` | the setting, or `null` | the higher of the setting and the verified GitHub release, or `null` when neither is known |
 | `update_available`, bell `host_update`, `agent-upgrade` version rule, `agent_upgrade` problem resolve | against the setting | against the value above |
-| Routes, fields, migrations, MCP tools, agent protocol | — | unchanged |
+| `BOT_API_AGENT_RELEASE_WEBHOOK_SECRET` / `_FILE` | absent | optional; at least 32 characters; both set stops the API at start |
+| `POST /hooks/github/agent-release` | absent | GitHub webhook: `404` when no secret; `401` bad signature; `413` over 1 MiB; `200` ping; `202` release (a check starts); `204` other events |
+| `/v1` routes, fields, migrations, MCP tools, agent protocol | — | unchanged |
 
 Consumers: the console and MCP read `latest_agent_version` and
 `update_available` as before; the hosts' helper is unchanged and still checks
@@ -171,15 +234,24 @@ every bundle itself.
   as getting a host to install it. Upgrades still need an org owner or admin
   to ask (console, or MCP with `confirm`) and `agent_upgrade = true` in the
   host's `runner.toml`.
-- No credential: unauthenticated calls, 4 an hour plus restarts, well inside
-  GitHub's 60 an hour per IP.
+- No GitHub credential: unauthenticated calls, at most 4 an hour from the
+  poll plus 2 a minute from webhook rings (only with a valid signature),
+  plus restarts. A release day uses a handful; GitHub allows 60 an hour per
+  IP. A failed check is logged and retried by the poll.
+- The webhook route is the API's only unauthenticated write-like route. It
+  holds no state, reads no payload field, answers before the check runs,
+  and refuses an unsigned body before parsing it.
 - Downgrade by D3 only lowers what is offered; the helper never installs a
   version that is not newer than the installed one.
 
 ## 7. Alternatives considered
 
-- **Workflow notifies the API (D1 B).** Faster (seconds), but adds an inbound
-  route, a credential in GitHub, and still needs polling for missed calls.
+- **Trust the webhook payload's tag.** Saves one GitHub call, but then the
+  secret alone decides what is offered; checking GitHub ourselves keeps the
+  signature rule the only rule.
+- **Workflow notifies the API (D1 C).** As fast as the webhook, but the
+  credential sits in the `release` environment and the workflow changes
+  (Tier 3); missed calls still need the poll.
 - **The agent reports the latest release it sees.** Hosts would each call
   GitHub and the API would have to trust what agents say; no gain over §4.1.
 - **Watch `github.com/.../releases/latest` redirects instead of the API.**
@@ -191,7 +263,8 @@ every bundle itself.
 ## 8. Rollback
 
 Set `BOT_API_AGENT_RELEASE_CHECK=off` (and the setting to the wanted version)
-and restart: exactly today's behaviour. A code revert needs nothing else (no
+and restart: exactly today's behaviour, and the webhook route answers `404`
+(delete the webhook on github.com too, or its deliveries show as failed). A code revert needs nothing else (no
 migration, no stored state).
 
 ## 9. Acceptance criteria and tests
@@ -213,10 +286,17 @@ migration, no stored state).
 6. `BOT_API_AGENT_RELEASE_CHECK=off` starts no checker; `maybe` stops the
    API at start with the fixed message.
 7. The compiled key list equals bot-agent `internal/release.PublicKeys` (a
-   test pins both base64 strings; the bot-agent change in §4.3 points at it).
+   test pins both base64 strings; the bot-agent change in §4.4 points at it).
 8. No log line or error carries a response body (a test with a body holding
    a marker string checks the log output).
 9. Existing tests that set `LatestAgentVersion` pass with the floor.
-10. Gates: `gofmt -l .`, `go build ./...`, `go vet ./...`, `go test ./...`
+10. Webhook: with a secret set, a `release` delivery with a valid signature
+    answers `202` and a check runs within a second (fake GitHub sees the
+    request); a wrong or missing signature answers `401` and starts no
+    check; `ping` `200`; other events `204`; a 1 MiB + 1 body `413`; no
+    secret `404`. Ten rings in a burst start at most one check per 30 s. The
+    poll interval is 60 minutes with a secret and 15 without. A short
+    secret, or both forms set, stops the API at start.
+11. Gates: `gofmt -l .`, `go build ./...`, `go vet ./...`, `go test ./...`
     (no database code changes, so no database gate); `-race` on
     `api/internal/agentrelease` and `api/internal/api`.
