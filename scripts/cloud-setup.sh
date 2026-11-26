@@ -233,6 +233,12 @@ done
 # packaging test uses) read them as the test user.
 for dir in "$REPO" "$(dirname "$REPO")/bot-agent"; do
 	[ -d "$dir/.git" ] || continue
+	# A GitHub runner's checkout is not readable by the test user; the
+	# workflow runs the tests as the runner user instead.
+	if ! runuser -u "$TEST_USER" -- test -r "$dir/.git"; then
+		say "skipped the safe.directory entry for $dir: $TEST_USER cannot read it"
+		continue
+	fi
 	if ! runuser -u "$TEST_USER" -- env HOME="$TEST_HOME" git config --global --get-all safe.directory | grep -qxF "$dir"; then
 		run runuser -u "$TEST_USER" -- env HOME="$TEST_HOME" git config --global --add safe.directory "$dir"
 		say "marked $dir as a safe git directory for $TEST_USER"
