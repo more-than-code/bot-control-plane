@@ -218,7 +218,9 @@ func (s *Server) handleHostPolicyGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cur, managed := currentPolicy(host)
-	v := hostPolicyView{Managed: managed, Edge: cur.Edge, Projects: cur.Projects}
+	// Images stay empty unless the host is managed, and are sent as [] (not
+	// null) as api-v1 v1.51 says; the console rejects null.
+	v := hostPolicyView{Managed: managed, Edge: cur.Edge, Images: []string{}, Projects: cur.Projects}
 	if managed {
 		v.Images = cur.Images
 		hash := host.Programs.PolicyHash
