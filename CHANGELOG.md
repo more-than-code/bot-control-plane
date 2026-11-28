@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.52 — 2026-11-28
+- The console's host Policy tab works again on a host whose runner.toml does not set `console_policy = true`. It showed "The API returned an unexpected response." because the API sent `images` as null instead of [].
+- The project, host and organization pages have a Refresh button that reloads the page's data in place, so you no longer need a browser reload to see new entries, deploys or host state. Rename fields keep what you typed.
+- No migration and no contract change. Hosts stay on bot-agent v0.2.20.
+
 ## v0.2.51 — 2026-11-26
 - On unhealthy, Restart or Roll back now works with the image's own HEALTHCHECK when the entry has no health check command. If the image has none either, the deploy fails and says why. Such a deploy needs bot-agent 0.2.20 on the host.
 - Deploybot finds the latest signed bot-agent release on GitHub by itself, so "Update available" follows new releases with no settings change. `BOT_API_LATEST_AGENT_VERSION` is now a floor. An optional GitHub webhook makes the check immediate; otherwise it runs every 15 minutes.

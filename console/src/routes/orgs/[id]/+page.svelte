@@ -6,6 +6,7 @@
 	import NewProject from '$lib/components/NewProject.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import RefreshButton from '$lib/components/RefreshButton.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { accessFailureOf } from '$lib/host-access';
 	import { fetchHosts, startHostsRefresh } from '$lib/hosts-refresh';
@@ -81,6 +82,7 @@
 		subtitle="Organization · your role {data.org.role}"
 	>
 		{#snippet actions()}
+			<RefreshButton />
 			{#if scope === 'projects' && data.canAdmin}
 				<NewProject
 					action={actionUrlFrom(page.url, 'createProject')}

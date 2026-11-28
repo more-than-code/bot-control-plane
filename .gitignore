@@ -13,6 +13,7 @@
 !.env.example
 
 # Skill Forge registry skills: the Project environment installs them in threads; `skf sync` writes them locally
-/.agents/skills/
-/.claude/skills
+/.agents/skills/*
+!/.agents/skills/deploybot-api-change/
+!/.agents/skills/deploybot-mcp-tool/
 /dist/

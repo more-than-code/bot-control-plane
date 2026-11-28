@@ -65,8 +65,13 @@ func TestHostPolicyGet(t *testing.T) {
 func TestHostPolicyNotManaged(t *testing.T) {
 	c := newPolicyCast(t, allowPrograms(false))
 	got := objectPayload(t, c.do(t, c.adminTok, http.MethodGet, "", "", http.StatusOK, "ok"))
-	if got["managed"] != false || got["images"] != nil || got["policy_hash"] != nil {
+	if got["managed"] != false || got["policy_hash"] != nil {
 		t.Fatalf("%v", got)
+	}
+	// api-v1 v1.51: images is [] (never null) on a host that is not managed;
+	// the console rejects null and shows "unexpected response".
+	if imgs, ok := got["images"].([]any); !ok || len(imgs) != 0 {
+		t.Fatalf("images %#v, want []", got["images"])
 	}
 	c.do(t, c.adminTok, http.MethodPost, "", policyBody(policyBase, true, []string{}, []string{"proj"}), http.StatusConflict, "unsupported_agent")
 	if len(c.taskSpecs()) != 0 {
